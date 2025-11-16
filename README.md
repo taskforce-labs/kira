@@ -10,23 +10,29 @@ Unlike Jira and other tools that are overly complicated and expensive, Kira keep
 
 ## Installation
 
-### From Source
+### Makefile (recommended)
 
 ```bash
-git clone https://github.com/your-org/kira.git
-cd kira
-make dev-setup            # optional: download/tidy modules
-make build                # build the kira binary
-sudo make install         # install to /usr/local/bin/
-# or use the install script (build + install/update):
-bash install_kira.sh              # installs to /usr/local/bin
-bash install_kira.sh --prefix "$HOME/.local/bin"  # custom location
+# System-wide install (default prefix /usr/local)
+sudo make install
+
+# User install without sudo
+make install PREFIX="$HOME/.local"
 ```
 
 ### Using Go Install
 
 ```bash
 go install github.com/your-org/kira/cmd/kira@latest
+```
+
+### From Source (contributors)
+
+If you want to build and test locally, see the contributor guide:
+
+```bash
+# Development setup, building, testing, and install options:
+see CONTRIBUTING.md
 ```
 
 ## Quick Start
@@ -266,56 +272,11 @@ Kira is designed to work seamlessly with git:
 - External changes are detected and prevent accidental commits
 - Full transparency through git history
 
-## Development
-
-### Building
-
-```bash
-make build
-```
-
-### Testing
-
-```bash
-make test
-```
-
-### End-to-end tests
-
-Run the E2E script, which exercises the CLI end-to-end in an isolated directory (`e2e-test/`, ignored by git):
-
-```bash
-bash kira_e2e_tests.sh
-```
-
-Preserve the generated test directory for inspection (e.g., to view `.git` state or artifacts):
-
-```bash
-bash kira_e2e_tests.sh --keep
-```
-
-After a `--keep` run, the latest directory can be inspected with:
-
-```bash
-latest=$(ls -dt e2e-test/test-kira-* | head -1)
-ls -la "$latest"
-```
-
-### Running
-
-```bash
-./kira --help
-```
-
 ## License
 
 MIT License - see LICENSE file for details.
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+See CONTRIBUTING.md for the full contributor workflow, development setup, and build/install details.
 

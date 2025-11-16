@@ -1,4 +1,7 @@
-.PHONY: build test clean install lint
+.PHONY: build test test-coverage clean clean-all install uninstall lint fmt check build-all install-tools clean-tools dev-setup help demo
+
+PREFIX ?= /usr/local
+DESTDIR ?=
 
 # Build the kira binary
 build:
@@ -19,17 +22,32 @@ test-coverage:
 
 # Clean build artifacts
 clean:
-	rm -f kira coverage.out coverage.html
+	rm -f kira coverage.out coverage.html kira-*-amd64 kira-*-amd64.exe
 
-# Install kira to /usr/local/bin
+# Clean everything: build artifacts, dev tools, and installed binary
+clean-all: clean clean-tools uninstall
+	@echo "All cleanup complete"
+
+# Install kira to $(PREFIX)/bin
 install: build
-	sudo mv kira /usr/local/bin/
+	install -d "$(DESTDIR)$(PREFIX)/bin"
+	install -m 0755 kira "$(DESTDIR)$(PREFIX)/bin/kira"
+
+# Uninstall kira from $(PREFIX)/bin
+uninstall:
+	@echo "Uninstalling kira from $(DESTDIR)$(PREFIX)/bin..."
+	@rm -f "$(DESTDIR)$(PREFIX)/bin/kira"
+	@echo "kira uninstalled"
 
 # Run linter
 lint:
 	golangci-lint run
 
-# Run all checks
+# Format code (writes changes) via golangci-lint config
+fmt:
+	golangci-lint run --fix
+
+# Run all checks (lint includes formatting and vet checks via golangci-lint)
 check: lint test
 
 # Build for multiple platforms
@@ -38,8 +56,47 @@ build-all:
 	GOOS=darwin GOARCH=amd64 go build -o kira-darwin-amd64 cmd/kira/main.go
 	GOOS=windows GOARCH=amd64 go build -o kira-windows-amd64.exe cmd/kira/main.go
 
+# Install required developer tools
+install-tools:
+	@echo "Installing developer tools..."
+	@BIN_DIR=$$(go env GOPATH)/bin; \
+	  echo "Checking if golangci-lint is already installed..."; \
+	  if command -v golangci-lint >/dev/null 2>&1; then \
+	    echo "golangci-lint found, checking version..."; \
+	    INSTALLED_VERSION=$$(golangci-lint version --format short 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo ""); \
+	    if [ "$$INSTALLED_VERSION" = "$(GOLANGCI_LINT_VERSION)" ]; then \
+	      echo "golangci-lint $(GOLANGCI_LINT_VERSION) already installed, skipping download"; \
+	      exit 0; \
+	    else \
+	      echo "golangci-lint $$INSTALLED_VERSION installed, upgrading to $(GOLANGCI_LINT_VERSION)"; \
+	    fi; \
+	  fi; \
+	  echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $$BIN_DIR"; \
+	  echo "Downloading install script to temporary file (safer than piping curl to sh)..."; \
+	  INSTALL_SCRIPT=$$(mktemp) || exit 1; \
+	  curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh -o $$INSTALL_SCRIPT || (rm -f $$INSTALL_SCRIPT; exit 1); \
+	  echo "Running install script (it handles SHA256 checksum verification)..."; \
+	  sh $$INSTALL_SCRIPT -b $$BIN_DIR $(GOLANGCI_LINT_VERSION); \
+	  echo "Cleaning up temporary install script..."; \
+	  rm -f $$INSTALL_SCRIPT
+
+# Clean up developer tools installed by install-tools/dev-setup
+clean-tools:
+	@echo "Cleaning up developer tools..."
+	@BIN_DIR=$$(go env GOPATH)/bin; \
+	  if [ -f "$$BIN_DIR/golangci-lint" ]; then \
+	    echo "Removing golangci-lint from $$BIN_DIR..."; \
+	    rm -f "$$BIN_DIR/golangci-lint"; \
+	    echo "golangci-lint removed"; \
+	  else \
+	    echo "golangci-lint not found in $$BIN_DIR"; \
+	  fi
+	@echo "Developer tools cleaned up"
+
 # Development setup
-dev-setup:
+GOLANGCI_LINT_VERSION ?= v1.55.2
+
+dev-setup: install-tools
 	go mod download
 	go mod tidy
 
@@ -50,7 +107,7 @@ help:
 # Demo initialization
 demo:
 	./kira init demo-workspace
-	cd demo-workspace && ../kira new prd "Demo Feature" todo "This is a demo feature"
+	cd demo-workspace && ../kira new prd "Demo Feature" todo "This is a demo feature" --ignore-input
 	cd demo-workspace && ../kira move 001 doing
 	cd demo-workspace && ../kira save "Initial demo setup"
 

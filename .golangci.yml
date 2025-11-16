@@ -1,0 +1,51 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  # Start from no linters, then opt in explicitly
+  default: none
+  enable:
+    - govet
+    - revive
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - goconst
+    - unused
+    - misspell
+    - cyclop
+
+  # Paths whose issues should be excluded (but still parsed for imports/types)
+  exclusions:
+    paths:
+      - vendor
+      - mock
+      - mocks
+      - generated
+      - tmp
+
+  settings:
+    cyclop:
+      # Slightly relaxed from the default of 10
+      max-complexity: 15
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+
+  settings:
+    gofumpt:
+      module-path: kira
+      extra-rules: true
+
+    goimports:
+      local-prefixes:
+        - kira
+
+issues:
+  max-same-issues: 0
+  max-issues-per-linter: 0
