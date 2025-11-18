@@ -47,152 +47,207 @@ func init() {
 }
 
 func createWorkItem(cfg *config.Config, args []string, interactive bool, inputValues map[string]string, helpInputs bool) error {
-	var template, title, status, description string
-
-	// Parse arguments (support either order for [status] and [title])
-	if len(args) > 0 {
-		template = args[0]
+	parsedArgs, err := parseWorkItemArgs(cfg, args)
+	if err != nil {
+		return err
 	}
 
-	// Build a set of valid statuses from config
-	validStatuses := make([]string, 0, len(cfg.StatusFolders))
-	statusSet := make(map[string]struct{}, len(cfg.StatusFolders))
-	for s := range cfg.StatusFolders {
-		statusSet[s] = struct{}{}
-		validStatuses = append(validStatuses, s)
+	template, err := resolveTemplate(cfg, parsedArgs.template, helpInputs)
+	if err != nil {
+		return err
 	}
 
-	if len(args) > 1 {
-		if _, ok := statusSet[args[1]]; ok {
-			status = args[1]
-		} else {
-			title = args[1]
-		}
-	}
-	if len(args) > 2 {
-		if status == "" {
-			if _, ok := statusSet[args[2]]; ok {
-				status = args[2]
-			} else if title == "" {
-				title = args[2]
-			} else {
-				// Neither arg[1] nor arg[2] is a valid status; error to avoid mis-file naming
-				return fmt.Errorf("invalid status: neither '%s' nor '%s' is a valid status (valid: %s)", args[1], args[2], strings.Join(validStatuses, ", "))
-			}
-		} else if title == "" {
-			// We already parsed a valid status from arg[1], so arg[2] is the title
-			title = args[2]
-		}
-	}
-	if len(args) > 3 {
-		description = args[3]
-	}
-
-	// Get template if not provided
-	if template == "" {
-		if helpInputs {
-			return fmt.Errorf("template must be specified when using --help-inputs")
-		}
-		var err error
-		template, err = selectTemplate(cfg)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Show help for template inputs if requested
 	if helpInputs {
 		return showTemplateInputs(cfg, template)
 	}
 
-	// Get title if not provided
-	if title == "" {
-		if interactive {
-			var err error
-			title, err = promptString("Enter work item title: ")
-			if err != nil {
-				return err
-			}
-		} else {
-			return fmt.Errorf("title is required (provide as argument or use --interactive flag)")
-		}
+	title, err := resolveTitle(parsedArgs.title, interactive)
+	if err != nil {
+		return err
 	}
 
-	// Get status if not provided: default to config.DefaultStatus (no prompt)
-	if status == "" {
-		status = cfg.DefaultStatus
-	}
-	// Validate status exists in config
-	if _, ok := cfg.StatusFolders[status]; !ok {
-		return fmt.Errorf("invalid status '%s' (valid: %s)", status, strings.Join(validStatuses, ", "))
+	status, err := resolveStatus(cfg, parsedArgs.status)
+	if err != nil {
+		return err
 	}
 
-	// Get next ID
 	nextID, err := validation.GetNextID()
 	if err != nil {
 		return fmt.Errorf("failed to get next ID: %w", err)
 	}
 
-	// Prepare input values
+	inputs, err := collectInputs(cfg, template, nextID, title, status, parsedArgs.description, inputValues, interactive)
+	if err != nil {
+		return err
+	}
+
+	return writeWorkItemFile(cfg, template, nextID, title, status, inputs)
+}
+
+type workItemArgs struct {
+	template    string
+	title       string
+	status      string
+	description string
+}
+
+func parseWorkItemArgs(cfg *config.Config, args []string) (workItemArgs, error) {
+	var result workItemArgs
+
+	if len(args) > 0 {
+		result.template = args[0]
+	}
+
+	statusSet := buildStatusSet(cfg)
+	validStatuses := buildValidStatuses(cfg)
+
+	if len(args) > 1 {
+		if _, ok := statusSet[args[1]]; ok {
+			result.status = args[1]
+		} else {
+			result.title = args[1]
+		}
+	}
+
+	if len(args) > 2 {
+		if err := parseThirdArg(&result, args[2], statusSet, validStatuses); err != nil {
+			return result, err
+		}
+	}
+
+	if len(args) > 3 {
+		result.description = args[3]
+	}
+
+	return result, nil
+}
+
+func buildStatusSet(cfg *config.Config) map[string]struct{} {
+	statusSet := make(map[string]struct{}, len(cfg.StatusFolders))
+	for s := range cfg.StatusFolders {
+		statusSet[s] = struct{}{}
+	}
+	return statusSet
+}
+
+func buildValidStatuses(cfg *config.Config) []string {
+	validStatuses := make([]string, 0, len(cfg.StatusFolders))
+	for s := range cfg.StatusFolders {
+		validStatuses = append(validStatuses, s)
+	}
+	return validStatuses
+}
+
+func parseThirdArg(result *workItemArgs, arg string, statusSet map[string]struct{}, validStatuses []string) error {
+	if result.status == "" {
+		if _, ok := statusSet[arg]; ok {
+			result.status = arg
+		} else if result.title == "" {
+			result.title = arg
+		} else {
+			return fmt.Errorf("invalid status: neither '%s' nor '%s' is a valid status (valid: %s)", result.title, arg, strings.Join(validStatuses, ", "))
+		}
+	} else if result.title == "" {
+		result.title = arg
+	}
+	return nil
+}
+
+func resolveTemplate(cfg *config.Config, template string, helpInputs bool) (string, error) {
+	if template == "" {
+		if helpInputs {
+			return "", fmt.Errorf("template must be specified when using --help-inputs")
+		}
+		return selectTemplate(cfg)
+	}
+	return template, nil
+}
+
+func resolveTitle(title string, interactive bool) (string, error) {
+	if title == "" {
+		if interactive {
+			return promptString("Enter work item title: ")
+		}
+		return "", fmt.Errorf("title is required (provide as argument or use --interactive flag)")
+	}
+	return title, nil
+}
+
+func resolveStatus(cfg *config.Config, status string) (string, error) {
+	if status == "" {
+		status = cfg.DefaultStatus
+	}
+	if _, ok := cfg.StatusFolders[status]; !ok {
+		validStatuses := buildValidStatuses(cfg)
+		return "", fmt.Errorf("invalid status '%s' (valid: %s)", status, strings.Join(validStatuses, ", "))
+	}
+	return status, nil
+}
+
+func collectInputs(cfg *config.Config, template, nextID, title, status, description string, inputValues map[string]string, interactive bool) (map[string]string, error) {
 	inputs := make(map[string]string)
 	inputs["id"] = nextID
 	inputs["title"] = title
 	inputs["status"] = status
 	inputs["created"] = time.Now().Format("2006-01-02")
+
 	if description != "" {
-		// Provide description positional arg as a default input if template supports it
 		if _, exists := inputValues["description"]; !exists {
 			inputValues["description"] = description
 		}
 	}
 
-	// Add any provided input values
 	for k, v := range inputValues {
 		inputs[k] = v
 	}
 
-	// Get template inputs and prompt for missing ones (only when interactive flag is set)
 	if interactive {
-		templatePath := filepath.Join(".work", cfg.Templates[template])
-		templateInputs, err := templates.GetTemplateInputs(templatePath)
-		if err != nil {
-			return fmt.Errorf("failed to get template inputs: %w", err)
-		}
-
-		for _, input := range templateInputs {
-			if _, exists := inputs[input.Name]; !exists {
-				value, err := promptForInput(input)
-				if err != nil {
-					return err
-				}
-				inputs[input.Name] = value
-			}
+		if err := collectInteractiveInputs(cfg, template, inputs); err != nil {
+			return nil, err
 		}
 	}
 
-	// Generate work item content
+	return inputs, nil
+}
+
+func collectInteractiveInputs(cfg *config.Config, template string, inputs map[string]string) error {
+	templatePath := filepath.Join(".work", cfg.Templates[template])
+	templateInputs, err := templates.GetTemplateInputs(templatePath)
+	if err != nil {
+		return fmt.Errorf("failed to get template inputs: %w", err)
+	}
+
+	for _, input := range templateInputs {
+		if _, exists := inputs[input.Name]; !exists {
+			value, err := promptForInput(input)
+			if err != nil {
+				return err
+			}
+			inputs[input.Name] = value
+		}
+	}
+	return nil
+}
+
+func writeWorkItemFile(cfg *config.Config, template, nextID, title, status string, inputs map[string]string) error {
 	templatePath := filepath.Join(".work", cfg.Templates[template])
 	content, err := templates.ProcessTemplate(templatePath, inputs)
 	if err != nil {
 		return fmt.Errorf("failed to process template: %w", err)
 	}
 
-	// Create filename
 	filename := fmt.Sprintf("%s-%s.%s.md", nextID, kebabCase(title), template)
 	statusFolder, exists := cfg.StatusFolders[status]
 	if !exists || statusFolder == "" {
 		return fmt.Errorf("invalid status folder for status '%s'", status)
 	}
 
-	// Ensure the status folder directory exists
 	statusFolderPath := filepath.Join(".work", statusFolder)
 	if err := os.MkdirAll(statusFolderPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create status folder: %w", err)
 	}
 
 	filePath := filepath.Join(statusFolderPath, filename)
-
-	// Write file
 	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("failed to write work item file: %w", err)
 	}

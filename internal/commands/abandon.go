@@ -40,43 +40,9 @@ Updates work item status to "abandoned" before archival.`,
 }
 
 func abandonWorkItems(cfg *config.Config, target, reasonOrSubfolder string) error {
-	var workItems []string
-	var sourcePath string
-
-	// Check if target is a work item ID or a path
-	if isWorkItemID(target) {
-		// Find work item by ID
-		workItemPath, err := findWorkItemFile(target)
-		if err != nil {
-			return err
-		}
-		workItems = []string{workItemPath}
-		sourcePath = filepath.Dir(workItemPath)
-	} else {
-		// Target is a path
-		if strings.Contains(target, "/") {
-			sourcePath = filepath.Join(".work", target)
-		} else {
-			// Status name provided
-			statusFolder, exists := cfg.StatusFolders[target]
-			if !exists {
-				return fmt.Errorf("invalid status: %s", target)
-			}
-			sourcePath = filepath.Join(".work", statusFolder)
-		}
-
-		// Add subfolder if provided
-		if reasonOrSubfolder != "" && !strings.Contains(reasonOrSubfolder, " ") {
-			// Likely a subfolder (no spaces)
-			sourcePath = filepath.Join(sourcePath, reasonOrSubfolder)
-		}
-
-		// Get all work item files in the source path
-		var err error
-		workItems, err = getWorkItemFiles(sourcePath)
-		if err != nil {
-			return fmt.Errorf("failed to get work item files: %w", err)
-		}
+	workItems, sourcePath, err := resolveAbandonTarget(cfg, target, reasonOrSubfolder)
+	if err != nil {
+		return err
 	}
 
 	if len(workItems) == 0 {
@@ -84,34 +50,90 @@ func abandonWorkItems(cfg *config.Config, target, reasonOrSubfolder string) erro
 		return nil
 	}
 
-	// Update work item statuses to "abandoned" and add reason if provided
+	if err := markWorkItemsAbandoned(workItems, reasonOrSubfolder); err != nil {
+		return err
+	}
+
+	archivePath, err := archiveWorkItems(workItems, sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to archive work items: %w", err)
+	}
+
+	if err := removeAbandonedFiles(workItems); err != nil {
+		return err
+	}
+
+	fmt.Printf("Abandoned %d work items to %s\n", len(workItems), archivePath)
+	return nil
+}
+
+func resolveAbandonTarget(cfg *config.Config, target, reasonOrSubfolder string) ([]string, string, error) {
+	if isWorkItemID(target) {
+		return resolveByID(target)
+	}
+	return resolveByPath(cfg, target, reasonOrSubfolder)
+}
+
+func resolveByID(target string) ([]string, string, error) {
+	workItemPath, err := findWorkItemFile(target)
+	if err != nil {
+		return nil, "", err
+	}
+	return []string{workItemPath}, filepath.Dir(workItemPath), nil
+}
+
+func resolveByPath(cfg *config.Config, target, reasonOrSubfolder string) ([]string, string, error) {
+	sourcePath, err := buildSourcePath(cfg, target, reasonOrSubfolder)
+	if err != nil {
+		return nil, "", err
+	}
+
+	workItems, err := getWorkItemFiles(sourcePath)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get work item files: %w", err)
+	}
+	return workItems, sourcePath, nil
+}
+
+func buildSourcePath(cfg *config.Config, target, reasonOrSubfolder string) (string, error) {
+	var sourcePath string
+	if strings.Contains(target, "/") {
+		sourcePath = filepath.Join(".work", target)
+	} else {
+		statusFolder, exists := cfg.StatusFolders[target]
+		if !exists {
+			return "", fmt.Errorf("invalid status: %s", target)
+		}
+		sourcePath = filepath.Join(".work", statusFolder)
+	}
+
+	if reasonOrSubfolder != "" && !strings.Contains(reasonOrSubfolder, " ") {
+		sourcePath = filepath.Join(sourcePath, reasonOrSubfolder)
+	}
+	return sourcePath, nil
+}
+
+func markWorkItemsAbandoned(workItems []string, reasonOrSubfolder string) error {
 	for _, workItem := range workItems {
 		if err := updateWorkItemStatus(workItem, "abandoned"); err != nil {
 			return fmt.Errorf("failed to update work item status: %w", err)
 		}
 
-		// Add abandonment reason if provided and it contains spaces (likely a reason)
 		if reasonOrSubfolder != "" && strings.Contains(reasonOrSubfolder, " ") {
 			if err := addAbandonmentReason(workItem, reasonOrSubfolder); err != nil {
 				return fmt.Errorf("failed to add abandonment reason: %w", err)
 			}
 		}
 	}
+	return nil
+}
 
-	// Archive work items
-	archivePath, err := archiveWorkItems(workItems, sourcePath)
-	if err != nil {
-		return fmt.Errorf("failed to archive work items: %w", err)
-	}
-
-	// Remove original files
+func removeAbandonedFiles(workItems []string) error {
 	for _, workItem := range workItems {
 		if err := os.Remove(workItem); err != nil {
 			fmt.Printf("Warning: failed to remove %s: %v\n", workItem, err)
 		}
 	}
-
-	fmt.Printf("Abandoned %d work items to %s\n", len(workItems), archivePath)
 	return nil
 }
 
