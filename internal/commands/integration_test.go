@@ -41,17 +41,47 @@ func findRepoRoot() (string, error) {
 func TestCLIIntegration(t *testing.T) {
 	t.Run("full workflow test", func(t *testing.T) {
 		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
 		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
+		defer func() { _ = os.Chdir(originalDir) }()
 
-		// Build the kira binary for testing using the repo root as working directory
+		// Build the kira binary for testing
 		repoRoot, err := findRepoRoot()
 		require.NoError(t, err, "failed to find repo root")
 		outPath := filepath.Join(tmpDir, "kira")
-		// Use relative path when Dir is set - Go resolves it relative to Dir
+		mainPath := filepath.Join(repoRoot, "cmd", "kira", "main.go")
+
+		// Diagnostic logging
+		t.Logf("Build diagnostics:")
+		t.Logf("  tmpDir: %s", tmpDir)
+		t.Logf("  repoRoot: %s", repoRoot)
+		t.Logf("  outPath: %s", outPath)
+		t.Logf("  mainPath: %s", mainPath)
+		t.Logf("  GITHUB_WORKSPACE: %s", os.Getenv("GITHUB_WORKSPACE"))
+		t.Logf("  current working dir: %s", originalDir)
+
+		// Verify paths exist
+		if _, err := os.Stat(repoRoot); err != nil {
+			t.Fatalf("repoRoot does not exist: %s (error: %v)", repoRoot, err)
+		}
+		if _, err := os.Stat(mainPath); err != nil {
+			t.Fatalf("main.go does not exist: %s (error: %v)", mainPath, err)
+		}
+		goModPath := filepath.Join(repoRoot, "go.mod")
+		if _, err := os.Stat(goModPath); err != nil {
+			t.Fatalf("go.mod does not exist at: %s (error: %v)", goModPath, err)
+		}
+
+		// Build from repo root directory - Go needs to be in module context
 		buildCmd := exec.Command("go", "build", "-o", outPath, "cmd/kira/main.go")
 		buildCmd.Dir = repoRoot
+		t.Logf("  build command: go build -o %s cmd/kira/main.go (Dir: %s)", outPath, repoRoot)
 		output, err := buildCmd.CombinedOutput()
+		if err != nil {
+			t.Logf("Build output: %s", string(output))
+			t.Logf("Build error: %v", err)
+		}
 		require.NoError(t, err, "build failed: %s", string(output))
 		defer func() { _ = os.Remove("kira") }()
 
@@ -190,9 +220,11 @@ func TestCLIIntegration(t *testing.T) {
 		repoRoot, err := findRepoRoot()
 		require.NoError(t, err, "failed to find repo root")
 		outPath := filepath.Join(tmpDir, "kira")
-		// Use relative path when Dir is set - Go resolves it relative to Dir
-		buildCmd := exec.Command("go", "build", "-o", outPath, "cmd/kira/main.go")
+		mainPath := filepath.Join(repoRoot, "cmd", "kira", "main.go")
+		// Use absolute path and set working directory so Go can find the module
+		buildCmd := exec.Command("go", "build", "-o", outPath, mainPath)
 		buildCmd.Dir = repoRoot
+		buildCmd.Env = append(os.Environ(), "GO111MODULE=on")
 		output, err := buildCmd.CombinedOutput()
 		require.NoError(t, err, "build failed: %s", string(output))
 		defer func() { _ = os.Remove("kira") }()
@@ -269,9 +301,11 @@ Added user authentication system.
 		repoRoot, err := findRepoRoot()
 		require.NoError(t, err, "failed to find repo root")
 		outPath := filepath.Join(tmpDir, "kira")
-		// Use relative path when Dir is set - Go resolves it relative to Dir
-		buildCmd := exec.Command("go", "build", "-o", outPath, "cmd/kira/main.go")
+		mainPath := filepath.Join(repoRoot, "cmd", "kira", "main.go")
+		// Use absolute path and set working directory so Go can find the module
+		buildCmd := exec.Command("go", "build", "-o", outPath, mainPath)
 		buildCmd.Dir = repoRoot
+		buildCmd.Env = append(os.Environ(), "GO111MODULE=on")
 		output, err := buildCmd.CombinedOutput()
 		require.NoError(t, err, "build failed: %s", string(output))
 		defer func() { _ = os.Remove("kira") }()
