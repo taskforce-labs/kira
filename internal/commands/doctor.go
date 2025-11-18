@@ -1,3 +1,4 @@
+// Package commands implements the CLI commands for the kira tool.
 package commands
 
 import (
@@ -13,7 +14,7 @@ var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check for and fix duplicate work item IDs",
 	Long:  `Checks for and fixes duplicate work item IDs by updating the latest one with a new ID.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if err := checkWorkDir(); err != nil {
 			return err
 		}
@@ -27,7 +28,7 @@ var doctorCmd = &cobra.Command{
 	},
 }
 
-func fixDuplicateIDs(cfg *config.Config) error {
+func fixDuplicateIDs(_ *config.Config) error {
 	result, err := validation.FixDuplicateIDs()
 	if err != nil {
 		return fmt.Errorf("failed to fix duplicate IDs: %w", err)

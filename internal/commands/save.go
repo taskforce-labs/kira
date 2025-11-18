@@ -1,3 +1,4 @@
+// Package commands implements the CLI commands for the kira tool.
 package commands
 
 import (
@@ -20,7 +21,7 @@ var saveCmd = &cobra.Command{
 	Long: `Updates the updated field in work items and commits changes to git.
 Validates all non-archived work items before staging.`,
 	Args: cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		if err := checkWorkDir(); err != nil {
 			return err
 		}

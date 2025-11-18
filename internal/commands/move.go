@@ -1,3 +1,4 @@
+// Package commands implements the CLI commands for the kira tool.
 package commands
 
 import (
@@ -18,7 +19,7 @@ var moveCmd = &cobra.Command{
 	Short: "Move a work item to a different status folder",
 	Long:  `Moves the work item to the target status folder. Will display options if target status not provided.`,
 	Args:  cobra.RangeArgs(1, 2),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		if err := checkWorkDir(); err != nil {
 			return err
 		}

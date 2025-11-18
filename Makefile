@@ -42,11 +42,11 @@ uninstall:
 
 # Run linter
 lint:
-	golangci-lint run
+	@PATH="$$(go env GOPATH)/bin:$$PATH" golangci-lint run
 
 # Format code (writes changes) via golangci-lint config
 fmt:
-	golangci-lint run --fix
+	@PATH="$$(go env GOPATH)/bin:$$PATH" golangci-lint run --fix
 
 # Run all checks (lint includes formatting and vet checks via golangci-lint)
 check: lint test
@@ -117,7 +117,7 @@ clean-tools:
 	@echo "Developer tools cleaned up"
 
 # Development setup
-GOLANGCI_LINT_VERSION ?= v1.55.2
+GOLANGCI_LINT_VERSION ?= latest
 
 dev-setup: install-tools
 	go mod download

@@ -1,3 +1,4 @@
+// Package commands implements the CLI commands for the kira tool.
 package commands
 
 import (
@@ -18,7 +19,7 @@ var abandonCmd = &cobra.Command{
 	Long: `Archives work items and marks them as abandoned.
 Updates work item status to "abandoned" before archival.`,
 	Args: cobra.RangeArgs(1, 2),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		if err := checkWorkDir(); err != nil {
 			return err
 		}

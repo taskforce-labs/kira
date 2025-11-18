@@ -1,3 +1,4 @@
+// Package validation provides validation functionality for work items.
 package validation
 
 import (
@@ -15,6 +16,9 @@ import (
 	"kira/internal/config"
 )
 
+// ValidationError represents a validation error for a specific file.
+//
+//nolint:revive // Stuttering is acceptable for exported types in this package
 type ValidationError struct {
 	File    string
 	Message string
@@ -24,14 +28,19 @@ func (e ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.File, e.Message)
 }
 
+// ValidationResult contains the results of a validation operation.
+//
+//nolint:revive // Stuttering is acceptable for exported types in this package
 type ValidationResult struct {
 	Errors []ValidationError
 }
 
+// AddError adds a validation error to the result.
 func (r *ValidationResult) AddError(file, message string) {
 	r.Errors = append(r.Errors, ValidationError{File: file, Message: message})
 }
 
+// HasErrors returns true if the validation result contains any errors.
 func (r *ValidationResult) HasErrors() bool {
 	return len(r.Errors) > 0
 }
@@ -48,6 +57,7 @@ func (r *ValidationResult) Error() string {
 	return strings.Join(messages, "\n")
 }
 
+// WorkItem represents a parsed work item with its metadata.
 type WorkItem struct {
 	ID      string                 `yaml:"id"`
 	Title   string                 `yaml:"title"`
@@ -57,6 +67,7 @@ type WorkItem struct {
 	Fields  map[string]interface{} `yaml:",inline"`
 }
 
+// ValidateWorkItems validates all work items in the workspace.
 func ValidateWorkItems(cfg *config.Config) (*ValidationResult, error) {
 	result := &ValidationResult{}
 
@@ -268,6 +279,7 @@ func validateWorkflowRules(cfg *config.Config) error {
 	return nil
 }
 
+// GetNextID generates the next available work item ID.
 func GetNextID() (string, error) {
 	files, err := getWorkItemFiles()
 	if err != nil {
@@ -292,6 +304,7 @@ func GetNextID() (string, error) {
 	return fmt.Sprintf("%03d", nextID), nil
 }
 
+// FixDuplicateIDs fixes duplicate work item IDs by assigning new IDs.
 func FixDuplicateIDs() (*ValidationResult, error) {
 	result := &ValidationResult{}
 

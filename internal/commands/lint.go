@@ -1,3 +1,4 @@
+// Package commands implements the CLI commands for the kira tool.
 package commands
 
 import (
@@ -13,7 +14,7 @@ var lintCmd = &cobra.Command{
 	Use:   "lint",
 	Short: "Check for issues in work items",
 	Long:  `Scans folders and files to check for issues and reports any found.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if err := checkWorkDir(); err != nil {
 			return err
 		}

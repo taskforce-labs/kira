@@ -1,3 +1,4 @@
+// Package commands implements the CLI commands for the kira tool.
 package commands
 
 import (
@@ -15,6 +16,7 @@ clankers (LLMs) and meatbags (people) in mind. It uses markdown files, git,
 and a lightweight CLI to manage and coordinate work.`,
 }
 
+// Execute runs the root command and returns any error encountered.
 func Execute() error {
 	return rootCmd.Execute()
 }

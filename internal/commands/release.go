@@ -1,3 +1,4 @@
+// Package commands implements the CLI commands for the kira tool.
 package commands
 
 import (
@@ -18,7 +19,7 @@ var releaseCmd = &cobra.Command{
 	Long: `Generates release notes and archives completed work items.
 Updates work item status to "released" before archival.`,
 	Args: cobra.MaximumNArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, args []string) error {
 		if err := checkWorkDir(); err != nil {
 			return err
 		}

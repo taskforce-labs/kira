@@ -1,3 +1,4 @@
+// Package commands implements the CLI commands for the kira tool.
 package commands
 
 import (
@@ -17,7 +18,7 @@ var (
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the kira version and build info",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		fmt.Printf("Version: %s\nCommit: %s\nBuildDate: %s\nState: %s\n", Version, Commit, BuildDate, Dirty)
 	},
 }

@@ -1,3 +1,4 @@
+// Package config provides configuration management for the kira tool.
 package config
 
 import (
@@ -8,6 +9,7 @@ import (
 	yaml "gopkg.in/yaml.v3"
 )
 
+// Config represents the kira configuration structure.
 type Config struct {
 	Version       string            `yaml:"version"`
 	Templates     map[string]string `yaml:"templates"`
@@ -18,21 +20,25 @@ type Config struct {
 	DefaultStatus string            `yaml:"default_status"`
 }
 
+// ValidationConfig contains validation settings for work items.
 type ValidationConfig struct {
 	RequiredFields []string `yaml:"required_fields"`
 	IDFormat       string   `yaml:"id_format"`
 	StatusValues   []string `yaml:"status_values"`
 }
 
+// CommitConfig contains git commit settings.
 type CommitConfig struct {
 	DefaultMessage string `yaml:"default_message"`
 }
 
+// ReleaseConfig contains release-related settings.
 type ReleaseConfig struct {
 	ReleasesFile      string `yaml:"releases_file"`
 	ArchiveDateFormat string `yaml:"archive_date_format"`
 }
 
+// DefaultConfig provides default configuration values.
 var DefaultConfig = Config{
 	Version: "1.0",
 	Templates: map[string]string{
@@ -64,6 +70,7 @@ var DefaultConfig = Config{
 	},
 }
 
+// LoadConfig loads the configuration from kira.yml file or returns defaults.
 func LoadConfig() (*Config, error) {
 	// Prefer root-level kira.yml; fall back to legacy .work/kira.yml if present
 	rootPath := "kira.yml"
@@ -139,6 +146,7 @@ func mergeWithDefaults(config *Config) {
 	}
 }
 
+// SaveConfig saves the configuration to kira.yml in the current directory.
 func SaveConfig(config *Config) error {
 	return SaveConfigToDir(config, ".")
 }

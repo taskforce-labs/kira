@@ -1,3 +1,4 @@
+// Package templates provides template processing functionality for work items.
 package templates
 
 import (
@@ -9,14 +10,19 @@ import (
 	"time"
 )
 
+// InputType represents the type of input field in a template.
 type InputType string
 
 const (
-	InputString   InputType = "string"
-	InputNumber   InputType = "number"
+	// InputString represents a string input type.
+	InputString InputType = "string"
+	// InputNumber represents a number input type.
+	InputNumber InputType = "number"
+	// InputDateTime represents a datetime input type.
 	InputDateTime InputType = "datetime"
 )
 
+// Input represents a template input field definition.
 type Input struct {
 	Type        InputType
 	Name        string
@@ -25,10 +31,12 @@ type Input struct {
 	DateFormat  string
 }
 
+// TemplateInput contains parsed input definitions from a template.
 type TemplateInput struct {
 	Inputs map[string]Input
 }
 
+// ParseTemplateInputs parses input definitions from template content.
 func ParseTemplateInputs(content string) (*TemplateInput, error) {
 	inputs := make(map[string]Input)
 
@@ -80,6 +88,7 @@ func ParseTemplateInputs(content string) (*TemplateInput, error) {
 	return &TemplateInput{Inputs: inputs}, nil
 }
 
+// ProcessTemplate processes a template file with provided input values.
 func ProcessTemplate(templatePath string, inputs map[string]string) (string, error) {
 	content, err := os.ReadFile(templatePath)
 	if err != nil {
@@ -121,6 +130,7 @@ func replaceRemainingInputs(content string) string {
 	return content
 }
 
+// GetTemplateInputs extracts input definitions from a template file.
 func GetTemplateInputs(templatePath string) ([]Input, error) {
 	content, err := os.ReadFile(templatePath)
 	if err != nil {
@@ -140,6 +150,7 @@ func GetTemplateInputs(templatePath string) ([]Input, error) {
 	return inputs, nil
 }
 
+// CreateDefaultTemplates creates default template files in the specified directory.
 func CreateDefaultTemplates(basePath string) error {
 	templates := map[string]string{
 		"template.prd.md":   getPRDTemplate(),
