@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	yaml "gopkg.in/yaml.v3"
 )
@@ -83,6 +84,12 @@ func LoadConfig() (*Config, error) {
 		configPath = legacyPath
 	} else {
 		return &DefaultConfig, nil
+	}
+
+	// Validate config path is safe (no path traversal)
+	cleanPath := filepath.Clean(configPath)
+	if strings.Contains(cleanPath, "..") {
+		return nil, fmt.Errorf("invalid config path: %s", configPath)
 	}
 
 	data, err := os.ReadFile(configPath)

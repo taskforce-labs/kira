@@ -8,6 +8,75 @@ import (
 	"time"
 )
 
+// validateWorkPath ensures a path is safe and within the .work directory
+func validateWorkPath(path string) error {
+	// Clean the path to remove .. and other traversal attempts
+	cleanPath := filepath.Clean(path)
+
+	// Resolve to absolute path
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+
+	// Get absolute path of .work directory
+	workDir, err := filepath.Abs(".work")
+	if err != nil {
+		return fmt.Errorf("failed to resolve .work directory: %w", err)
+	}
+
+	// Ensure the path is within .work directory
+	// Use separator to prevent partial matches (e.g., .work-backup)
+	workDirWithSep := workDir + string(filepath.Separator)
+	if !strings.HasPrefix(absPath+string(filepath.Separator), workDirWithSep) && absPath != workDir {
+		return fmt.Errorf("path outside .work directory: %s", path)
+	}
+
+	return nil
+}
+
+// safeReadFile reads a file after validating the path is within .work/
+func safeReadFile(filePath string) ([]byte, error) {
+	if err := validateWorkPath(filePath); err != nil {
+		return nil, err
+	}
+	// #nosec G304 - path has been validated by validateWorkPath above
+	return os.ReadFile(filePath)
+}
+
+// safeReadProjectFile reads a file from project root (like RELEASES.md, kira.yml)
+// It validates the file is in the current directory and doesn't contain path traversal
+func safeReadProjectFile(filePath string) ([]byte, error) {
+	// Clean the path to remove .. and other traversal attempts
+	cleanPath := filepath.Clean(filePath)
+
+	// Ensure it's a simple filename or relative path without traversal
+	if strings.Contains(cleanPath, "..") {
+		return nil, fmt.Errorf("path contains traversal: %s", filePath)
+	}
+
+	// Resolve to absolute path
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+
+	// Get absolute path of current directory
+	currentDir, err := filepath.Abs(".")
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve current directory: %w", err)
+	}
+
+	// Ensure the path is within current directory
+	currentDirWithSep := currentDir + string(filepath.Separator)
+	if !strings.HasPrefix(absPath+string(filepath.Separator), currentDirWithSep) && absPath != currentDir {
+		return nil, fmt.Errorf("path outside project directory: %s", filePath)
+	}
+
+	// #nosec G304 - path has been validated above
+	return os.ReadFile(filePath)
+}
+
 // findWorkItemFile searches for a work item file by ID
 func findWorkItemFile(workItemID string) (string, error) {
 	var foundPath string
@@ -24,7 +93,7 @@ func findWorkItemFile(workItemID string) (string, error) {
 		// Check if this is a work item file with the matching ID
 		if strings.HasSuffix(path, ".md") && !strings.Contains(path, "template") && !strings.HasSuffix(path, "IDEAS.md") {
 			// Read the file to check the ID
-			content, err := os.ReadFile(path)
+			content, err := safeReadFile(path)
 			if err != nil {
 				return err
 			}
@@ -51,7 +120,7 @@ func findWorkItemFile(workItemID string) (string, error) {
 
 // updateWorkItemStatus updates the status field in a work item file
 func updateWorkItemStatus(filePath, newStatus string) error {
-	content, err := os.ReadFile(filePath)
+	content, err := safeReadFile(filePath)
 	if err != nil {
 		return err
 	}
@@ -105,7 +174,7 @@ func archiveWorkItems(workItems []string, sourcePath string) (string, error) {
 		filename := filepath.Base(workItem)
 		archivePath := filepath.Join(archiveDir, filename)
 
-		content, err := os.ReadFile(workItem)
+		content, err := safeReadFile(workItem)
 		if err != nil {
 			return "", fmt.Errorf("failed to read work item: %w", err)
 		}

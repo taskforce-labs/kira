@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,32 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// validateTestFilePath ensures a file path is within the test's temporary directory
+func validateTestFilePath(path, tmpDir string) error {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	absTmpDir, err := filepath.Abs(tmpDir)
+	if err != nil {
+		return err
+	}
+	tmpDirWithSep := absTmpDir + string(filepath.Separator)
+	if !strings.HasPrefix(absPath+string(filepath.Separator), tmpDirWithSep) && absPath != absTmpDir {
+		return fmt.Errorf("path outside test directory: %s", path)
+	}
+	return nil
+}
+
+// safeReadTestFile reads a file after validating it's within the test directory
+func safeReadTestFile(path, tmpDir string) ([]byte, error) {
+	if err := validateTestFilePath(path, tmpDir); err != nil {
+		return nil, err
+	}
+	// #nosec G304 - path has been validated by validateTestFilePath above
+	return os.ReadFile(path)
+}
 
 func TestInitializeWorkspace(t *testing.T) {
 	t.Run("creates workspace structure", func(t *testing.T) {
@@ -52,7 +79,7 @@ func TestInitializeWorkspace(t *testing.T) {
 
 		// Check that existing file is still there
 		assert.FileExists(t, existingFile)
-		content, err := os.ReadFile(existingFile)
+		content, err := safeReadTestFile(existingFile, tmpDir)
 		require.NoError(t, err)
 		assert.Equal(t, "existing content", string(content))
 	})
@@ -61,6 +88,8 @@ func TestInitializeWorkspace(t *testing.T) {
 func TestIdeasFileBehavior(t *testing.T) {
 	t.Run("prepends header when IDEAS.md exists without header", func(t *testing.T) {
 		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
 
 		// Pre-create .work/IDEAS.md with custom content only
 		workDir := filepath.Join(tmpDir, ".work")
@@ -69,10 +98,10 @@ func TestIdeasFileBehavior(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(workDir, "IDEAS.md"), []byte(existing), 0o600))
 
 		// Initialize (should prepend header without wiping existing)
-		err := initializeWorkspace(tmpDir)
+		err := initializeWorkspace(".")
 		require.NoError(t, err)
 
-		data, readErr := os.ReadFile(filepath.Join(workDir, "IDEAS.md"))
+		data, readErr := safeReadFile(".work/IDEAS.md")
 		require.NoError(t, readErr)
 		content := string(data)
 		assert.True(t, strings.HasPrefix(content, "# Ideas"))
@@ -81,13 +110,15 @@ func TestIdeasFileBehavior(t *testing.T) {
 
 	t.Run("does not duplicate header when re-running", func(t *testing.T) {
 		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
 
 		// First run creates header
-		require.NoError(t, initializeWorkspace(tmpDir))
+		require.NoError(t, initializeWorkspace("."))
 		// Second run should not duplicate header
-		require.NoError(t, initializeWorkspace(tmpDir))
+		require.NoError(t, initializeWorkspace("."))
 
-		data, err := os.ReadFile(filepath.Join(tmpDir, ".work", "IDEAS.md"))
+		data, err := safeReadFile(".work/IDEAS.md")
 		require.NoError(t, err)
 		content := string(data)
 		// Count only top-level "# Ideas" lines (ignore "## Ideas")

@@ -29,7 +29,7 @@ func addIdea(description string) error {
 	ideasPath := filepath.Join(".work", "IDEAS.md")
 
 	// Read existing content
-	content, err := os.ReadFile(ideasPath)
+	content, err := safeReadFile(ideasPath)
 	if err != nil {
 		return fmt.Errorf("failed to read IDEAS.md: %w", err)
 	}

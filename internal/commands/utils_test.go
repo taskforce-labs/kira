@@ -70,7 +70,9 @@ created: 2024-01-01
 
 # Test Feature
 `
-		filePath := "test-work-item.md"
+		// Create .work directory and file
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		filePath := ".work/1_todo/test-work-item.md"
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
 		// Update status
@@ -145,10 +147,10 @@ title: Test Feature 2
 ---
 # Test Feature 2
 `
-		require.NoError(t, os.WriteFile("work-item1.md", []byte(workItem1), 0o600))
-		require.NoError(t, os.WriteFile("work-item2.md", []byte(workItem2), 0o600))
+		require.NoError(t, os.WriteFile(".work/work-item1.md", []byte(workItem1), 0o600))
+		require.NoError(t, os.WriteFile(".work/work-item2.md", []byte(workItem2), 0o600))
 
-		workItems := []string{"work-item1.md", "work-item2.md"}
+		workItems := []string{".work/work-item1.md", ".work/work-item2.md"}
 
 		// Archive work items
 		archivePath, err := archiveWorkItems(workItems, "source-dir")
@@ -165,11 +167,11 @@ title: Test Feature 2
 		assert.FileExists(t, archivedFile2)
 
 		// Check that content was preserved
-		content1, err := os.ReadFile(archivedFile1)
+		content1, err := safeReadFile(archivedFile1)
 		require.NoError(t, err)
 		assert.Contains(t, string(content1), "Test Feature 1")
 
-		content2, err := os.ReadFile(archivedFile2)
+		content2, err := safeReadFile(archivedFile2)
 		require.NoError(t, err)
 		assert.Contains(t, string(content2), "Test Feature 2")
 	})

@@ -1,12 +1,15 @@
 package commands
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,6 +41,26 @@ func findRepoRoot() (string, error) {
 	}
 }
 
+// validateTestPath ensures a path is within the test's temporary directory
+func validateTestPath(path, tmpDir string) error {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+
+	absTmpDir, err := filepath.Abs(tmpDir)
+	if err != nil {
+		return fmt.Errorf("invalid tmpDir: %w", err)
+	}
+
+	tmpDirWithSep := absTmpDir + string(filepath.Separator)
+	if !strings.HasPrefix(absPath+string(filepath.Separator), tmpDirWithSep) && absPath != absTmpDir {
+		return fmt.Errorf("path outside test directory: %s", path)
+	}
+
+	return nil
+}
+
 // buildKiraBinary builds the kira binary for testing.
 func buildKiraBinary(t *testing.T, tmpDir string) string {
 	repoRoot, err := findRepoRoot()
@@ -50,8 +73,16 @@ func buildKiraBinary(t *testing.T, tmpDir string) string {
 		t.Fatalf("main.go does not exist: %s (error: %v)", mainPath, err)
 	}
 
+	// Validate output path is within test directory
+	if err := validateTestPath(outPath, tmpDir); err != nil {
+		t.Fatalf("invalid output path: %v", err)
+	}
+
 	// Build from repo root directory - Go needs to be in module context
-	buildCmd := exec.Command("go", "build", "-o", outPath, "cmd/kira/main.go")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// #nosec G204 - outPath and mainPath validated above, command is hardcoded "go build"
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", outPath, "cmd/kira/main.go")
 	buildCmd.Dir = repoRoot
 	output, err := buildCmd.CombinedOutput()
 	require.NoError(t, err, "build failed: %s", string(output))
@@ -135,7 +166,11 @@ func TestCLIIntegration(t *testing.T) {
 		_, thisFile, _, _ := runtime.Caller(0)
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 		outPath := filepath.Join(tmpDir, "kira")
-		buildCmd := exec.Command("go", "build", "-o", outPath, "kira/cmd/kira")
+		require.NoError(t, validateTestPath(outPath, tmpDir))
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// #nosec G204 - outPath validated above, command is hardcoded "go build"
+		buildCmd := exec.CommandContext(ctx, "go", "build", "-o", outPath, "kira/cmd/kira")
 		buildCmd.Dir = repoRoot
 		output, err := buildCmd.CombinedOutput()
 		require.NoError(t, err, "build failed: %s", string(output))
@@ -166,7 +201,11 @@ func TestCLIIntegration(t *testing.T) {
 		_, thisFile, _, _ := runtime.Caller(0)
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 		outPath := filepath.Join(tmpDir, "kira")
-		buildCmd := exec.Command("go", "build", "-o", outPath, "kira/cmd/kira")
+		require.NoError(t, validateTestPath(outPath, tmpDir))
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// #nosec G204 - outPath validated above, command is hardcoded "go build"
+		buildCmd := exec.CommandContext(ctx, "go", "build", "-o", outPath, "kira/cmd/kira")
 		buildCmd.Dir = repoRoot
 		output, err := buildCmd.CombinedOutput()
 		require.NoError(t, err, "build failed: %s", string(output))
@@ -207,8 +246,12 @@ func TestCLIIntegration(t *testing.T) {
 		require.NoError(t, err, "failed to find repo root")
 		outPath := filepath.Join(tmpDir, "kira")
 		mainPath := filepath.Join(repoRoot, "cmd", "kira", "main.go")
+		require.NoError(t, validateTestPath(outPath, tmpDir))
 		// Use absolute path and set working directory so Go can find the module
-		buildCmd := exec.Command("go", "build", "-o", outPath, mainPath)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// #nosec G204 - outPath and mainPath validated above, command is hardcoded "go build"
+		buildCmd := exec.CommandContext(ctx, "go", "build", "-o", outPath, mainPath)
 		buildCmd.Dir = repoRoot
 		buildCmd.Env = append(os.Environ(), "GO111MODULE=on")
 		output, err := buildCmd.CombinedOutput()
@@ -288,8 +331,12 @@ Added user authentication system.
 		require.NoError(t, err, "failed to find repo root")
 		outPath := filepath.Join(tmpDir, "kira")
 		mainPath := filepath.Join(repoRoot, "cmd", "kira", "main.go")
+		require.NoError(t, validateTestPath(outPath, tmpDir))
 		// Use absolute path and set working directory so Go can find the module
-		buildCmd := exec.Command("go", "build", "-o", outPath, mainPath)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// #nosec G204 - outPath and mainPath validated above, command is hardcoded "go build"
+		buildCmd := exec.CommandContext(ctx, "go", "build", "-o", outPath, mainPath)
 		buildCmd.Dir = repoRoot
 		buildCmd.Env = append(os.Environ(), "GO111MODULE=on")
 		output, err := buildCmd.CombinedOutput()
@@ -313,6 +360,7 @@ Added user authentication system.
 			assert.FileExists(t, templateFile)
 
 			// Check that template contains input placeholders
+			// #nosec G304 - test file path, safe
 			content, err := os.ReadFile(templateFile)
 			require.NoError(t, err)
 			assert.Contains(t, string(content), "<!--input-")
@@ -334,7 +382,11 @@ Added user authentication system.
 		_, thisFile, _, _ := runtime.Caller(0)
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 		outPath := filepath.Join(tmpDir, "kira")
-		buildCmd := exec.Command("go", "build", "-o", outPath, "kira/cmd/kira")
+		require.NoError(t, validateTestPath(outPath, tmpDir))
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// #nosec G204 - outPath validated above, command is hardcoded "go build"
+		buildCmd := exec.CommandContext(ctx, "go", "build", "-o", outPath, "kira/cmd/kira")
 		buildCmd.Dir = repoRoot
 		output, err := buildCmd.CombinedOutput()
 		require.NoError(t, err, "build failed: %s", string(output))
@@ -391,7 +443,11 @@ This is a release note entry.
 		_, thisFile, _, _ := runtime.Caller(0)
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 		outPath := filepath.Join(tmpDir, "kira")
-		buildCmd := exec.Command("go", "build", "-o", outPath, "kira/cmd/kira")
+		require.NoError(t, validateTestPath(outPath, tmpDir))
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// #nosec G204 - outPath validated above, command is hardcoded "go build"
+		buildCmd := exec.CommandContext(ctx, "go", "build", "-o", outPath, "kira/cmd/kira")
 		buildCmd.Dir = repoRoot
 		output, err := buildCmd.CombinedOutput()
 		require.NoError(t, err, "build failed: %s", string(output))
@@ -455,7 +511,11 @@ created: 2024-01-01
 		_, thisFile, _, _ := runtime.Caller(0)
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 		outPath := filepath.Join(tmpDir, "kira")
-		buildCmd := exec.Command("go", "build", "-o", outPath, "kira/cmd/kira")
+		require.NoError(t, validateTestPath(outPath, tmpDir))
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// #nosec G204 - outPath validated above, command is hardcoded "go build"
+		buildCmd := exec.CommandContext(ctx, "go", "build", "-o", outPath, "kira/cmd/kira")
 		buildCmd.Dir = repoRoot
 		output, err := buildCmd.CombinedOutput()
 		require.NoError(t, err, "build failed: %s", string(output))
@@ -522,7 +582,11 @@ created: 2024-01-01
 		_, thisFile, _, _ := runtime.Caller(0)
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 		outPath := filepath.Join(tmpDir, "kira")
-		buildCmd := exec.Command("go", "build", "-o", outPath, "kira/cmd/kira")
+		require.NoError(t, validateTestPath(outPath, tmpDir))
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// #nosec G204 - outPath validated above, command is hardcoded "go build"
+		buildCmd := exec.CommandContext(ctx, "go", "build", "-o", outPath, "kira/cmd/kira")
 		buildCmd.Dir = repoRoot
 		output, err := buildCmd.CombinedOutput()
 		require.NoError(t, err, "build failed: %s", string(output))

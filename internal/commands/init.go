@@ -85,7 +85,7 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 			return fmt.Errorf("failed to create IDEAS.md: %w", err)
 		}
 	} else {
-		content, readErr := os.ReadFile(ideasPath)
+		content, readErr := safeReadFile(ideasPath)
 		if readErr != nil {
 			return fmt.Errorf("failed to read IDEAS.md: %w", readErr)
 		}

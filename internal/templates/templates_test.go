@@ -67,11 +67,12 @@ title: <!--input-string:title:"Feature title"-->
 <!--input-string:context:"Background and rationale"-->
 `
 
-		tmpFile, err := os.CreateTemp("", "template_*.md")
-		require.NoError(t, err)
-		defer func() { _ = os.Remove(tmpFile.Name()) }()
+		// Create .work/templates directory structure
+		require.NoError(t, os.MkdirAll(".work/templates", 0o700))
+		templatePath := ".work/templates/test-template.md"
+		defer func() { _ = os.RemoveAll(".work") }()
 
-		require.NoError(t, os.WriteFile(tmpFile.Name(), []byte(templateContent), 0o600))
+		require.NoError(t, os.WriteFile(templatePath, []byte(templateContent), 0o600))
 
 		inputs := map[string]string{
 			"id":      "001",
@@ -79,7 +80,7 @@ title: <!--input-string:title:"Feature title"-->
 			"context": "This is a test feature",
 		}
 
-		result, err := ProcessTemplate(tmpFile.Name(), inputs)
+		result, err := ProcessTemplate(templatePath, inputs)
 		require.NoError(t, err)
 
 		assert.Contains(t, result, "id: 001")

@@ -2,6 +2,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -120,7 +121,7 @@ func updateWorkItemTimestamps() error {
 }
 
 func updateFileTimestamp(filePath, timestamp string) error {
-	content, err := os.ReadFile(filePath)
+	content, err := safeReadFile(filePath)
 	if err != nil {
 		return err
 	}
@@ -154,9 +155,38 @@ func updateFileTimestamp(filePath, timestamp string) error {
 	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o600)
 }
 
+// sanitizeCommitMessage validates and sanitizes a commit message
+func sanitizeCommitMessage(msg string) (string, error) {
+	// Remove newlines and other dangerous characters
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", "")
+	msg = strings.TrimSpace(msg)
+
+	// Validate length
+	if len(msg) == 0 {
+		return "", fmt.Errorf("commit message cannot be empty")
+	}
+	if len(msg) > 1000 {
+		return "", fmt.Errorf("commit message too long (max 1000 characters)")
+	}
+
+	// Check for shell metacharacters that could be dangerous
+	dangerous := []string{"`", "$", "(", ")", "{", "}", "[", "]", "|", "&", ";", "<", ">"}
+	for _, char := range dangerous {
+		if strings.Contains(msg, char) {
+			return "", fmt.Errorf("commit message contains invalid character: %s", char)
+		}
+	}
+
+	return msg, nil
+}
+
 func checkExternalChanges() (bool, error) {
 	// Check git status for changes outside .work/
-	cmd := exec.Command("git", "status", "--porcelain")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
 	output, err := cmd.Output()
 	if err != nil {
 		// If git is not available or not a git repo, assume no external changes
@@ -182,11 +212,24 @@ func checkExternalChanges() (bool, error) {
 
 func stageWorkChanges() error {
 	// Stage all changes in .work/ directory
-	cmd := exec.Command("git", "add", ".work/")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "add", ".work/")
 	return cmd.Run()
 }
 
 func commitChanges(message string) error {
-	cmd := exec.Command("git", "commit", "-m", message)
+	// Sanitize commit message
+	sanitized, err := sanitizeCommitMessage(message)
+	if err != nil {
+		return fmt.Errorf("invalid commit message: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// #nosec G204 - sanitized message has been validated and sanitized by sanitizeCommitMessage
+	cmd := exec.CommandContext(ctx, "git", "commit", "-m", sanitized)
 	return cmd.Run()
 }

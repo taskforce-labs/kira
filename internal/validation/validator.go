@@ -151,8 +151,38 @@ func getWorkItemFiles() ([]string, error) {
 	return files, err
 }
 
+// validateWorkItemPath ensures a work item path is safe and within .work/
+func validateWorkItemPath(path string) error {
+	cleanPath := filepath.Clean(path)
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+
+	workDir, err := filepath.Abs(".work")
+	if err != nil {
+		return fmt.Errorf("failed to resolve .work directory: %w", err)
+	}
+
+	workDirWithSep := workDir + string(filepath.Separator)
+	if !strings.HasPrefix(absPath+string(filepath.Separator), workDirWithSep) && absPath != workDir {
+		return fmt.Errorf("path outside .work directory: %s", path)
+	}
+
+	return nil
+}
+
+// safeReadWorkItemFile reads a work item file after validating the path
+func safeReadWorkItemFile(filePath string) ([]byte, error) {
+	if err := validateWorkItemPath(filePath); err != nil {
+		return nil, err
+	}
+	// #nosec G304 - path has been validated by validateWorkItemPath above
+	return os.ReadFile(filePath)
+}
+
 func parseWorkItemFile(filePath string) (*WorkItem, error) {
-	content, err := os.ReadFile(filePath)
+	content, err := safeReadWorkItemFile(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +383,7 @@ func FixDuplicateIDs() (*ValidationResult, error) {
 }
 
 func updateWorkItemID(filePath, newID string) error {
-	content, err := os.ReadFile(filePath)
+	content, err := safeReadWorkItemFile(filePath)
 	if err != nil {
 		return err
 	}

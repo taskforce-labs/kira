@@ -143,7 +143,7 @@ func isWorkItemID(target string) bool {
 }
 
 func addAbandonmentReason(filePath, reason string) error {
-	content, err := os.ReadFile(filePath)
+	content, err := safeReadFile(filePath)
 	if err != nil {
 		return err
 	}

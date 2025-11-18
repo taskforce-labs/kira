@@ -121,7 +121,7 @@ func generateReleaseNotes(workItems []string) (string, error) {
 	var releaseNotes []string
 
 	for _, workItem := range workItems {
-		content, err := os.ReadFile(workItem)
+		content, err := safeReadFile(workItem)
 		if err != nil {
 			return "", err
 		}
@@ -165,7 +165,7 @@ func updateReleasesFile(cfg *config.Config, releaseNotes string) error {
 
 	// Read existing content if file exists
 	if _, err := os.Stat(releasesPath); err == nil {
-		existing, err := os.ReadFile(releasesPath)
+		existing, err := safeReadProjectFile(releasesPath)
 		if err != nil {
 			return fmt.Errorf("failed to read releases file: %w", err)
 		}
