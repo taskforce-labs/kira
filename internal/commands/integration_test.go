@@ -65,6 +65,57 @@ func TestCLIIntegration(t *testing.T) {
 		if _, err := os.Stat(repoRoot); err != nil {
 			t.Fatalf("repoRoot does not exist: %s (error: %v)", repoRoot, err)
 		}
+
+		// List repo root contents for debugging
+		entries, err := os.ReadDir(repoRoot)
+		if err == nil {
+			t.Logf("  repoRoot contents: %v", func() []string {
+				var names []string
+				for _, e := range entries {
+					names = append(names, e.Name())
+				}
+				return names
+			}())
+		}
+
+		// Check if cmd directory exists
+		cmdDir := filepath.Join(repoRoot, "cmd")
+		if _, err := os.Stat(cmdDir); err != nil {
+			t.Fatalf("cmd directory does not exist: %s (error: %v)", cmdDir, err)
+		}
+		t.Logf("  cmd directory exists: %s", cmdDir)
+
+		// List cmd directory contents
+		cmdEntries, err := os.ReadDir(cmdDir)
+		if err == nil {
+			t.Logf("  cmd directory contents: %v", func() []string {
+				var names []string
+				for _, e := range cmdEntries {
+					names = append(names, e.Name())
+				}
+				return names
+			}())
+		}
+
+		// Check if cmd/kira directory exists
+		kiraDir := filepath.Join(repoRoot, "cmd", "kira")
+		if _, err := os.Stat(kiraDir); err != nil {
+			t.Fatalf("cmd/kira directory does not exist: %s (error: %v)", kiraDir, err)
+		}
+		t.Logf("  cmd/kira directory exists: %s", kiraDir)
+
+		// List cmd/kira directory contents
+		kiraEntries, err := os.ReadDir(kiraDir)
+		if err == nil {
+			t.Logf("  cmd/kira directory contents: %v", func() []string {
+				var names []string
+				for _, e := range kiraEntries {
+					names = append(names, e.Name())
+				}
+				return names
+			}())
+		}
+
 		if _, err := os.Stat(mainPath); err != nil {
 			t.Fatalf("main.go does not exist: %s (error: %v)", mainPath, err)
 		}
