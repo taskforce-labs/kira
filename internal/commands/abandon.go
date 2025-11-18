@@ -129,5 +129,5 @@ func addAbandonmentReason(filePath, reason string) error {
 	abandonmentNote := fmt.Sprintf("\n\n## Abandonment\n\n**Reason:** %s\n**Date:** %s\n", reason, time.Now().Format("2006-01-02 15:04:05"))
 	newContent := string(content) + abandonmentNote
 
-	return os.WriteFile(filePath, []byte(newContent), 0644)
+	return os.WriteFile(filePath, []byte(newContent), 0o644)
 }

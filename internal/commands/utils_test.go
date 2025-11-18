@@ -16,7 +16,7 @@ func TestFindWorkItemFile(t *testing.T) {
 		defer os.Chdir("/")
 
 		// Create .work directory structure
-		os.MkdirAll(".work/1_todo", 0755)
+		os.MkdirAll(".work/1_todo", 0o755)
 
 		// Create a work item file
 		workItemContent := `---
@@ -30,7 +30,7 @@ created: 2024-01-01
 # Test Feature
 `
 		filePath := ".work/1_todo/001-test-feature.prd.md"
-		os.WriteFile(filePath, []byte(workItemContent), 0644)
+		os.WriteFile(filePath, []byte(workItemContent), 0o644)
 
 		// Find the work item
 		foundPath, err := findWorkItemFile("001")
@@ -44,7 +44,7 @@ created: 2024-01-01
 		defer os.Chdir("/")
 
 		// Create .work directory structure
-		os.MkdirAll(".work/1_todo", 0755)
+		os.MkdirAll(".work/1_todo", 0o755)
 
 		// Try to find non-existent work item
 		_, err := findWorkItemFile("999")
@@ -71,7 +71,7 @@ created: 2024-01-01
 # Test Feature
 `
 		filePath := "test-work-item.md"
-		os.WriteFile(filePath, []byte(workItemContent), 0644)
+		os.WriteFile(filePath, []byte(workItemContent), 0o644)
 
 		// Update status
 		err := updateWorkItemStatus(filePath, "doing")
@@ -93,7 +93,7 @@ func TestGetWorkItemFiles(t *testing.T) {
 		defer os.Chdir("/")
 
 		// Create directory structure
-		os.MkdirAll("test-dir", 0755)
+		os.MkdirAll("test-dir", 0o755)
 
 		// Create work item files
 		workItem1 := `---
@@ -108,9 +108,9 @@ title: Test Feature 2
 ---
 # Test Feature 2
 `
-		os.WriteFile("test-dir/001-feature1.md", []byte(workItem1), 0644)
-		os.WriteFile("test-dir/002-feature2.md", []byte(workItem2), 0644)
-		os.WriteFile("test-dir/not-a-work-item.txt", []byte("not a work item"), 0644)
+		os.WriteFile("test-dir/001-feature1.md", []byte(workItem1), 0o644)
+		os.WriteFile("test-dir/002-feature2.md", []byte(workItem2), 0o644)
+		os.WriteFile("test-dir/not-a-work-item.txt", []byte("not a work item"), 0o644)
 
 		// Get work item files
 		files, err := getWorkItemFiles("test-dir")
@@ -130,7 +130,7 @@ func TestArchiveWorkItems(t *testing.T) {
 		defer os.Chdir("/")
 
 		// Create .work directory structure
-		os.MkdirAll(".work", 0755)
+		os.MkdirAll(".work", 0o755)
 
 		// Create work item files
 		workItem1 := `---
@@ -145,8 +145,8 @@ title: Test Feature 2
 ---
 # Test Feature 2
 `
-		os.WriteFile("work-item1.md", []byte(workItem1), 0644)
-		os.WriteFile("work-item2.md", []byte(workItem2), 0644)
+		os.WriteFile("work-item1.md", []byte(workItem1), 0o644)
+		os.WriteFile("work-item2.md", []byte(workItem2), 0o644)
 
 		workItems := []string{"work-item1.md", "work-item2.md"}
 

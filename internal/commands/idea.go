@@ -41,7 +41,7 @@ func addIdea(description string) error {
 	newContent := string(content) + newIdea
 
 	// Write back to file
-	if err := os.WriteFile(ideasPath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(ideasPath, []byte(newContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write IDEAS.md: %w", err)
 	}
 

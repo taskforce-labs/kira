@@ -17,7 +17,7 @@ func TestLintWorkItems(t *testing.T) {
 		defer os.Chdir("/")
 
 		// Create .work directory structure
-		os.MkdirAll(".work/1_todo", 0755)
+		os.MkdirAll(".work/1_todo", 0o755)
 
 		// Create a valid work item
 		workItemContent := `---
@@ -33,7 +33,7 @@ created: 2024-01-01
 ## Context
 This is a test feature.
 `
-		os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(workItemContent), 0644)
+		os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(workItemContent), 0o644)
 
 		cfg := &config.DefaultConfig
 		err := lintWorkItems(cfg)
@@ -46,7 +46,7 @@ This is a test feature.
 		defer os.Chdir("/")
 
 		// Create .work directory structure
-		os.MkdirAll(".work/1_todo", 0755)
+		os.MkdirAll(".work/1_todo", 0o755)
 
 		// Create an invalid work item (invalid status)
 		workItemContent := `---
@@ -59,7 +59,7 @@ created: 2024-01-01
 
 # Test Feature
 `
-		os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(workItemContent), 0644)
+		os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(workItemContent), 0o644)
 
 		cfg := &config.DefaultConfig
 		err := lintWorkItems(cfg)

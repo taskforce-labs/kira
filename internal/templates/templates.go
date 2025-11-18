@@ -149,13 +149,13 @@ func CreateDefaultTemplates(basePath string) error {
 	}
 
 	templatesDir := filepath.Join(basePath, "templates")
-	if err := os.MkdirAll(templatesDir, 0755); err != nil {
+	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create templates directory: %w", err)
 	}
 
 	for filename, content := range templates {
 		path := filepath.Join(templatesDir, filename)
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			return fmt.Errorf("failed to write template %s: %w", filename, err)
 		}
 	}

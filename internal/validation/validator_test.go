@@ -18,7 +18,7 @@ func TestValidateWorkItems(t *testing.T) {
 		defer os.Chdir("/")
 
 		// Create .work directory structure
-		os.MkdirAll(".work/1_todo", 0755)
+		os.MkdirAll(".work/1_todo", 0o755)
 
 		// Create a valid work item
 		workItemContent := `---
@@ -35,7 +35,7 @@ created: 2024-01-01
 This is a test feature.
 `
 
-		os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(workItemContent), 0644)
+		os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(workItemContent), 0o644)
 
 		cfg := &config.DefaultConfig
 		result, err := ValidateWorkItems(cfg)
@@ -51,7 +51,7 @@ This is a test feature.
 		defer os.Chdir("/")
 
 		// Create .work directory structure
-		os.MkdirAll(".work/1_todo", 0755)
+		os.MkdirAll(".work/1_todo", 0o755)
 
 		// Create an invalid work item (missing title in front matter)
 		workItemContent := `---
@@ -64,7 +64,7 @@ created: 2024-01-01
 # Test Feature
 `
 
-		os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(workItemContent), 0644)
+		os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(workItemContent), 0o644)
 
 		cfg := &config.DefaultConfig
 		result, err := ValidateWorkItems(cfg)
@@ -82,7 +82,7 @@ func TestGetNextID(t *testing.T) {
 		os.Chdir(tmpDir)
 		defer os.Chdir("/")
 
-		os.MkdirAll(".work", 0755)
+		os.MkdirAll(".work", 0o755)
 
 		id, err := GetNextID()
 		require.NoError(t, err)
@@ -95,7 +95,7 @@ func TestGetNextID(t *testing.T) {
 		os.Chdir(tmpDir)
 		defer os.Chdir("/")
 
-		os.MkdirAll(".work/1_todo", 0755)
+		os.MkdirAll(".work/1_todo", 0o755)
 
 		// Create a work item with ID 001
 		workItemContent := `---
@@ -109,7 +109,7 @@ created: 2024-01-01
 # Test Feature
 `
 
-		os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(workItemContent), 0644)
+		os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(workItemContent), 0o644)
 
 		id, err := GetNextID()
 		require.NoError(t, err)
@@ -124,7 +124,7 @@ func TestFixDuplicateIDs(t *testing.T) {
 		os.Chdir(tmpDir)
 		defer os.Chdir("/")
 
-		os.MkdirAll(".work/1_todo", 0755)
+		os.MkdirAll(".work/1_todo", 0o755)
 
 		// Create two work items with the same ID
 		workItemContent1 := `---
@@ -149,8 +149,8 @@ created: 2024-01-02
 # Second Feature
 `
 
-		os.WriteFile(".work/1_todo/001-first-feature.prd.md", []byte(workItemContent1), 0644)
-		os.WriteFile(".work/1_todo/001-second-feature.prd.md", []byte(workItemContent2), 0644)
+		os.WriteFile(".work/1_todo/001-first-feature.prd.md", []byte(workItemContent1), 0o644)
+		os.WriteFile(".work/1_todo/001-second-feature.prd.md", []byte(workItemContent2), 0o644)
 
 		result, err := FixDuplicateIDs()
 		require.NoError(t, err)

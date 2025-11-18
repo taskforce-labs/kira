@@ -17,13 +17,13 @@ func TestAddIdea(t *testing.T) {
 		defer os.Chdir("/")
 
 		// Create .work directory and IDEAS.md
-		os.MkdirAll(".work", 0755)
+		os.MkdirAll(".work", 0o755)
 		ideasContent := `# Ideas
 
 ## Ideas
 
 `
-		os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0644)
+		os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o644)
 
 		// Add an idea
 		err := addIdea("Test idea for testing")
@@ -43,13 +43,13 @@ func TestAddIdea(t *testing.T) {
 		defer os.Chdir("/")
 
 		// Create .work directory and IDEAS.md
-		os.MkdirAll(".work", 0755)
+		os.MkdirAll(".work", 0o755)
 		ideasContent := `# Ideas
 
 ## Ideas
 
 `
-		os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0644)
+		os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o644)
 
 		// Add an idea
 		beforeTime := time.Now()

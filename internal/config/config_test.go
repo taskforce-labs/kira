@@ -30,7 +30,7 @@ status_folders:
   todo: "custom_todo"
 `
 
-		os.WriteFile("kira.yml", []byte(testConfig), 0644)
+		os.WriteFile("kira.yml", []byte(testConfig), 0o644)
 		defer os.Remove("kira.yml")
 
 		config, err := LoadConfig()

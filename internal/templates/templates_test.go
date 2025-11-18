@@ -71,7 +71,7 @@ title: <!--input-string:title:"Feature title"-->
 		require.NoError(t, err)
 		defer os.Remove(tmpFile.Name())
 
-		os.WriteFile(tmpFile.Name(), []byte(templateContent), 0644)
+		os.WriteFile(tmpFile.Name(), []byte(templateContent), 0o644)
 
 		inputs := map[string]string{
 			"id":      "001",

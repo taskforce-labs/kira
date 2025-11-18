@@ -354,5 +354,5 @@ func updateWorkItemID(filePath, newID string) error {
 		}
 	}
 
-	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0644)
+	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644)
 }
