@@ -1,7 +1,7 @@
 ---
 id: 002
 title: Kira Release
-status: backlog
+status: todo
 kind: prd
 assigned: wkallan1984@gmail.com
 estimate: 1 day
