@@ -1,6 +1,8 @@
 # Kira
+Version: v0.1.0-alpha
 
 A git-based, plaintext productivity tool designed with both clankers (LLMs) and meatbags (people) in mind.
+
 
 ## Overview
 
