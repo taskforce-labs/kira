@@ -34,3 +34,9 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 
 - [2025-11-29] A game where you get to shoot kaju with an army of robots from the cli
 
+- [2025-11-29] Add a commit flag to the move command so that the work item is committed to git when moved.
+
+- [2025-11-29] List ideas with with numbers instead of bullet points.
+
+- [2025-11-29] Covert an idea to a work item with a command by entering the idea number and pressing enter.
+
