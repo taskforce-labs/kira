@@ -11,6 +11,8 @@ tags: <!--input-strings[research,discovery,investigation]:tags:"Tags"-->
 
 # <!--input-string:title:"Spike title"-->
 
+<!--input-string:description:"Description"-->
+
 ## Objective
 
 ## Questions to Answer

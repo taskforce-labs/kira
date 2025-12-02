@@ -12,6 +12,8 @@ tags: <!--input-strings[frontend,backend,database,api,ui,security]:tags:"Tags"--
 
 # <!--input-string:title:"Feature title"-->
 
+<!--input-string:description:"Description"-->
+
 ## Context
 
 ## Requirements

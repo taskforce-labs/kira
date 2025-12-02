@@ -11,7 +11,7 @@ tags: <!--input-strings[bug,performance,security,ui]:tags:"Tags"-->
 
 # <!--input-string:title:"Issue title"-->
 
-## Problem Description
+<!--input-string:description:"Description"-->
 
 ## Steps to Reproduce
 

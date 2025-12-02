@@ -11,6 +11,8 @@ tags: <!--input-strings[implementation,maintenance,refactoring]:tags:"Tags"-->
 
 # <!--input-string:title:"Task title"-->
 
+<!--input-string:description:"Description"-->
+
 ## Details
 
 
