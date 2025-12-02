@@ -61,6 +61,14 @@ func validateTestPath(path, tmpDir string) error {
 	return nil
 }
 
+// safeExecCommand creates an exec.Command after validating the command path
+func safeExecCommand(tmpDir, commandPath string, args ...string) (*exec.Cmd, error) {
+	if err := validateTestPath(commandPath, tmpDir); err != nil {
+		return nil, err
+	}
+	return exec.Command(commandPath, args...), nil
+}
+
 // buildKiraBinary builds the kira binary for testing.
 func buildKiraBinary(t *testing.T, tmpDir string) string {
 	repoRoot, err := findRepoRoot()
@@ -133,11 +141,12 @@ func TestCLIIntegration(t *testing.T) {
 			assert.FileExists(t, p)
 		}
 
-		// Test kira idea
-		ideaCmd := exec.Command("./kira", "idea", "Test idea for integration")
+		// Test kira idea add
+		ideaCmd := exec.Command("./kira", "idea", "add", "Test idea for integration")
 		output, err = ideaCmd.CombinedOutput()
-		require.NoError(t, err, "idea failed: %s", string(output))
-		assert.Contains(t, string(output), "Added idea: Test idea for integration")
+		require.NoError(t, err, "idea add failed: %s", string(output))
+		assert.Contains(t, string(output), "Added idea")
+		assert.Contains(t, string(output), "Test idea for integration")
 
 		// Check that idea was added to IDEAS.md
 		ideasContent, err := os.ReadFile(".work/IDEAS.md")
@@ -613,5 +622,268 @@ created: 2024-01-01
 		output, err = saveCmd.CombinedOutput()
 		assert.Error(t, err)
 		assert.Contains(t, string(output), "validation failed")
+	})
+
+	t.Run("idea conversion workflow", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize workspace
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		output, err := initCmd.CombinedOutput()
+		require.NoError(t, err, "init failed: %s", string(output))
+
+		// Add an idea
+		ideaCmd, err := safeExecCommand(tmpDir, kiraPath, "idea", "dark mode: allow the user to toggle between light and dark mode")
+		require.NoError(t, err)
+		output, err = ideaCmd.CombinedOutput()
+		require.NoError(t, err, "idea add failed: %s", string(output))
+		assert.Contains(t, string(output), "Added idea")
+
+		// List ideas
+		listCmd, err := safeExecCommand(tmpDir, kiraPath, "idea", "list")
+		require.NoError(t, err)
+		output, err = listCmd.CombinedOutput()
+		require.NoError(t, err, "idea list failed: %s", string(output))
+		assert.Contains(t, string(output), "dark mode")
+
+		// Convert idea to work item
+		convertCmd, err := safeExecCommand(tmpDir, kiraPath, "new", "prd", "todo", "idea", "1")
+		require.NoError(t, err)
+		output, err = convertCmd.CombinedOutput()
+		require.NoError(t, err, "convert idea failed: %s", string(output))
+		assert.Contains(t, string(output), "Created work item")
+
+		// Verify idea was removed from IDEAS.md
+		ideasPath := filepath.Join(tmpDir, ".work", "IDEAS.md")
+		ideasContent, err := safeReadTestFile(ideasPath, tmpDir)
+		require.NoError(t, err)
+		assert.NotContains(t, string(ideasContent), "dark mode")
+
+		// Verify work item was created
+		globPattern := filepath.Join(tmpDir, ".work", "1_todo", "*.md")
+		files, err := filepath.Glob(globPattern)
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+
+		// Verify work item content
+		workItemContent, err := safeReadTestFile(files[0], tmpDir)
+		require.NoError(t, err)
+		assert.Contains(t, string(workItemContent), "title: dark mode")
+		assert.Contains(t, string(workItemContent), "allow the user to toggle between light and dark mode")
+	})
+
+	t.Run("idea conversion with multiple ideas renumbers correctly", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize workspace
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		output, err := initCmd.CombinedOutput()
+		require.NoError(t, err, "init failed: %s", string(output))
+
+		// Add multiple ideas
+		idea1Cmd, err := safeExecCommand(tmpDir, kiraPath, "idea", "First idea")
+		require.NoError(t, err)
+		output, err = idea1Cmd.CombinedOutput()
+		require.NoError(t, err, "idea 1 add failed: %s", string(output))
+
+		idea2Cmd, err := safeExecCommand(tmpDir, kiraPath, "idea", "Second idea")
+		require.NoError(t, err)
+		output, err = idea2Cmd.CombinedOutput()
+		require.NoError(t, err, "idea 2 add failed: %s", string(output))
+
+		idea3Cmd, err := safeExecCommand(tmpDir, kiraPath, "idea", "Third idea")
+		require.NoError(t, err)
+		output, err = idea3Cmd.CombinedOutput()
+		require.NoError(t, err, "idea 3 add failed: %s", string(output))
+
+		// Convert middle idea (idea 2)
+		convertCmd, err := safeExecCommand(tmpDir, kiraPath, "new", "prd", "todo", "idea", "2")
+		require.NoError(t, err)
+		output, err = convertCmd.CombinedOutput()
+		require.NoError(t, err, "convert idea failed: %s", string(output))
+
+		// Verify remaining ideas are renumbered
+		listCmd, err := safeExecCommand(tmpDir, kiraPath, "idea", "list")
+		require.NoError(t, err)
+		output, err = listCmd.CombinedOutput()
+		require.NoError(t, err, "idea list failed: %s", string(output))
+
+		outputStr := string(output)
+		// Should have ideas 1 and 2 (renumbered from original 1 and 3)
+		assert.Contains(t, outputStr, "1. [")
+		assert.Contains(t, outputStr, "2. [")
+		assert.Contains(t, outputStr, "First idea")
+		assert.Contains(t, outputStr, "Third idea")
+		// Should not have "Second idea" anymore
+		assert.NotContains(t, outputStr, "Second idea")
+	})
+
+	t.Run("idea conversion error cases", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize workspace
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		output, err := initCmd.CombinedOutput()
+		require.NoError(t, err, "init failed: %s", string(output))
+
+		// Try to convert non-existent idea
+		convertCmd, err := safeExecCommand(tmpDir, kiraPath, "new", "prd", "todo", "idea", "999")
+		require.NoError(t, err)
+		output, err = convertCmd.CombinedOutput()
+		assert.Error(t, err)
+		assert.Contains(t, string(output), "Idea 999 not found")
+
+		// Try with invalid idea number
+		convertCmd, err = safeExecCommand(tmpDir, kiraPath, "new", "prd", "todo", "idea", "abc")
+		require.NoError(t, err)
+		output, err = convertCmd.CombinedOutput()
+		assert.Error(t, err)
+		assert.Contains(t, string(output), "invalid idea number")
+
+		// Try with zero
+		convertCmd, err = safeExecCommand(tmpDir, kiraPath, "new", "prd", "todo", "idea", "0")
+		require.NoError(t, err)
+		output, err = convertCmd.CombinedOutput()
+		assert.Error(t, err)
+		assert.Contains(t, string(output), "invalid idea number")
+	})
+
+	t.Run("idea parsing with and without colons", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize workspace
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		output, err := initCmd.CombinedOutput()
+		require.NoError(t, err, "init failed: %s", string(output))
+
+		// Add idea with colon
+		idea1Cmd, err := safeExecCommand(tmpDir, kiraPath, "idea", "add", "dark mode: allow toggle")
+		require.NoError(t, err)
+		err = idea1Cmd.Run()
+		require.NoError(t, err)
+
+		// Add idea without colon (more than 5 words)
+		idea2Cmd, err := safeExecCommand(tmpDir, kiraPath, "idea", "add", "user authentication requirements with OAuth support")
+		require.NoError(t, err)
+		err = idea2Cmd.Run()
+		require.NoError(t, err)
+
+		// Add idea without colon (fewer than 5 words)
+		idea3Cmd, err := safeExecCommand(tmpDir, kiraPath, "idea", "add", "fix login bug")
+		require.NoError(t, err)
+		err = idea3Cmd.Run()
+		require.NoError(t, err)
+
+		// Convert idea with colon
+		convert1Cmd, err := safeExecCommand(tmpDir, kiraPath, "new", "prd", "todo", "idea", "1")
+		require.NoError(t, err)
+		err = convert1Cmd.Run()
+		require.NoError(t, err)
+
+		// Verify work item has correct title and description
+		globPattern := filepath.Join(tmpDir, ".work", "1_todo", "*.md")
+		files, err := filepath.Glob(globPattern)
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+
+		workItemContent, err := safeReadTestFile(files[0], tmpDir)
+		require.NoError(t, err)
+		contentStr := string(workItemContent)
+		assert.Contains(t, contentStr, "title: dark mode")
+		// Description gets mapped to context field in PRD template
+		assert.Contains(t, contentStr, "allow toggle")
+
+		// Convert idea without colon (more than 5 words)
+		// After converting idea 1, ideas are renumbered: original idea 2 becomes idea 1
+		convert2Cmd, err := safeExecCommand(tmpDir, kiraPath, "new", "prd", "todo", "idea", "1")
+		require.NoError(t, err)
+		err = convert2Cmd.Run()
+		require.NoError(t, err)
+
+		// Verify second work item
+		globPattern2 := filepath.Join(tmpDir, ".work", "1_todo", "*.md")
+		files, err = filepath.Glob(globPattern2)
+		require.NoError(t, err)
+		require.Len(t, files, 2)
+
+		// Find the second work item (the one with "user authentication" or "OAuth")
+		var secondFile string
+		for _, file := range files {
+			content, err := safeReadTestFile(file, tmpDir)
+			require.NoError(t, err)
+			contentStr := string(content)
+			// Find the work item that contains "user authentication" or "OAuth"
+			if strings.Contains(contentStr, "user authentication") || strings.Contains(contentStr, "OAuth") {
+				secondFile = file
+				break
+			}
+		}
+		require.NotEmpty(t, secondFile, "Should find second work item file with user authentication")
+
+		workItemContent2, err := safeReadTestFile(secondFile, tmpDir)
+		require.NoError(t, err)
+		contentStr2 := string(workItemContent2)
+		// Title should be first 5 words: "user authentication requirements with OAuth"
+		assert.Contains(t, contentStr2, "user authentication requirements with OAuth")
+		// Description should contain the full text in context field
+		assert.Contains(t, contentStr2, "user authentication requirements with OAuth support")
+
+		// Convert idea without colon (fewer than 5 words)
+		// After converting idea 1 again, original idea 3 becomes idea 1
+		convert3Cmd, err := safeExecCommand(tmpDir, kiraPath, "new", "prd", "todo", "idea", "1")
+		require.NoError(t, err)
+		err = convert3Cmd.Run()
+		require.NoError(t, err)
+
+		// Verify third work item
+		globPattern3 := filepath.Join(tmpDir, ".work", "1_todo", "*.md")
+		files, err = filepath.Glob(globPattern3)
+		require.NoError(t, err)
+		require.Len(t, files, 3)
+
+		// Find the third work item
+		var thirdFile string
+		for _, file := range files {
+			content, err := safeReadTestFile(file, tmpDir)
+			require.NoError(t, err)
+			if strings.Contains(string(content), "fix login bug") {
+				thirdFile = file
+				break
+			}
+		}
+		require.NotEmpty(t, thirdFile)
+
+		workItemContent3, err := safeReadTestFile(thirdFile, tmpDir)
+		require.NoError(t, err)
+		contentStr3 := string(workItemContent3)
+		assert.Contains(t, contentStr3, "title: fix login bug")
 	})
 }

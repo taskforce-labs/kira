@@ -10,31 +10,49 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAddIdea(t *testing.T) {
-	t.Run("adds idea to IDEAS.md", func(t *testing.T) {
+const (
+	ideasHeaderContent = `# Ideas
+
+## List
+
+`
+	ideasHeaderWithOneIdea = `# Ideas
+
+## List
+
+1. [2025-01-01] First idea
+`
+	ideasHeaderWithTwoIdeas = `# Ideas
+
+## List
+
+1. [2025-01-01] First idea
+2. [2025-01-02] Second idea
+`
+)
+
+func TestAddIdeaWithNumber(t *testing.T) {
+	t.Run("adds numbered idea to IDEAS.md", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
 
 		// Create .work directory and IDEAS.md
 		require.NoError(t, os.MkdirAll(".work", 0o700))
-		ideasContent := `# Ideas
-
-## Ideas
-
-`
-		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o600))
+		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderContent), 0o600))
 
 		// Add an idea
-		err := addIdea("Test idea for testing")
+		err := addIdeaWithNumber("Test idea for testing")
 		require.NoError(t, err)
 
 		// Check that the idea was added
 		content, err := os.ReadFile(".work/IDEAS.md")
 		require.NoError(t, err)
 
-		assert.Contains(t, string(content), "Test idea for testing")
-		assert.Contains(t, string(content), "## Ideas")
+		contentStr := string(content)
+		assert.Contains(t, contentStr, "Test idea for testing")
+		assert.Contains(t, contentStr, "## List")
+		assert.Contains(t, contentStr, "1. [")
 	})
 
 	t.Run("adds timestamp to idea", func(t *testing.T) {
@@ -44,16 +62,11 @@ func TestAddIdea(t *testing.T) {
 
 		// Create .work directory and IDEAS.md
 		require.NoError(t, os.MkdirAll(".work", 0o700))
-		ideasContent := `# Ideas
-
-## Ideas
-
-`
-		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o600))
+		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderContent), 0o600))
 
 		// Add an idea
 		beforeTime := time.Now()
-		err := addIdea("Timestamped idea")
+		err := addIdeaWithNumber("Timestamped idea")
 		require.NoError(t, err)
 		afterTime := time.Now()
 
@@ -64,7 +77,7 @@ func TestAddIdea(t *testing.T) {
 		contentStr := string(content)
 		assert.Contains(t, contentStr, "Timestamped idea")
 
-		// Check that timestamp is in the expected format
+		// Check that timestamp is in the expected format (date only)
 		lines := strings.Split(contentStr, "\n")
 		var ideaLine string
 		for _, line := range lines {
@@ -75,7 +88,7 @@ func TestAddIdea(t *testing.T) {
 		}
 
 		assert.NotEmpty(t, ideaLine)
-		assert.Contains(t, ideaLine, "- [")
+		assert.Contains(t, ideaLine, "1. [")
 		assert.Contains(t, ideaLine, "]")
 
 		// Parse timestamp and verify it's within expected range
@@ -83,10 +96,100 @@ func TestAddIdea(t *testing.T) {
 		endIdx := strings.Index(ideaLine, "]")
 		timestampStr := ideaLine[startIdx:endIdx]
 
-		timestamp, err := time.Parse("2006-01-02 15:04:05", timestampStr)
+		_, parseErr := time.Parse("2006-01-02", timestampStr)
+		require.NoError(t, parseErr)
+
+		beforeDate := beforeTime.UTC().Format("2006-01-02")
+		afterDate := afterTime.UTC().Format("2006-01-02")
+		assert.True(t, timestampStr == beforeDate || timestampStr == afterDate)
+	})
+
+	t.Run("numbers ideas sequentially", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Create .work directory and IDEAS.md
+		require.NoError(t, os.MkdirAll(".work", 0o700))
+		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderWithOneIdea), 0o600))
+
+		// Add second idea
+		err := addIdeaWithNumber("Second idea")
 		require.NoError(t, err)
 
-		assert.True(t, timestamp.After(beforeTime.Add(-time.Second)))
-		assert.True(t, timestamp.Before(afterTime.Add(time.Second)))
+		// Check that the idea was numbered correctly
+		content, err := os.ReadFile(".work/IDEAS.md")
+		require.NoError(t, err)
+
+		contentStr := string(content)
+		assert.Contains(t, contentStr, "2. [")
+		assert.Contains(t, contentStr, "Second idea")
+	})
+
+	t.Run("creates IDEAS.md if it doesn't exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Create .work directory but no IDEAS.md
+		require.NoError(t, os.MkdirAll(".work", 0o700))
+
+		// Add an idea
+		err := addIdeaWithNumber("New idea")
+		require.NoError(t, err)
+
+		// Check that IDEAS.md was created
+		content, err := os.ReadFile(".work/IDEAS.md")
+		require.NoError(t, err)
+
+		assert.Contains(t, string(content), "New idea")
+		assert.Contains(t, string(content), "## List")
+	})
+}
+
+func TestListIdeas(t *testing.T) {
+	t.Run("lists ideas with numbers", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Create .work directory and IDEAS.md with ideas
+		require.NoError(t, os.MkdirAll(".work", 0o700))
+		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderWithTwoIdeas), 0o600))
+
+		// This test would need to capture stdout, so we'll test the parsing instead
+		ideasFile, err := parseIdeasFile()
+		require.NoError(t, err)
+
+		assert.Equal(t, 2, len(ideasFile.Ideas))
+		assert.NotNil(t, ideasFile.Ideas[1])
+		assert.NotNil(t, ideasFile.Ideas[2])
+		assert.Equal(t, "First idea", ideasFile.Ideas[1].Text)
+		assert.Equal(t, "Second idea", ideasFile.Ideas[2].Text)
+	})
+
+	t.Run("handles empty IDEAS.md gracefully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Create .work directory and empty IDEAS.md
+		require.NoError(t, os.MkdirAll(".work", 0o700))
+		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderContent), 0o600))
+
+		err := listIdeas()
+		require.NoError(t, err)
+	})
+
+	t.Run("handles missing IDEAS.md gracefully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Create .work directory but no IDEAS.md
+		require.NoError(t, os.MkdirAll(".work", 0o700))
+
+		err := listIdeas()
+		require.NoError(t, err)
 	})
 }

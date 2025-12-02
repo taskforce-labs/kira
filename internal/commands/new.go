@@ -52,6 +52,11 @@ func createWorkItem(cfg *config.Config, args []string, interactive bool, inputVa
 		return err
 	}
 
+	// Check if converting an idea
+	if parsedArgs.ideaNumber > 0 {
+		return convertIdeaToWorkItem(cfg, parsedArgs.ideaNumber, parsedArgs.template, parsedArgs.status, interactive, inputValues, helpInputs)
+	}
+
 	template, err := resolveTemplate(cfg, parsedArgs.template, helpInputs)
 	if err != nil {
 		return err
@@ -89,17 +94,62 @@ type workItemArgs struct {
 	title       string
 	status      string
 	description string
+	ideaNumber  int // If > 0, indicates converting an idea
+}
+
+// parseIdeaArgs handles parsing when "idea" keyword is found
+func parseIdeaArgs(args []string, ideaIndex int, statusSet map[string]struct{}) (workItemArgs, error) {
+	var result workItemArgs
+
+	// Found "idea" keyword - next arg should be idea number
+	if ideaIndex+1 >= len(args) {
+		return result, fmt.Errorf("idea number required after 'idea' keyword")
+	}
+
+	ideaNumberStr := args[ideaIndex+1]
+	ideaNumber, err := strconv.Atoi(ideaNumberStr)
+	if err != nil || ideaNumber < 1 || ideaNumber > 999999 {
+		return result, fmt.Errorf("invalid idea number: %s", ideaNumberStr)
+	}
+
+	result.ideaNumber = ideaNumber
+
+	// Parse template and status from args before "idea"
+	if ideaIndex > 0 {
+		result.template = args[0]
+	}
+	if ideaIndex > 1 {
+		if _, ok := statusSet[args[1]]; ok {
+			result.status = args[1]
+		}
+	}
+
+	return result, nil
 }
 
 func parseWorkItemArgs(cfg *config.Config, args []string) (workItemArgs, error) {
 	var result workItemArgs
 
+	statusSet := buildStatusSet(cfg)
+	validStatuses := buildValidStatuses(cfg)
+
+	// Check for "idea" keyword
+	ideaIndex := -1
+	for i, arg := range args {
+		if arg == "idea" {
+			ideaIndex = i
+			break
+		}
+	}
+
+	if ideaIndex != -1 {
+		return parseIdeaArgs(args, ideaIndex, statusSet)
+	}
+
+	// No "idea" keyword - parse normally
 	if len(args) > 0 {
 		result.template = args[0]
 	}
-
-	statusSet := buildStatusSet(cfg)
-	validStatuses := buildValidStatuses(cfg)
 
 	if len(args) > 1 {
 		if _, ok := statusSet[args[1]]; ok {
@@ -192,6 +242,9 @@ func collectInputs(cfg *config.Config, template, nextID, title, status, descript
 	inputs["created"] = time.Now().Format("2006-01-02")
 
 	if description != "" {
+		if inputValues == nil {
+			inputValues = make(map[string]string)
+		}
 		if _, exists := inputValues["description"]; !exists {
 			inputValues["description"] = description
 		}
@@ -389,4 +442,67 @@ func kebabCase(s string) string {
 	s = strings.ReplaceAll(s, " ", "-")
 	s = strings.ReplaceAll(s, "_", "-")
 	return s
+}
+
+// convertIdeaToWorkItem converts an idea to a work item
+func convertIdeaToWorkItem(cfg *config.Config, ideaNumber int, template, status string, interactive bool, inputValues map[string]string, helpInputs bool) error {
+	// Get the idea by number
+	idea, err := getIdeaByNumber(ideaNumber)
+	if err != nil {
+		return err
+	}
+
+	// Parse title and description from idea text
+	parsed := parseIdeaTitleDescription(idea.Text)
+	title := parsed.Title
+	description := parsed.Description
+
+	// Resolve template (prompt if needed)
+	resolvedTemplate, err := resolveTemplate(cfg, template, helpInputs)
+	if err != nil {
+		return err
+	}
+
+	if helpInputs {
+		return showTemplateInputs(cfg, resolvedTemplate)
+	}
+
+	// Resolve status (use default if not provided)
+	resolvedStatus, err := resolveStatus(cfg, status)
+	if err != nil {
+		return err
+	}
+
+	// Get next work item ID
+	nextID, err := validation.GetNextID()
+	if err != nil {
+		return fmt.Errorf("failed to get next ID: %w", err)
+	}
+
+	// Collect inputs for template
+	// Map description to context for PRD templates (default template uses context, not description)
+	if inputValues == nil {
+		inputValues = make(map[string]string)
+	}
+	if description != "" && inputValues["context"] == "" {
+		inputValues["context"] = description
+	}
+	inputs, err := collectInputs(cfg, resolvedTemplate, nextID, title, resolvedStatus, description, inputValues, interactive)
+	if err != nil {
+		return err
+	}
+
+	// Create the work item file
+	if err := writeWorkItemFile(cfg, resolvedTemplate, nextID, title, resolvedStatus, inputs); err != nil {
+		return fmt.Errorf("failed to create work item: %w", err)
+	}
+
+	// Remove idea from IDEAS.md and renumber remaining ideas
+	if err := removeIdeaByNumber(ideaNumber); err != nil {
+		// Log warning but don't fail - work item was created successfully
+		fmt.Printf("Warning: Work item created but failed to remove idea %d: %v\n", ideaNumber, err)
+		return nil
+	}
+
+	return nil
 }

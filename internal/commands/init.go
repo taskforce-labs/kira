@@ -74,7 +74,7 @@ func initializeWorkspace(targetDir string) error {
 This file is for capturing quick ideas and thoughts that don't fit into formal work items yet.
 
 ## How to use
-- Add ideas with timestamps using ` + "`kira idea \"your idea here\"`" + `
+- Add ideas with timestamps using ` + "`kira idea add \"your idea here\"`" + `
 - Or manually add entries below
 
 ## List

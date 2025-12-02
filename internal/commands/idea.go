@@ -3,17 +3,22 @@ package commands
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 )
 
 var ideaCmd = &cobra.Command{
-	Use:   "idea <description>",
+	Use:   "idea",
+	Short: "Manage ideas in IDEAS.md",
+	Long:  `Adds ideas with timestamps to IDEAS.md or lists existing ideas.`,
+}
+
+var ideaAddCmd = &cobra.Command{
+	Use:   "add <description>",
 	Short: "Add an idea to IDEAS.md",
-	Long:  `Adds an idea with a timestamp to the IDEAS.md file.`,
+	Long:  `Adds an idea with a timestamp to the IDEAS.md file in numbered format.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(_ *cobra.Command, args []string) error {
 		if err := checkWorkDir(); err != nil {
@@ -21,31 +26,150 @@ var ideaCmd = &cobra.Command{
 		}
 
 		description := args[0]
-		return addIdea(description)
+		return addIdeaWithNumber(description)
 	},
 }
 
-func addIdea(description string) error {
-	ideasPath := filepath.Join(".work", "IDEAS.md")
+var ideaListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all ideas",
+	Long:  `Lists all ideas from IDEAS.md with their numbers and timestamps.`,
+	Args:  cobra.NoArgs,
+	RunE: func(_ *cobra.Command, _ []string) error {
+		if err := checkWorkDir(); err != nil {
+			return err
+		}
 
-	// Read existing content
-	content, err := safeReadFile(ideasPath)
+		return listIdeas()
+	},
+}
+
+func init() {
+	ideaCmd.AddCommand(ideaAddCmd)
+	ideaCmd.AddCommand(ideaListCmd)
+	// Support legacy "idea <description>" syntax
+	ideaCmd.RunE = func(_ *cobra.Command, args []string) error {
+		if err := checkWorkDir(); err != nil {
+			return err
+		}
+		if len(args) == 0 {
+			return ideaCmd.Help()
+		}
+		return addIdeaWithNumber(args[0])
+	}
+	ideaCmd.Args = cobra.MaximumNArgs(1)
+}
+
+func addIdeaWithNumber(description string) error {
+	// Parse existing file or create new structure
+	ideasFile, err := parseIdeasFile()
 	if err != nil {
-		return fmt.Errorf("failed to read IDEAS.md: %w", err)
+		// If file doesn't exist, create basic structure
+		if strings.Contains(err.Error(), "not found") {
+			ideasFile = &IdeasFile{
+				BeforeIdeas: `# Ideas
+
+This file is for capturing quick ideas and thoughts that don't fit into formal work items yet.
+
+## How to use
+- Add ideas with timestamps using ` + "`kira idea add \"your idea here\"`" + `
+- Or manually add entries below
+
+`,
+				Ideas:      make(map[int]*Idea),
+				IdeaLines:  make(map[int]int),
+				Lines:      []string{},
+				AfterIdeas: "",
+			}
+		} else {
+			return err
+		}
 	}
 
-	// Append new idea with timestamp (UTC for deterministic tests)
-	timestamp := time.Now().UTC().Format("2006-01-02 15:04:05")
-	newIdea := fmt.Sprintf("- [%s] %s\n", timestamp, description)
+	// Fill gaps in numbering before adding new idea
+	if len(ideasFile.Ideas) > 0 {
+		if err := fillGapsInIdeas(ideasFile); err != nil {
+			return fmt.Errorf("failed to fill gaps in ideas: %w", err)
+		}
+		// Write back to file after renumbering
+		if err := writeIdeasFile(ideasFile); err != nil {
+			return fmt.Errorf("failed to write IDEAS.md after renumbering: %w", err)
+		}
+		// Re-parse to get updated structure
+		ideasFile, err = parseIdeasFile()
+		if err != nil {
+			return fmt.Errorf("failed to re-parse IDEAS.md: %w", err)
+		}
+	}
 
-	// Append to content
-	newContent := string(content) + newIdea
+	// Get next idea number (after gaps are filled)
+	nextNumber, err := getNextIdeaNumber()
+	if err != nil {
+		return fmt.Errorf("failed to get next idea number: %w", err)
+	}
+
+	// Create new idea with date format (not datetime)
+	timestamp := time.Now().UTC().Format("2006-01-02")
+	newIdea := &Idea{
+		Number:    nextNumber,
+		Timestamp: timestamp,
+		Text:      description,
+		LineIndex: len(ideasFile.Lines), // Will be updated when written
+	}
+
+	// Add to ideas map
+	ideasFile.Ideas[nextNumber] = newIdea
 
 	// Write back to file
-	if err := os.WriteFile(ideasPath, []byte(newContent), 0o600); err != nil {
+	if err := writeIdeasFile(ideasFile); err != nil {
 		return fmt.Errorf("failed to write IDEAS.md: %w", err)
 	}
 
-	fmt.Printf("Added idea: %s\n", description)
+	fmt.Printf("Added idea %d: %s\n", nextNumber, description)
+	return nil
+}
+
+func listIdeas() error {
+	ideasFile, err := parseIdeasFile()
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			fmt.Println("No ideas found.")
+			return nil
+		}
+		if strings.Contains(err.Error(), "No ideas found") {
+			fmt.Println("No ideas found.")
+			return nil
+		}
+		return err
+	}
+
+	if len(ideasFile.Ideas) == 0 {
+		fmt.Println("No ideas found.")
+		return nil
+	}
+
+	// Collect and sort idea numbers
+	ideaNumbers := make([]int, 0, len(ideasFile.Ideas))
+	for number := range ideasFile.Ideas {
+		ideaNumbers = append(ideaNumbers, number)
+	}
+
+	// Sort idea numbers
+	for i := 1; i < len(ideaNumbers); i++ {
+		key := ideaNumbers[i]
+		j := i - 1
+		for j >= 0 && ideaNumbers[j] > key {
+			ideaNumbers[j+1] = ideaNumbers[j]
+			j--
+		}
+		ideaNumbers[j+1] = key
+	}
+
+	// Display ideas
+	for _, number := range ideaNumbers {
+		idea := ideasFile.Ideas[number]
+		fmt.Printf("%d. [%s] %s\n", idea.Number, idea.Timestamp, idea.Text)
+	}
+
 	return nil
 }
