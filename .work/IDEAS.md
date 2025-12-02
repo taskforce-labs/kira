@@ -6,7 +6,7 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 - Add ideas with timestamps using `kira idea "your idea here"`
 - Or manually add entries below
 
-## Ideas
+## List
 1. [2025-10-11] Local webserver to give non-technical folk a GUI to visualize the state of the system and make changes.
 2. [2025-10-11] Kira should be able to create a static read only version of the GUI that can be hosted on github pages, s3, gitlab pages, etc.
 3. [2025-10-11] Kira should have commands that make it easy to include as git submodules in other projects.
@@ -20,7 +20,6 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 11. [2025-11-29] Command to split a work item into smaller work items.
 12. [2025-11-29] Command to bulk update work items that match a pattern.
 13. [2025-11-29] A game where you get to shoot kaju with an army of robots from the cli
-14. [2025-11-29] Commit flag for move command: Add a commit flag to the move command so that the work item is committed to git when moved.
-15. [2025-11-29] Use git email to automatically assign work items to the current user.
-16. [2025-11-29] List email addresses of all users from the git history and associate them a number that can be used to assign work items to the correct user. (these number will be in order of first commit to the repo so new users will have a higher number than existing users) kira config should allow for users to be ignored.
-17. [2025-11-30] kaiju easter egg: a hidden command that will show an ascii art kaiju
+14. [2025-11-29] Use git email to automatically assign work items to the current user.
+15. [2025-11-29] List email addresses of all users from the git history and associate them a number that can be used to assign work items to the correct user. (these number will be in order of first commit to the repo so new users will have a higher number than existing users) kira config should allow for users to be ignored.
+16. [2025-11-30] kaiju easter egg: a hidden command that will show an ascii art kaiju
