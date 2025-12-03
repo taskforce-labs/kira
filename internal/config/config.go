@@ -30,7 +30,9 @@ type ValidationConfig struct {
 
 // CommitConfig contains git commit settings.
 type CommitConfig struct {
-	DefaultMessage string `yaml:"default_message"`
+	DefaultMessage      string `yaml:"default_message"`
+	MoveSubjectTemplate string `yaml:"move_subject_template"`
+	MoveBodyTemplate    string `yaml:"move_body_template"`
 }
 
 // ReleaseConfig contains release-related settings.
@@ -63,7 +65,9 @@ var DefaultConfig = Config{
 		StatusValues:   []string{"backlog", "todo", "doing", "review", "done", "released", "abandoned", "archived"},
 	},
 	Commit: CommitConfig{
-		DefaultMessage: "Update work items",
+		DefaultMessage:      "Update work items",
+		MoveSubjectTemplate: "Move {type} {id} to {target_status}",
+		MoveBodyTemplate:    "{title} ({current_status} -> {target_status})",
 	},
 	Release: ReleaseConfig{
 		ReleasesFile:      "RELEASES.md",
@@ -108,6 +112,18 @@ func LoadConfig() (*Config, error) {
 	return &config, nil
 }
 
+func mergeCommitDefaults(commit *CommitConfig) {
+	if commit.DefaultMessage == "" {
+		commit.DefaultMessage = DefaultConfig.Commit.DefaultMessage
+	}
+	if commit.MoveSubjectTemplate == "" {
+		commit.MoveSubjectTemplate = DefaultConfig.Commit.MoveSubjectTemplate
+	}
+	if commit.MoveBodyTemplate == "" {
+		commit.MoveBodyTemplate = DefaultConfig.Commit.MoveBodyTemplate
+	}
+}
+
 func mergeWithDefaults(config *Config) {
 	if config.Templates == nil {
 		config.Templates = make(map[string]string)
@@ -137,9 +153,7 @@ func mergeWithDefaults(config *Config) {
 		config.Validation.StatusValues = DefaultConfig.Validation.StatusValues
 	}
 
-	if config.Commit.DefaultMessage == "" {
-		config.Commit.DefaultMessage = DefaultConfig.Commit.DefaultMessage
-	}
+	mergeCommitDefaults(&config.Commit)
 
 	if config.Release.ReleasesFile == "" {
 		config.Release.ReleasesFile = DefaultConfig.Release.ReleasesFile

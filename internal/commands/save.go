@@ -171,7 +171,9 @@ func sanitizeCommitMessage(msg string) (string, error) {
 	}
 
 	// Check for shell metacharacters that could be dangerous
-	dangerous := []string{"`", "$", "(", ")", "{", "}", "[", "]", "|", "&", ";", "<", ">"}
+	// Note: parentheses () and angle brackets <> are allowed as they're safe in commit messages
+	// and needed for status transitions (e.g., "todo -> doing")
+	dangerous := []string{"`", "$", "{", "}", "[", "]", "|", "&", ";"}
 	for _, char := range dangerous {
 		if strings.Contains(msg, char) {
 			return "", fmt.Errorf("commit message contains invalid character: %s", char)

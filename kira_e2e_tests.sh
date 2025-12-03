@@ -370,6 +370,75 @@ else
   exit 1
 fi
 
+# Test 15: move command with --commit flag
+echo ""
+echo "🧪 Test 15: move command with --commit flag"
+"$KIRA_BIN" init --force > /dev/null
+git init > /dev/null 2>&1
+git config user.email test@example.com
+git config user.name "Test User"
+git add .
+git commit -m "init" > /dev/null 2>&1
+# Create a work item in todo
+cat > .work/1_todo/002-move-commit-test.prd.md << 'EOF'
+---
+id: 002
+title: Move Commit Test
+status: todo
+kind: prd
+created: 2024-01-01
+---
+
+# Move Commit Test
+EOF
+git add .work/1_todo/002-move-commit-test.prd.md
+git commit -m "Add work item" > /dev/null 2>&1
+# Move with --commit flag
+if "$KIRA_BIN" move 002 doing -c; then
+  # Verify file was moved
+  if [ -f ".work/2_doing/002-move-commit-test.prd.md" ] && [ ! -f ".work/1_todo/002-move-commit-test.prd.md" ]; then
+    echo "✅ Work item moved successfully"
+  else
+    echo "❌ Work item move failed"
+    exit 1
+  fi
+  # Verify commit was created
+  COMMIT_MSG=$(git log -1 --pretty=%B)
+  if echo "$COMMIT_MSG" | grep -q "Move prd 002 to doing"; then
+    echo "✅ Commit message subject correct"
+  else
+    echo "❌ Commit message subject incorrect: $COMMIT_MSG"
+    exit 1
+  fi
+  if echo "$COMMIT_MSG" | grep -q "Move Commit Test (todo -> doing)"; then
+    echo "✅ Commit message body correct"
+  else
+    echo "❌ Commit message body incorrect: $COMMIT_MSG"
+    exit 1
+  fi
+  # Verify commit includes both deletion and addition
+  COMMIT_FILES=$(git show --name-status --pretty=format: HEAD | grep -E "^(A|D|R)" | grep "002-move-commit-test")
+  if echo "$COMMIT_FILES" | grep -q "\.work/1_todo/002-move-commit-test.prd.md" && \
+     echo "$COMMIT_FILES" | grep -q "\.work/2_doing/002-move-commit-test.prd.md"; then
+    echo "✅ Commit includes both deletion and addition"
+  else
+    echo "❌ Commit does not include both changes"
+    echo "Commit files:"
+    git show --name-status HEAD | grep "002-move-commit-test"
+    exit 1
+  fi
+  # Verify status was updated in file
+  if grep -q "^status: doing$" .work/2_doing/002-move-commit-test.prd.md; then
+    echo "✅ Status updated in file"
+  else
+    echo "❌ Status not updated in file"
+    exit 1
+  fi
+else
+  echo "❌ kira move --commit failed"
+  exit 1
+fi
+
 # Cleanup
 echo ""
 if [ "$KEEP" -eq 1 ] || [ "${KEEP_TEST_DIR:-0}" -ne 0 ]; then
@@ -396,6 +465,7 @@ echo "  ✅ Lint validation"
 echo "  ✅ Doctor check"
 echo "  ✅ Work item movement"
 echo "  ✅ Help system"
+echo "  ✅ Move with commit flag"
 echo ""
 echo "🚀 Kira is ready for use!"
 
