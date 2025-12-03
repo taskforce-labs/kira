@@ -1,7 +1,7 @@
 ---
 id: 006
 title: convert ideas into work items
-status: doing
+status: done
 kind: prd
 assigned:
 estimate: 0
