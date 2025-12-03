@@ -1,7 +1,7 @@
 ---
 id: 007
 title: Commit flag for move command
-status: todo
+status: review
 kind: prd
 assigned:
 estimate: 0
