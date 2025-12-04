@@ -21,5 +21,4 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 12. [2025-11-29] Command to bulk update work items that match a pattern.
 13. [2025-11-29] A game where you get to shoot kaju with an army of robots from the cli
 14. [2025-11-29] Use git email to automatically assign work items to the current user.
-15. [2025-11-29] List email addresses of all users from the git history and associate them a number that can be used to assign work items to the correct user. (these number will be in order of first commit to the repo so new users will have a higher number than existing users) kira config should allow for users to be ignored.
-16. [2025-11-30] kaiju easter egg: a hidden command that will show an ascii art kaiju
+15. [2025-11-30] kaiju easter egg: a hidden command that will show an ascii art kaiju
