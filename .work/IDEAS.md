@@ -22,4 +22,4 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 13. [2025-11-29] A game where you get to shoot kaju with an army of robots from the cli
 14. [2025-11-29] Use git email to automatically assign work items to the current user.
 15. [2025-11-30] kaiju easter egg: a hidden command that will show an ascii art kaiju
-16. [2025-12-04] start work: creates a worktree of main/master with work-item title, creates a branch of work-item, created a draft PR  and opens the IDE
+16. [2025-12-05] launch agent: command that will a launch an agent to pick up a work item
