@@ -23,3 +23,5 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 14. [2025-11-29] Use git email to automatically assign work items to the current user.
 15. [2025-11-30] kaiju easter egg: a hidden command that will show an ascii art kaiju
 16. [2025-12-05] launch agent: command that will a launch an agent to pick up a work item
+17. [2025-12-08] mcp process: runs a local mcp server in a single process that knows about all the kira based projects
+18. [2025-12-08] Learn cli from gui: whenever a user interacts with the gui show the cli commands along the bottom of the screen
