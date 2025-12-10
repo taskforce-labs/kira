@@ -25,3 +25,6 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 16. [2025-12-05] launch agent: command that will a launch an agent to pick up a work item
 17. [2025-12-08] mcp process: runs a local mcp server in a single process that knows about all the kira based projects
 18. [2025-12-08] Learn cli from gui: whenever a user interacts with the gui show the cli commands along the bottom of the screen
+19. [2025-12-08] extract relevant context: a way to help LLMs get the relevant context about architecture for polyrepos codebases or large repos - some of the structure in kira.yml could be used to help LLMs get the relevant context - combined with cli access to ai clis
+20. [2025-12-08] kira env branching: when kira work creates worktrees and branches the env files a treated so that multiple instances of the project can run locally
+21. [2025-12-10] kira review: this would create a worktree, checkout the branch of a PR so the reviewer can run locally
