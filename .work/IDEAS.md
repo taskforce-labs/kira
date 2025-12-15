@@ -28,3 +28,4 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 19. [2025-12-08] extract relevant context: a way to help LLMs get the relevant context about architecture for polyrepos codebases or large repos - some of the structure in kira.yml could be used to help LLMs get the relevant context - combined with cli access to ai clis
 20. [2025-12-08] kira env branching: when kira work creates worktrees and branches the env files a treated so that multiple instances of the project can run locally
 21. [2025-12-10] kira review: this would create a worktree, checkout the branch of a PR so the reviewer can run locally
+22. [2025-12-14] kira review context: an ability to include context history into the reivew - helpful when working with agents
