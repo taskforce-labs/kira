@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -185,4 +188,78 @@ func archiveWorkItems(workItems []string, sourcePath string) (string, error) {
 	}
 
 	return archiveDir, nil
+}
+
+// formatCommandPreview formats a command for dry-run output
+func formatCommandPreview(name string, args []string) string {
+	if len(args) == 0 {
+		return fmt.Sprintf("[DRY RUN] %s", name)
+	}
+	return fmt.Sprintf("[DRY RUN] %s %s", name, strings.Join(args, " "))
+}
+
+// executeCommand executes a command with context and optional dry-run support.
+// If dryRun is true, it prints what would be executed and returns empty string and nil.
+// If dryRun is false, it executes the command and returns stdout output.
+// If dir is non-empty, the command is executed in that directory.
+// Errors include stderr output for debugging.
+func executeCommand(ctx context.Context, name string, args []string, dir string, dryRun bool) (string, error) {
+	if dryRun {
+		preview := formatCommandPreview(name, args)
+		if dir != "" {
+			preview = fmt.Sprintf("%s (in %s)", preview, dir)
+		}
+		fmt.Println(preview)
+		return "", nil
+	}
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		stderrStr := strings.TrimSpace(stderr.String())
+		if stderrStr != "" {
+			return "", fmt.Errorf("%w: %s", err, stderrStr)
+		}
+		return "", err
+	}
+
+	return stdout.String(), nil
+}
+
+// executeCommandCombinedOutput executes a command and returns combined stdout+stderr.
+// This is useful for commands where you need to see all output regardless of success/failure.
+// If dryRun is true, it prints what would be executed and returns empty string and nil.
+func executeCommandCombinedOutput(ctx context.Context, name string, args []string, dir string, dryRun bool) (string, error) {
+	if dryRun {
+		preview := formatCommandPreview(name, args)
+		if dir != "" {
+			preview = fmt.Sprintf("%s (in %s)", preview, dir)
+		}
+		fmt.Println(preview)
+		return "", nil
+	}
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outputStr := strings.TrimSpace(string(output))
+		if outputStr != "" {
+			return "", fmt.Errorf("%w: %s", err, outputStr)
+		}
+		return "", err
+	}
+
+	return string(output), nil
 }

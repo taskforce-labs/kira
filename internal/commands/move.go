@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -40,12 +39,14 @@ var moveCmd = &cobra.Command{
 		}
 
 		commitFlag, _ := cmd.Flags().GetBool("commit")
-		return moveWorkItem(cfg, workItemID, targetStatus, commitFlag)
+		dryRunFlag, _ := cmd.Flags().GetBool("dry-run")
+		return moveWorkItem(cfg, workItemID, targetStatus, commitFlag, dryRunFlag)
 	},
 }
 
 func init() {
 	moveCmd.Flags().BoolP("commit", "c", false, "Commit the move to git")
+	moveCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
 }
 
 const unknownValue = "unknown"
@@ -148,18 +149,18 @@ func buildCommitMessage(cfg *config.Config, workItemType, id, title, currentStat
 }
 
 // checkStagedChanges checks if there are any staged changes excluding specified paths
+// Note: This function always executes git commands even in dry-run mode because it's a read-only check
 func checkStagedChanges(excludePaths []string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--name-only")
-	output, err := cmd.Output()
+	output, err := executeCommand(ctx, "git", []string{"diff", "--cached", "--name-only"}, "", false)
 	if err != nil {
 		// If git is not available or not a git repo, return error
 		return false, fmt.Errorf("git is not available or not a git repository")
 	}
 
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(output, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -184,12 +185,10 @@ func checkStagedChanges(excludePaths []string) (bool, error) {
 	return false, nil
 }
 
-// commitMove stages the moved files and commits with sanitized message
-func commitMove(oldPath, newPath, subject, body string) error {
-	// Check for staged changes excluding moved file paths
-	hasOtherStaged, err := checkStagedChanges([]string{oldPath, newPath})
+// validateStagedChanges checks for staged changes and returns an error if conditions aren't met
+func validateStagedChanges(excludePaths []string) error {
+	hasOtherStaged, err := checkStagedChanges(excludePaths)
 	if err != nil {
-		// Check if error is about git not being available
 		if strings.Contains(err.Error(), "git is not available") {
 			return fmt.Errorf("git is not available. Install git to use --commit flag")
 		}
@@ -198,30 +197,44 @@ func commitMove(oldPath, newPath, subject, body string) error {
 		}
 		return fmt.Errorf("failed to check staged changes: %w", err)
 	}
-
 	if hasOtherStaged {
 		return fmt.Errorf("other files are already staged. Commit or unstage them before using --commit flag, or use 'kira save' to commit all changes together")
 	}
+	return nil
+}
 
-	// Stage both old file deletion and new file addition
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
+// stageFileChanges stages the old file deletion and new file addition for a move
+func stageFileChanges(ctx context.Context, oldPath, newPath string, dryRun bool) error {
 	// Stage the old file deletion first using git rm --cached
-	// This properly stages the deletion even if the file no longer exists
-	cmd := exec.CommandContext(ctx, "git", "rm", "--cached", oldPath)
-	if err := cmd.Run(); err != nil {
+	_, cmdErr := executeCommand(ctx, "git", []string{"rm", "--cached", oldPath}, "", dryRun)
+	if cmdErr != nil && !dryRun {
 		// If git rm fails (file wasn't tracked), try git add -u to stage deletions
 		oldDir := filepath.Dir(oldPath)
-		// #nosec G204 - oldDir is derived from validated file path, safe to use
-		cmd = exec.CommandContext(ctx, "git", "add", "-u", oldDir)
-		_ = cmd.Run() // If that also fails, the file might not have been tracked - proceed anyway
+		_, _ = executeCommand(ctx, "git", []string{"add", "-u", oldDir}, "", dryRun)
 	}
 
 	// Stage the new file addition
-	cmd = exec.CommandContext(ctx, "git", "add", newPath)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to stage changes: %w", err)
+	_, cmdErr = executeCommand(ctx, "git", []string{"add", newPath}, "", dryRun)
+	if cmdErr != nil && !dryRun {
+		return fmt.Errorf("failed to stage changes: %w", cmdErr)
+	}
+	return nil
+}
+
+// commitMove stages the moved files and commits with sanitized message
+func commitMove(oldPath, newPath, subject, body string, dryRun bool) error {
+	// Skip staged changes check in dry-run mode (it requires a git repo)
+	if !dryRun {
+		if err := validateStagedChanges([]string{oldPath, newPath}); err != nil {
+			return err
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := stageFileChanges(ctx, oldPath, newPath, dryRun); err != nil {
+		return err
 	}
 
 	// Sanitize subject and body separately
@@ -242,24 +255,52 @@ func commitMove(oldPath, newPath, subject, body string) error {
 	commitCtx, commitCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer commitCancel()
 
-	var commitCmd *exec.Cmd
+	var commitArgs []string
 	if sanitizedBody != "" {
-		// #nosec G204 - sanitized messages have been validated and sanitized by sanitizeCommitMessage
-		commitCmd = exec.CommandContext(commitCtx, "git", "commit", "-m", sanitizedSubject, "-m", sanitizedBody)
+		commitArgs = []string{"commit", "-m", sanitizedSubject, "-m", sanitizedBody}
 	} else {
-		// #nosec G204 - sanitized message has been validated and sanitized by sanitizeCommitMessage
-		commitCmd = exec.CommandContext(commitCtx, "git", "commit", "-m", sanitizedSubject)
+		commitArgs = []string{"commit", "-m", sanitizedSubject}
 	}
 
-	output, err := commitCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to commit: %s: %w", string(output), err)
+	_, err = executeCommandCombinedOutput(commitCtx, "git", commitArgs, "", dryRun)
+	if err != nil && !dryRun {
+		return fmt.Errorf("failed to commit: %w", err)
 	}
 
 	return nil
 }
 
-func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFlag bool) error {
+// moveWorkItemDryRun shows what would happen without making changes
+func moveWorkItemDryRun(cfg *config.Config, workItemPath, targetPath, targetStatus string, commitFlag bool, metadata workItemMetadata) error {
+	fmt.Println("[DRY RUN] Would perform the following operations:")
+	fmt.Printf("[DRY RUN] Move file: %s -> %s\n", workItemPath, targetPath)
+	fmt.Printf("[DRY RUN] Update status field: %s -> %s\n", metadata.currentStatus, targetStatus)
+
+	if !commitFlag {
+		return nil
+	}
+
+	subject, body, err := buildCommitMessage(cfg, metadata.workItemType, metadata.id, metadata.title, metadata.currentStatus, targetStatus)
+	if err != nil {
+		return fmt.Errorf("failed to build commit message: %w", err)
+	}
+	fmt.Printf("[DRY RUN] Commit message subject: %s\n", subject)
+	if body != "" {
+		fmt.Printf("[DRY RUN] Commit message body: %s\n", body)
+	}
+	// Show git commands that would be executed
+	return commitMove(workItemPath, targetPath, subject, body, true)
+}
+
+// workItemMetadata holds extracted metadata from a work item file
+type workItemMetadata struct {
+	workItemType  string
+	id            string
+	title         string
+	currentStatus string
+}
+
+func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFlag, dryRun bool) error {
 	// Find the work item file
 	workItemPath, err := findWorkItemFile(workItemID)
 	if err != nil {
@@ -267,9 +308,9 @@ func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFla
 	}
 
 	// Extract metadata BEFORE moving (to get current status)
-	var workItemType, id, title, currentStatus string
-	if commitFlag {
-		workItemType, id, title, currentStatus, err = extractWorkItemMetadata(workItemPath)
+	var metadata workItemMetadata
+	if commitFlag || dryRun {
+		metadata.workItemType, metadata.id, metadata.title, metadata.currentStatus, err = extractWorkItemMetadata(workItemPath)
 		if err != nil {
 			return fmt.Errorf("failed to extract work item metadata: %w", err)
 		}
@@ -277,7 +318,9 @@ func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFla
 
 	// Get target status if not provided
 	if targetStatus == "" {
-		var err error
+		if dryRun {
+			return fmt.Errorf("target status must be provided when using --dry-run")
+		}
 		targetStatus, err = selectTargetStatus(cfg)
 		if err != nil {
 			return err
@@ -291,11 +334,18 @@ func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFla
 
 	// Get target folder path
 	targetFolder := filepath.Join(".work", cfg.StatusFolders[targetStatus])
-
-	// Move the file
 	filename := filepath.Base(workItemPath)
 	targetPath := filepath.Join(targetFolder, filename)
 
+	if dryRun {
+		return moveWorkItemDryRun(cfg, workItemPath, targetPath, targetStatus, commitFlag, metadata)
+	}
+
+	return executeMoveWorkItem(cfg, workItemID, workItemPath, targetPath, targetStatus, commitFlag, metadata)
+}
+
+// executeMoveWorkItem performs the actual move operation
+func executeMoveWorkItem(cfg *config.Config, workItemID, workItemPath, targetPath, targetStatus string, commitFlag bool, metadata workItemMetadata) error {
 	if err := os.Rename(workItemPath, targetPath); err != nil {
 		return fmt.Errorf("failed to move work item: %w", err)
 	}
@@ -305,27 +355,24 @@ func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFla
 		return fmt.Errorf("failed to update work item status: %w", err)
 	}
 
-	// Commit if flag is set
-	if commitFlag {
-		// Build commit message
-		subject, body, err := buildCommitMessage(cfg, workItemType, id, title, currentStatus, targetStatus)
-		if err != nil {
-			fmt.Printf("Moved work item %s to %s\n", workItemID, targetStatus)
-			return fmt.Errorf("failed to build commit message: %w", err)
-		}
-
-		// Commit the move
-		// Note: workItemPath is the old path (before move), targetPath is the new path (after move)
-		if err := commitMove(workItemPath, targetPath, subject, body); err != nil {
-			fmt.Printf("Moved work item %s to %s\n", workItemID, targetStatus)
-			return fmt.Errorf("failed to commit move: %w", err)
-		}
-
-		fmt.Printf("Moved work item %s to %s and committed\n", workItemID, targetStatus)
+	if !commitFlag {
+		fmt.Printf("Moved work item %s to %s\n", workItemID, targetStatus)
 		return nil
 	}
 
-	fmt.Printf("Moved work item %s to %s\n", workItemID, targetStatus)
+	// Build and execute commit
+	subject, body, err := buildCommitMessage(cfg, metadata.workItemType, metadata.id, metadata.title, metadata.currentStatus, targetStatus)
+	if err != nil {
+		fmt.Printf("Moved work item %s to %s\n", workItemID, targetStatus)
+		return fmt.Errorf("failed to build commit message: %w", err)
+	}
+
+	if err := commitMove(workItemPath, targetPath, subject, body, false); err != nil {
+		fmt.Printf("Moved work item %s to %s\n", workItemID, targetStatus)
+		return fmt.Errorf("failed to commit move: %w", err)
+	}
+
+	fmt.Printf("Moved work item %s to %s and committed\n", workItemID, targetStatus)
 	return nil
 }
 

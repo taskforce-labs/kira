@@ -1,9 +1,12 @@
 package commands
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,19 +21,9 @@ func TestFindWorkItemFile(t *testing.T) {
 		// Create .work directory structure
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
-		// Create a work item file
-		workItemContent := `---
-id: 001
-title: Test Feature
-status: todo
-kind: prd
-created: 2024-01-01
----
-
-# Test Feature
-`
+		// Create a work item file (using testWorkItemContent constant from move_test.go)
 		filePath := ".work/1_todo/001-test-feature.prd.md"
-		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+		require.NoError(t, os.WriteFile(filePath, []byte(testWorkItemContent), 0o600))
 
 		// Find the work item
 		foundPath, err := findWorkItemFile("001")
@@ -174,5 +167,155 @@ title: Test Feature 2
 		content2, err := safeReadFile(archivedFile2)
 		require.NoError(t, err)
 		assert.Contains(t, string(content2), "Test Feature 2")
+	})
+}
+
+func TestFormatCommandPreview(t *testing.T) {
+	t.Run("formats command with no args", func(t *testing.T) {
+		result := formatCommandPreview("git", []string{})
+		assert.Equal(t, "[DRY RUN] git", result)
+	})
+
+	t.Run("formats command with single arg", func(t *testing.T) {
+		result := formatCommandPreview("git", []string{"status"})
+		assert.Equal(t, "[DRY RUN] git status", result)
+	})
+
+	t.Run("formats command with multiple args", func(t *testing.T) {
+		result := formatCommandPreview("git", []string{"commit", "-m", "test message"})
+		assert.Equal(t, "[DRY RUN] git commit -m test message", result)
+	})
+}
+
+func TestExecuteCommand(t *testing.T) {
+	t.Run("dry run returns empty string and prints preview", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Capture stdout
+		oldStdout := os.Stdout
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		os.Stdout = w
+
+		output, err := executeCommand(ctx, "echo", []string{"hello"}, "", true)
+
+		// Restore stdout and read captured output
+		require.NoError(t, w.Close())
+		os.Stdout = oldStdout
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		captured := buf.String()
+
+		require.NoError(t, err)
+		assert.Empty(t, output)
+		assert.Contains(t, captured, "[DRY RUN] echo hello")
+	})
+
+	t.Run("dry run with directory shows directory in preview", func(t *testing.T) {
+		ctx := context.Background()
+		tmpDir := t.TempDir()
+
+		// Capture stdout
+		oldStdout := os.Stdout
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		os.Stdout = w
+
+		output, err := executeCommand(ctx, "ls", []string{"-la"}, tmpDir, true)
+
+		// Restore stdout and read captured output
+		require.NoError(t, w.Close())
+		os.Stdout = oldStdout
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		captured := buf.String()
+
+		require.NoError(t, err)
+		assert.Empty(t, output)
+		assert.Contains(t, captured, "[DRY RUN] ls -la")
+		assert.Contains(t, captured, tmpDir)
+	})
+
+	t.Run("successful command execution returns stdout", func(t *testing.T) {
+		ctx := context.Background()
+
+		output, err := executeCommand(ctx, "echo", []string{"hello world"}, "", false)
+		require.NoError(t, err)
+		assert.Equal(t, "hello world\n", output)
+	})
+
+	t.Run("command execution respects working directory", func(t *testing.T) {
+		ctx := context.Background()
+		tmpDir := t.TempDir()
+
+		// Create a test file in the temp directory
+		testFile := filepath.Join(tmpDir, "testfile.txt")
+		require.NoError(t, os.WriteFile(testFile, []byte("test"), 0o600))
+
+		// Run ls in the temp directory
+		output, err := executeCommand(ctx, "ls", []string{}, tmpDir, false)
+		require.NoError(t, err)
+		assert.Contains(t, output, "testfile.txt")
+	})
+
+	t.Run("failed command returns error with stderr", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Run a command that will fail and produce stderr
+		_, err := executeCommand(ctx, "ls", []string{"nonexistent-directory-12345"}, "", false)
+		require.Error(t, err)
+		// Error message should contain info about the failure
+		assert.Contains(t, err.Error(), "exit status")
+	})
+
+	t.Run("context cancellation stops command", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+
+		// Run a command that takes longer than the timeout
+		_, err := executeCommand(ctx, "sleep", []string{"10"}, "", false)
+		require.Error(t, err)
+	})
+}
+
+func TestExecuteCommandCombinedOutput(t *testing.T) {
+	t.Run("dry run returns empty string and prints preview", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Capture stdout
+		oldStdout := os.Stdout
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		os.Stdout = w
+
+		output, err := executeCommandCombinedOutput(ctx, "echo", []string{"hello"}, "", true)
+
+		// Restore stdout and read captured output
+		require.NoError(t, w.Close())
+		os.Stdout = oldStdout
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		captured := buf.String()
+
+		require.NoError(t, err)
+		assert.Empty(t, output)
+		assert.Contains(t, captured, "[DRY RUN] echo hello")
+	})
+
+	t.Run("successful command execution returns combined output", func(t *testing.T) {
+		ctx := context.Background()
+
+		output, err := executeCommandCombinedOutput(ctx, "echo", []string{"hello world"}, "", false)
+		require.NoError(t, err)
+		assert.Equal(t, "hello world\n", output)
+	})
+
+	t.Run("failed command includes output in error", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Run a command that will fail
+		_, err := executeCommandCombinedOutput(ctx, "ls", []string{"nonexistent-directory-12345"}, "", false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exit status")
 	})
 }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,7 +21,7 @@ var saveCmd = &cobra.Command{
 	Long: `Updates the updated field in work items and commits changes to git.
 Validates all non-archived work items before staging.`,
 	Args: cobra.MaximumNArgs(1),
-	RunE: func(_ *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := checkWorkDir(); err != nil {
 			return err
 		}
@@ -37,11 +36,16 @@ Validates all non-archived work items before staging.`,
 			commitMessage = args[0]
 		}
 
-		return saveWorkItems(cfg, commitMessage)
+		dryRunFlag, _ := cmd.Flags().GetBool("dry-run")
+		return saveWorkItems(cfg, commitMessage, dryRunFlag)
 	},
 }
 
-func saveWorkItems(cfg *config.Config, commitMessage string) error {
+func init() {
+	saveCmd.Flags().Bool("dry-run", false, "Show what would be done without making changes")
+}
+
+func saveWorkItems(cfg *config.Config, commitMessage string, dryRun bool) error {
 	// Validate all work items first
 	result, err := validation.ValidateWorkItems(cfg)
 	if err != nil {
@@ -56,12 +60,17 @@ func saveWorkItems(cfg *config.Config, commitMessage string) error {
 		return fmt.Errorf("validation failed - fix errors before saving")
 	}
 
-	// Update timestamps for modified work items
-	if err := updateWorkItemTimestamps(); err != nil {
-		return fmt.Errorf("failed to update timestamps: %w", err)
+	if dryRun {
+		fmt.Println("[DRY RUN] Would perform the following operations:")
+		fmt.Println("[DRY RUN] Update timestamps for modified work items")
+	} else {
+		// Update timestamps for modified work items
+		if err := updateWorkItemTimestamps(); err != nil {
+			return fmt.Errorf("failed to update timestamps: %w", err)
+		}
 	}
 
-	// Check for external changes
+	// Check for external changes (always runs even in dry-run for validation)
 	hasExternalChanges, err := checkExternalChanges()
 	if err != nil {
 		return fmt.Errorf("failed to check for external changes: %w", err)
@@ -74,7 +83,7 @@ func saveWorkItems(cfg *config.Config, commitMessage string) error {
 	}
 
 	// Stage only .work/ directory changes
-	if err := stageWorkChanges(); err != nil {
+	if err := stageWorkChanges(dryRun); err != nil {
 		return fmt.Errorf("failed to stage work changes: %w", err)
 	}
 
@@ -83,11 +92,15 @@ func saveWorkItems(cfg *config.Config, commitMessage string) error {
 		commitMessage = cfg.Commit.DefaultMessage
 	}
 
-	if err := commitChanges(commitMessage); err != nil {
+	if err := commitChanges(commitMessage, dryRun); err != nil {
 		return fmt.Errorf("failed to commit changes: %w", err)
 	}
 
-	fmt.Println("Work items saved and committed successfully.")
+	if dryRun {
+		fmt.Println("[DRY RUN] Would save and commit work items successfully.")
+	} else {
+		fmt.Println("Work items saved and committed successfully.")
+	}
 	return nil
 }
 
@@ -185,17 +198,17 @@ func sanitizeCommitMessage(msg string) (string, error) {
 
 func checkExternalChanges() (bool, error) {
 	// Check git status for changes outside .work/
+	// Note: This function always executes git commands even in dry-run mode because it's a read-only check
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
-	output, err := cmd.Output()
+	output, err := executeCommand(ctx, "git", []string{"status", "--porcelain"}, "", false)
 	if err != nil {
 		// If git is not available or not a git repo, assume no external changes
 		return false, nil
 	}
 
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(output, "\n")
 	for _, line := range lines {
 		if line != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "??") {
 			// Check if the change is outside .work/
@@ -212,26 +225,30 @@ func checkExternalChanges() (bool, error) {
 	return false, nil
 }
 
-func stageWorkChanges() error {
+func stageWorkChanges(dryRun bool) error {
 	// Stage all changes in .work/ directory
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "add", ".work/")
-	return cmd.Run()
+	_, err := executeCommand(ctx, "git", []string{"add", ".work/"}, "", dryRun)
+	return err
 }
 
-func commitChanges(message string) error {
+func commitChanges(message string, dryRun bool) error {
 	// Sanitize commit message
 	sanitized, err := sanitizeCommitMessage(message)
 	if err != nil {
 		return fmt.Errorf("invalid commit message: %w", err)
 	}
 
+	if dryRun {
+		fmt.Printf("[DRY RUN] git commit -m %q\n", sanitized)
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// #nosec G204 - sanitized message has been validated and sanitized by sanitizeCommitMessage
-	cmd := exec.CommandContext(ctx, "git", "commit", "-m", sanitized)
-	return cmd.Run()
+	_, err = executeCommand(ctx, "git", []string{"commit", "-m", sanitized}, "", false)
+	return err
 }

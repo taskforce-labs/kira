@@ -192,7 +192,7 @@ func TestMoveWorkItem(t *testing.T) {
 
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
 
-		err := moveWorkItem(cfg, "001", "doing", false)
+		err := moveWorkItem(cfg, "001", "doing", false, false)
 		require.NoError(t, err)
 
 		// Check file was moved
@@ -228,7 +228,7 @@ func TestMoveWorkItem(t *testing.T) {
 		require.NoError(t, exec.Command("git", "add", testFilePath).Run())
 		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
 
-		err := moveWorkItem(cfg, "001", "doing", true)
+		err := moveWorkItem(cfg, "001", "doing", true, false)
 		require.NoError(t, err)
 
 		// Check file was moved
@@ -256,7 +256,7 @@ func TestMoveWorkItem(t *testing.T) {
 
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
 
-		err := moveWorkItem(cfg, "001", "doing", true)
+		err := moveWorkItem(cfg, "001", "doing", true, false)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to commit")
 
@@ -264,5 +264,72 @@ func TestMoveWorkItem(t *testing.T) {
 		targetPath := ".work/2_doing/001-test-feature.prd.md"
 		_, err = os.Stat(targetPath)
 		require.NoError(t, err)
+	})
+
+	t.Run("dry run does not move file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+
+		// Run with dry-run flag
+		err := moveWorkItem(cfg, "001", "doing", false, true)
+		require.NoError(t, err)
+
+		// Check file was NOT moved - should still be at original location
+		_, err = os.Stat(testFilePath)
+		require.NoError(t, err)
+
+		// Check file was NOT moved to target
+		_, err = os.Stat(testTargetPath)
+		require.Error(t, err)
+		assert.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("dry run with commit flag shows git commands", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+
+		// Run with both commit and dry-run flags
+		err := moveWorkItem(cfg, "001", "doing", true, true)
+		require.NoError(t, err)
+
+		// Check file was NOT moved
+		_, err = os.Stat(testFilePath)
+		require.NoError(t, err)
+	})
+
+	t.Run("dry run requires target status", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+
+		// Run with dry-run but no target status
+		err := moveWorkItem(cfg, "001", "", false, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "target status must be provided when using --dry-run")
 	})
 }
