@@ -1286,6 +1286,487 @@ If `--dry-run` flag is provided, the command will:
    - [ ] IDE opens with correct workspace/project path
    - [ ] Command-line editors work correctly
 
+## Implementation Phases
+
+This implementation uses a **horizontal slicing approach**, building complete layers of functionality from foundation to integration. Each phase implements an entire architectural layer before moving to the next, ensuring the foundation is rock-solid before adding complexity.
+
+**Phase Boundaries = Commit Boundaries:**
+- Each phase must complete with code that passes `make check` (linting, security, tests, coverage)
+- No `#nosec` or other check-skipping comments allowed
+- Manual commit after each phase before proceeding to next
+- Each phase builds working, tested code on top of the previous phase
+
+### Phase 0: Infrastructure Refactoring ⭐ **DO THIS FIRST**
+
+**Goal:** Create centralized command execution utilities and establish consistent patterns before building new features.
+
+**Why First:** Battle-testing the infrastructure on existing commands (that already have tests) is safer than introducing untested utilities alongside complex new features. This also gives us dry-run support across all commands immediately.
+
+**Scope:**
+- Create `executeCommand()` utility in `internal/commands/utils.go`
+- Function signature: `func executeCommand(ctx context.Context, name string, args []string, dir string, dryRun bool) (string, error)`
+- Refactor `move.go` to use `executeCommand()` for all git operations
+- Refactor `save.go` to use `executeCommand()` for all git operations
+- Add `--dry-run` flag to existing commands
+- Implement consistent error handling patterns
+- Write comprehensive tests for `executeCommand()`
+
+**Success Criteria:**
+- [ ] `executeCommand()` handles all command execution with consistent error handling
+- [ ] If `dryRun=true`: Prints command without executing, returns nil
+- [ ] If `dryRun=false`: Executes command using `exec.CommandContext` with proper error handling
+- [ ] Returns both stdout and stderr for debugging
+- [ ] `move.go` uses `executeCommand()` for all git commands
+- [ ] `save.go` uses `executeCommand()` for all git commands
+- [ ] `--dry-run` flag works on `move` command (shows what would happen)
+- [ ] `--dry-run` flag works on `save` command (shows what would happen)
+- [ ] All existing tests still pass (no regression)
+- [ ] Integration tests verify refactored commands work identically
+- [ ] **`make check` passes with no errors (linting, security, tests, coverage)**
+- [ ] **No `#nosec` or other check-skipping comments added**
+- [ ] **Code is commit-ready before moving to Phase 1**
+
+**Deliverables:**
+- `internal/commands/utils.go` with `executeCommand()` and helper functions
+- Refactored `move.go` using centralized utilities
+- Refactored `save.go` using centralized utilities
+- Unit tests for `executeCommand()`
+- Updated integration tests
+- Documentation for command execution patterns
+
+---
+
+### Phase 1: Input Validation & Safety (Horizontal Layer)
+
+**Goal:** Build bulletproof input validation and safety mechanisms before touching any git operations. This phase validates inputs for BOTH standalone AND polyrepo workflows.
+
+**Scope:**
+- Work item ID validation (using `cfg.Validation.IDFormat`, path traversal protection)
+- Work item lookup and metadata extraction
+- Title sanitization (kebab-case conversion, handle missing titles, empty checks, length limits)
+- Path validation and sanitization (worktree_root, repo_root, project.path) - **for standalone AND polyrepo**
+- Workspace behavior inference (standalone, monorepo, polyrepo detection)
+- Worktree path collision detection (check if path exists, validate if it's a worktree) - **for standalone AND polyrepo**
+- `--override` flag logic (detect conflicts, plan removal strategy) - **for standalone AND polyrepo**
+- `--skip-status-check` flag logic (detect status matches)
+- Configuration parsing and validation (Git, Start, Workspace configs)
+- All validation error messages with consistent format
+- **NO git operations** - just validation and planning
+
+**Success Criteria:**
+- [ ] Work item ID validated against `cfg.Validation.IDFormat` before any operations
+- [ ] Path traversal attacks prevented (IDs with `../` rejected)
+- [ ] Work item file located correctly in `.work/` directory structure
+- [ ] Missing titles handled with fallback to ID (warning logged)
+- [ ] Title sanitization uses kebab-case (same algorithm as `kira new`)
+- [ ] Empty sanitized titles detected and rejected with clear error
+- [ ] Long titles truncated with hash suffix for uniqueness
+- [ ] All path values cleaned with `filepath.Clean()` and validated
+- [ ] Worktree path existence detected correctly
+- [ ] Valid git worktrees distinguished from invalid directories
+- [ ] Work item ID in path/branch name detected (for same-item conflicts)
+- [ ] `--override` flag: Plans removal of existing paths (doesn't execute yet)
+- [ ] **Workspace behavior inference: Detects standalone (no workspace config)**
+- [ ] **Workspace behavior inference: Detects monorepo (projects without `path` fields)**
+- [ ] **Workspace behavior inference: Detects polyrepo (projects with `path` fields OR `repo_root`)**
+- [ ] Configuration loads with all defaults applied correctly
+- [ ] Invalid `start.move_to` rejected at config load time
+- [ ] All validation errors follow format: "Error: {what}. {why}. {action}."
+- [ ] Comprehensive unit tests for all validation logic (standalone AND polyrepo)
+- [ ] Edge cases covered (special characters, Unicode, empty strings, long strings)
+- [ ] **`make check` passes with no errors (linting, security, tests, coverage)**
+- [ ] **No `#nosec` or other check-skipping comments added**
+- [ ] **Code is commit-ready before moving to Phase 2**
+
+**Configuration Required:**
+```yaml
+git:
+  trunk_branch: main  # optional: defaults to auto-detect
+  remote: origin      # optional: defaults to "origin"
+
+start:
+  move_to: doing      # optional: defaults to "doing" (validated against StatusFolders)
+  status_action: none # Phase 1: only validate config, don't use yet
+
+workspace:
+  # Phase 1: Validate workspace config exists and is parseable
+  # Behavior inference happens but no git operations yet
+  projects:
+    - name: frontend
+      path: ../frontend  # polyrepo indicator
+```
+
+**Deliverables:**
+- `internal/commands/start.go` with validation functions (no git operations)
+- Work item metadata extraction (reuses `extractWorkItemMetadata` from `move.go`)
+- Title sanitization function (same algorithm as `kira new`)
+- Path validation and sanitization utilities (standalone AND polyrepo)
+- Workspace behavior inference logic (standalone, monorepo, polyrepo detection)
+- Worktree collision detection logic (standalone AND polyrepo)
+- `internal/commands/start_test.go` with comprehensive validation tests
+- Updated `internal/config/config.go` with Git, Start, and Workspace configuration structs
+- Configuration validation tests
+- Documentation for validation patterns
+
+---
+
+### Phase 2: Git Operations Layer (Horizontal Layer)
+
+**Goal:** Implement all git operations with comprehensive error handling for BOTH standalone AND polyrepo workflows. This phase builds on validated inputs from Phase 1 and uses `executeCommand()` from Phase 0.
+
+**Scope:**
+- Trunk branch detection (configured or auto-detect main/master, handle conflicts) - **for standalone AND polyrepo**
+- Per-project trunk branch override (`project.trunk_branch`) - **polyrepo only**
+- Current branch validation (must be on trunk branch before any operations)
+- Remote name resolution (priority order: project.remote > git.remote > "origin") - **for standalone AND polyrepo**
+- Git pull operations (fetch + merge, handle uncommitted changes, conflicts, diverged branches, network errors) - **for standalone AND polyrepo**
+- **Standalone git operations:**
+  - Single worktree creation
+  - Single branch creation/checkout
+  - Worktree removal with `--override`
+- **Polyrepo git operations:**
+  - Main project worktree creation (always created)
+  - Multiple worktree creation with repo_root grouping
+  - Transaction-like behavior: Pre-validation → Phase 1 (all worktrees) → Phase 2 (all branches)
+  - Rollback helper function (`rollbackWorktrees`) for all-or-nothing failure handling
+  - All-or-nothing validation (paths, branches) before creating anything
+  - `--override` for polyrepo: Remove all conflicting paths before creating worktrees
+- Branch existence checks (detect if branch points to trunk or has commits) - **for standalone AND polyrepo**
+- Branch creation (new branches) - **for standalone AND polyrepo**
+- Branch checkout with `--reuse-branch` (checkout existing branches) - **for standalone AND polyrepo**
+- All git error handling with consistent format
+- Uses `executeCommand()` from Phase 0 for all git operations
+
+**Success Criteria:**
+- [ ] Trunk branch detection works (configured, auto-detect, conflict detection)
+- [ ] Both "main" and "master" exist: Fails with clear error asking for config
+- [ ] Configured trunk branch that doesn't exist: Clear error message
+- [ ] Current branch validated (must be on trunk) before any operations
+- [ ] Not on trunk branch: Fails with error (no auto-checkout)
+- [ ] Remote existence checked before pull operations
+- [ ] Missing remote: Warning logged, pull skipped, worktree creation continues
+- [ ] Uncommitted changes detected: Fails with clear error before pull
+- [ ] Git fetch + merge executes correctly (not `git pull`)
+- [ ] Merge conflicts detected and reported with git output
+- [ ] Diverged branches detected and reported with clear error
+- [ ] Network errors during pull reported with git output
+- [ ] Worktree created at correct path using `git worktree add`
+- [ ] `--override` removes existing worktree using `git worktree remove` or `os.RemoveAll`
+- [ ] `--override` handles locked worktrees and uncommitted changes (`--force`)
+- [ ] Branch existence checked using `git show-ref`
+- [ ] Branch pointing to trunk detected (compare commit hashes)
+- [ ] Branch with commits detected: Fails with error requiring deletion
+- [ ] New branch created with `git worktree add -b <branch> <trunk>`
+- [ ] `--reuse-branch` creates worktree then checks out existing branch
+- [ ] **Standalone: Single worktree and branch created correctly**
+- [ ] **Polyrepo: Main project worktree created at `{worktree_root}/{work-item-id}-{title}/main/`**
+- [ ] **Polyrepo: Projects with same `repo_root` grouped into single worktree**
+- [ ] **Polyrepo: Standalone projects (no `repo_root`) get separate worktrees**
+- [ ] **Polyrepo: Pre-validation checks all paths and branches before creating anything**
+- [ ] **Polyrepo: All-or-nothing worktree creation (Phase 1: all worktrees, Phase 2: all branches)**
+- [ ] **Polyrepo: Rollback removes all worktrees in reverse order on any failure**
+- [ ] **Polyrepo: `--override` removes all conflicting paths (all-or-nothing) before creating worktrees**
+- [ ] **Polyrepo: Per-project trunk_branch override works correctly**
+- [ ] **Polyrepo: Per-project remote override works correctly**
+- [ ] **Polyrepo: Consistent branch naming across all repos: `{work-item-id}-{title}`**
+- [ ] All git operations use `executeCommand()` from Phase 0
+- [ ] All error messages include git output for debugging
+- [ ] Integration tests cover all git scenarios (standalone AND polyrepo, mocked git commands)
+- [ ] **`make check` passes with no errors (linting, security, tests, coverage)**
+- [ ] **No `#nosec` or other check-skipping comments added**
+- [ ] **Code is commit-ready before moving to Phase 3**
+
+**Configuration Required:**
+```yaml
+git:
+  trunk_branch: main  # optional: defaults to auto-detect
+  remote: origin      # optional: defaults to "origin"
+
+start:
+  move_to: doing      # optional: defaults to "doing"
+  status_action: none # Phase 2: only git operations, no status management yet
+
+workspace:
+  # Phase 2: Uses workspace config for polyrepo git operations
+  worktree_root: ../../my-worktrees  # optional: defaults to derived path
+  projects:
+    - name: frontend
+      path: ../frontend
+      trunk_branch: develop  # optional: per-project override
+      remote: upstream       # optional: per-project override
+```
+
+**Deliverables:**
+- Updated `internal/commands/start.go` with all git operations (standalone AND polyrepo)
+- Git operation helper functions (trunk detection, pull, worktree, branch)
+- Workspace behavior inference logic (standalone, monorepo, polyrepo)
+- Rollback helper function (`rollbackWorktrees`) for polyrepo failure handling
+- Pre-validation logic (paths, branches, repositories) for polyrepo
+- Transaction-like execution (Phase 1 worktrees, Phase 2 branches) for polyrepo
+- Error handling for all git scenarios (standalone AND polyrepo)
+- Updated `internal/config/config.go` with workspace configuration
+- Updated `internal/commands/start_test.go` with git operation tests (standalone AND polyrepo)
+- Integration tests for git workflows (standalone AND polyrepo, mocked git commands)
+- Documentation for git operation patterns
+
+---
+
+### Phase 3: Status Management Layer (Horizontal Layer)
+
+**Goal:** Implement all status update functionality for BOTH standalone AND polyrepo workflows, building on validated inputs (Phase 1) and working git operations (Phase 2).
+
+**Scope:**
+- Status check after git pull (step 5 in execution order) - **for standalone AND polyrepo**
+- `--skip-status-check` flag to bypass status check
+- Status update using `moveWorkItem()` from `move.go` - **works for both workflows**
+- All `status_action` values:
+  - `none`: Skip status update
+  - `commit_only`: Commit on trunk before worktree creation - **for standalone AND polyrepo**
+  - `commit_and_push`: Commit and push on trunk before worktree creation - **for standalone AND polyrepo**
+  - `commit_only_branch`: Commit on new branch after worktree creation - **for standalone AND polyrepo**
+- Status commit message templates (with variable substitution)
+- Integration with existing `moveWorkItem()` function
+- Error handling for status operations
+
+**Success Criteria:**
+- [ ] Status check executes after git pull (step 5) if `status_action != none`
+- [ ] Status check skipped entirely if `status_action == none`
+- [ ] Work item already in target status: Fails unless `--skip-status-check`
+- [ ] `--skip-status-check` allows restarting work (skips status check and update)
+- [ ] `moveWorkItem(cfg, id, move_to, false)` called to move file (no auto-commit)
+- [ ] `status_action: none` skips all status operations
+- [ ] `status_action: commit_only` stages and commits on trunk before worktree creation
+- [ ] `status_action: commit_and_push` stages, commits, and pushes on trunk before worktree creation
+- [ ] `status_action: commit_only_branch` stages and commits on new branch after worktree creation
+- [ ] Status commit message template supports variables: {type}, {id}, {title}, {move_to}
+- [ ] Default commit message used if template not configured
+- [ ] Uncommitted changes detected before status commit on trunk
+- [ ] Status commit failure aborts worktree creation (for commit_only/commit_and_push)
+- [ ] Status push failure aborts worktree creation (for commit_and_push)
+- [ ] For `commit_only_branch`: Commit happens in worktree context on new branch
+- [ ] Uses `executeCommand()` for all git operations
+- [ ] Integration tests cover all status_action scenarios
+- [ ] **`make check` passes with no errors (linting, security, tests, coverage)**
+- [ ] **No `#nosec` or other check-skipping comments added**
+- [ ] **Code is commit-ready before moving to Phase 4**
+
+**Configuration Required:**
+```yaml
+git:
+  trunk_branch: main
+  remote: origin
+
+start:
+  move_to: doing                                    # optional: defaults to "doing"
+  status_action: commit_and_push                    # options: none | commit_only | commit_and_push | commit_only_branch
+  status_commit_message: "Start work on {type} {id}: {title}"  # optional: template
+```
+
+**Deliverables:**
+- Updated `internal/commands/start.go` with status management
+- Status check logic (step 5 in execution order)
+- Status commit operations for all `status_action` values
+- Commit message template engine (variable substitution)
+- Updated `internal/commands/start_test.go` with status tests
+- Integration tests for all status workflows
+- Documentation for status management patterns
+
+---
+
+### Phase 4: Integration & Polish (Horizontal Layer)
+
+**Goal:** Add IDE launching, setup commands, dry-run mode, and final polish.
+
+**Scope:**
+- IDE configuration (`ide.command` and `ide.args`)
+- IDE launching with error handling
+- `--no-ide` and `--ide <command>` flags
+- Setup commands/scripts (`workspace.setup` and `project.setup`)
+- `--dry-run` flag with comprehensive preview generation
+- Flag overrides (`--trunk-branch`, `--status-action`)
+- Enhanced error messages
+- E2E tests
+- Performance optimization
+- Documentation and release notes
+
+**Success Criteria:**
+- [ ] `--no-ide` skips IDE opening silently (highest priority)
+- [ ] `--ide <command>` overrides config (supports shell expansion)
+- [ ] `ide.command` from config used if no flag (no auto-detection)
+- [ ] IDE opens in worktree directory (standalone/monorepo)
+- [ ] IDE opens at worktree root (polyrepo)
+- [ ] IDE launch failure logged as warning (worktree creation succeeds)
+- [ ] `workspace.setup` executes in main project worktree
+- [ ] `project.setup` executes in project worktrees (polyrepo)
+- [ ] Setup runs after IDE opening (allows background execution)
+- [ ] Setup failure aborts command with clear error
+- [ ] `--dry-run` validates all inputs (including status check)
+- [ ] `--dry-run` shows comprehensive preview (worktrees, branches, status, git ops, setup, IDE)
+- [ ] `--dry-run` exits 0 if validation passes, non-zero if fails
+- [ ] `--dry-run` executes no git operations, no file moves, no IDE, no setup
+- [ ] `--trunk-branch` flag overrides config
+- [ ] `--status-action` flag overrides config
+- [ ] All error messages follow format standard
+- [ ] E2E tests cover complete workflows
+- [ ] Performance < 5 seconds for standalone
+- [ ] Documentation complete
+- [ ] Release notes written
+- [ ] **`make check` passes with no errors (linting, security, tests, coverage)**
+- [ ] **No `#nosec` or other check-skipping comments added**
+- [ ] **Code is ready for public release (v0.1.0)**
+
+**Configuration Required:**
+```yaml
+git:
+  trunk_branch: main
+  remote: origin
+
+start:
+  move_to: doing
+  status_action: commit_and_push
+  status_commit_message: "Start work on {type} {id}: {title}"
+
+ide:
+  command: "cursor"
+  args: ["--new-window"]
+
+workspace:
+  setup: docker compose up -d  # main project setup
+  projects:
+    - name: frontend
+      setup: npm install
+    - name: backend
+      setup: ./scripts/setup.sh
+```
+
+**Deliverables:**
+- Updated `internal/commands/start.go` with IDE and setup support
+- IDE launching logic (with all flags)
+- Setup command execution logic
+- Dry-run mode with preview generation
+- Flag override handling
+- E2E tests in `kira_e2e_tests.sh`
+- Complete documentation
+- Release notes
+
+---
+
+### Testing Strategy Across Phases
+
+**Phase 0: Infrastructure**
+- Unit tests for `executeCommand()` function
+- Test both dryRun=true and dryRun=false paths
+- Integration tests verifying refactored commands work identically
+- Regression tests ensuring no behavior changes
+
+**Phase 1: Input Validation**
+- Unit tests for all validation functions (90%+ coverage)
+- Edge case tests (empty strings, Unicode, special characters, path traversal)
+- Configuration parsing and default application tests
+- Error message format tests
+- NO integration tests yet (no git operations)
+
+**Phase 2: Git Operations**
+- Mock-based unit tests for git operation functions
+- Integration tests with real git repositories (temporary test repos)
+- Error scenario tests (conflicts, network errors, diverged branches)
+- `--override` and `--reuse-branch` flag tests
+- Remote name resolution tests
+- **Standalone AND polyrepo:** Workspace behavior inference tests
+- **Polyrepo:** Transaction rollback tests (simulate failures at different stages)
+- **Polyrepo:** Pre-validation tests (all-or-nothing checking)
+- **Polyrepo:** Per-project override tests
+
+**Phase 3: Status Management**
+- Unit tests for status check logic
+- Integration tests for all `status_action` values (standalone AND polyrepo)
+- Tests for `moveWorkItem()` integration
+- Commit message template tests
+- `--skip-status-check` flag tests
+
+**Phase 4: Integration & Polish**
+- IDE integration tests (mock IDE execution)
+- Setup command execution tests
+- Dry-run mode tests (comprehensive preview validation)
+- E2E tests covering complete workflows
+- Performance benchmarks
+
+---
+
+### Dependencies Between Phases
+
+**Strict Linear Dependencies (Horizontal Layering):**
+
+```
+Phase 0 (Infrastructure)
+    ↓
+Phase 1 (Input Validation) ← Uses executeCommand() for any git checks
+    ↓
+Phase 2 (Git Operations) ← Uses validated inputs, uses executeCommand()
+    ↓                    ← Handles standalone AND polyrepo
+Phase 3 (Status Management) ← Uses validated inputs + git operations
+    ↓                       ← Works for standalone AND polyrepo
+Phase 4 (Integration) ← Adds IDE, setup, dry-run on top of complete foundation
+```
+
+**Why This Order:**
+- **Phase 0 first:** Infrastructure must exist before anything else
+- **Phase 1 next:** All subsequent phases rely on validated, sanitized inputs (standalone AND polyrepo)
+- **Phase 2 builds on Phase 1:** Git operations need validated inputs to be safe. Handles BOTH standalone AND polyrepo in same layer
+- **Phase 3 builds on Phase 1+2:** Status management needs validation + git operations. Works for BOTH standalone AND polyrepo
+- **Phase 4 is final:** Integration features (IDE, setup, dry-run) go on top of complete foundation
+
+**Cannot Skip or Reorder:** Each phase builds on the previous one's foundation.
+
+---
+
+### Rollout Plan
+
+**Horizontal Implementation = Complete Foundation First**
+
+Each phase builds a complete architectural layer before moving to the next. No user releases until the entire feature is complete and polished.
+
+**Implementation Order:**
+
+1. **Phase 0: Infrastructure**
+   - Refactor existing commands to use `executeCommand()`
+   - Add dry-run support to `move` and `save`
+   - Internal testing and validation
+
+2. **Phase 1: Input Validation**
+   - All input validation and sanitization (standalone AND polyrepo)
+   - Workspace behavior inference
+   - Worktree collision detection
+   - Path safety checks
+   - Internal testing (no git operations yet)
+
+3. **Phase 2: Git Operations**
+   - All git operations (trunk, pull, worktree, branch)
+   - **Standalone AND polyrepo** workflows
+   - Transaction rollback for polyrepo
+   - `--override` and `--reuse-branch` support
+   - Internal testing with real git repositories (standalone AND polyrepo)
+   - **Internal milestone: Git operations complete for all workflow types**
+
+4. **Phase 3: Status Management**
+   - Status check and update logic
+   - All `status_action` values (standalone AND polyrepo)
+   - Internal testing of complete workflows
+   - **Internal milestone: Complete workflow functional (standalone AND polyrepo)**
+
+5. **Phase 4: Integration & Polish**
+   - IDE launching
+   - Setup commands
+   - Dry-run mode
+   - E2E tests
+   - Documentation
+
+**Release Strategy:**
+- No public releases until Phase 5 complete
+- Internal testing after each phase
+- First public release includes complete feature set
+- Well-tested, documented, and polished
+
 ## Implementation Notes
 
 ### Concurrent Execution Safety
@@ -1312,6 +1793,22 @@ The `kira start` command is designed to support concurrent execution for differe
   4. Branch existence checks (prevents duplicate branch creation)
 
 - **Recommendation for users:** For maximum safety when running concurrent commands, users should ensure different work items are used for each concurrent `kira start` execution, or use appropriate coordination mechanisms at the workflow level if concurrent execution of the same work item is required.
+
+### Code Quality Requirements
+
+**Every phase must meet these requirements before moving to the next:**
+
+- **`make check` passes:** All linting, security checks, unit tests, and code coverage requirements
+- **No check-skipping:** Absolutely no `#nosec`, `.golangci.yml` modifications, or other check-skipping mechanisms
+- **Security compliance:** Follow `docs/security/golang-secure-coding.md` for all file operations and command execution
+- **Test coverage:** Unit tests for all new functions, integration tests for complete workflows
+- **Documentation:** Update relevant docs (README, security docs, etc.) in the same phase
+
+**Why this matters:**
+- Horizontal slicing means each layer is foundation for the next
+- Buggy validation layer = all subsequent layers are unsafe
+- Phase boundaries = commit boundaries = must be production-ready
+- No "we'll fix the tests later" - tests are part of the phase
 
 ### Architecture
 
