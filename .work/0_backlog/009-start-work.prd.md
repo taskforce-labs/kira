@@ -50,6 +50,8 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
 
 1. **Work Item Lookup**
    - Accept a work item ID as a required argument
+   - **Work item ID validation:** Validate that the work item ID matches the format specified in `cfg.Validation.IDFormat` (default: `"^\\d{3}$"` - three digits) using the same validation function as `kira new` command (`validateIDFormat` from `internal/validation/validator.go`). If validation fails, abort with error: `"Error: Invalid work item ID '{id}'. Work item ID format is invalid (expected format: {id-format}). Work item IDs must match the configured format."` (where `{id-format}` is the value from `cfg.Validation.IDFormat`). This validation occurs before any file system operations or worktree creation.
+   - **Path traversal protection:** The work item ID validation also protects against path traversal attacks, as IDs that don't match the expected format (e.g., containing `../` or other invalid characters) will be rejected before being used in file paths.
    - Locate the work item file in the `.work/` directory structure
    - Extract work item metadata (ID, title, status)
    - **Handle missing title:** If title is empty or "unknown", use work item ID as fallback and log warning
@@ -62,17 +64,20 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
      - Otherwise auto-detect: check for "main" first, then "master"
      - If both "main" and "master" branches exist: fail with error: "Error: Both 'main' and 'master' branches exist. Cannot auto-detect trunk branch. Configure `git.trunk_branch` explicitly in kira.yml to specify which branch to use."
      - Error if trunk branch not found: "Error: Trunk branch '{branch-name}' not found. Configured branch does not exist and auto-detection failed. Verify the branch name in `git.trunk_branch` configuration or ensure 'main' or 'master' branch exists."
+   - **Validate current branch is trunk:** Check if the current branch (from `git rev-parse --abbrev-ref HEAD`) matches the determined trunk branch. If not, fail with error: `"Error: Start command can only be run from trunk branch. Please checkout the trunk branch and try again."` This validation occurs before any pull operations or worktree creation.
    - **Pull latest changes from origin** to ensure trunk branch is up-to-date before any operations:
-     - Determine remote name: Use `git.remote` if configured, otherwise default to "origin"
+     - **Remote name resolution:** See "Remote Name Resolution" section for priority order
+       - For main repository: Use `git.remote` if configured, otherwise default to "origin"
+       - For polyrepo projects: Use `project.remote` if configured, then `git.remote` if configured, then "origin" as final default
      - Check if remote exists using `git remote get-url <remote-name>`; if command fails (no remote configured):
        - Log warning: "Warning: No remote '{remote-name}' configured. Skipping pull step. Worktree will be created from local trunk branch."
        - Skip pull step, continue with worktree creation
-     - For polyrepo: For each project, determine remote name: Use `project.remote` if configured, otherwise use `git.remote` (or "origin" if `git.remote` is also omitted)
+     - For polyrepo: For each project, determine remote name using priority order (see "Remote Name Resolution" section)
        - Check each project repository independently using its configured remote name
        - Skip pull for projects without remote, log warning per project with the remote name that was checked
      - Check for uncommitted changes in trunk branch; if found, abort with error: "Error: Trunk branch has uncommitted changes. Cannot proceed with pull operation. Commit or stash changes before starting work."
-     - Checkout trunk branch (configured or auto-detected)
-     - Run `git fetch <remote-name> <trunk_branch>` to fetch latest changes (where remote-name is from `git.remote` or "origin" default)
+     - **Note:** Trunk branch checkout is not needed here since validation ensures we're already on trunk branch (see trunk branch validation step above). The command must be run from the trunk branch.
+     - Run `git fetch <remote-name> <trunk_branch>` to fetch latest changes (where remote-name is determined using priority order - see "Remote Name Resolution" section)
      - Run `git merge <remote-name>/<trunk_branch>` to merge remote changes into local trunk branch
      - If merge fails due to conflicts: abort with error showing git output
      - If merge fails due to diverged branches (local commits not on remote): abort with error: "Error: Trunk branch has diverged from {remote-name}/{trunk-branch}. Local and remote branches have different commits. Rebase or merge manually before starting work."
@@ -105,8 +110,9 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
      - No log messages about IDE (silently skip)
    - **`--ide` flag override:** If `--ide <command>` flag is provided (and `--no-ide` not set):
      - Use the flag value as IDE command (overrides `ide.command` from config)
-     - Ignore `ide.args` from config (no args are passed to the IDE command)
-     - Execute: `{flag-command} {worktree-path}` (no args)
+     - Ignore `ide.args` from config (flag value takes precedence)
+     - **Shell expansion support:** Users can pass arguments via shell expansion (e.g., `--ide "cursor --new-window"`). The flag value can include both the command and its arguments, and will be executed as-is by the shell.
+     - Execute: `{flag-command} {worktree-path}` (where `{flag-command}` may include arguments if provided via shell expansion)
    - **Config-based:** If neither flag provided, use `ide.command` from `kira.yml` - no auto-detection
    - If no IDE command found (flag or config): Skip IDE opening, log info message "Info: No IDE configured. Worktree created at {path}. Configure `ide.command` in kira.yml or use `--ide <command>` flag to automatically open IDE."
    - For standalone or monorepo: Open IDE in the worktree directory (single repository)
@@ -115,9 +121,11 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
 
 6. **Setup Commands/Scripts**
    - **Main project setup:** If `workspace.setup` is configured in `kira.yml`:
+     - **Main project definition:** The main project is the repository where `kira.yml` is located
+     - **Note:** The main project is never listed in `workspace.projects` (it's the repository containing `kira.yml`), but it always gets a worktree created
      - Execute setup command/script in main project worktree directory
      - For standalone/monorepo: Run in `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}`
-     - For polyrepo: Run in main project worktree (if main project has its own worktree)
+     - For polyrepo: Run in main project worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/main/` (or `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{main-project-name}/`)
    - **Project-specific setup:** For each project in polyrepo with `project.setup` configured:
      - Execute setup command/script in that project's worktree directory
      - Run in the worktree path where the project is located
@@ -136,14 +144,17 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
 
 6. **Status Management**
    - **Status Check:** Executes as step 5 in Command Execution Order, after git pull (step 4) and before worktree creation (step 7)
+     - **Note:** This check only applies if `status_action` is not `none` (if `status_action` is `none`, skip this check entirely since no status update will occur)
      - This check happens after pulling latest changes to ensure we're checking the most up-to-date work item status
-     - If work item status matches configured `start.move_to` (defaults to "doing") and `--skip-status-check` flag is not provided:
-       - Fail with error: "Error: Work item {id} is already in '{move_to}' status. Work item status matches target status. Use --skip-status-check to restart work or review elsewhere." (where {move_to} is the configured value)
-       - Abort command before worktree creation (step 7)
-     - If work item status matches configured `start.move_to` and `--skip-status-check` flag is provided:
-       - Skip status update step (step 6), proceed directly to worktree creation (step 7)
-       - Allows resuming work or reviewing work item in different location
-     - If work item status does not match configured `start.move_to`: Continue with normal status update flow (step 6)
+     - **Check logic:**
+       - If work item status matches configured `start.move_to` (defaults to "doing") and `--skip-status-check` flag is not provided:
+         - Fail with error: "Error: Work item {id} is already in '{move_to}' status. Work item status matches target status. Use --skip-status-check to restart work or review elsewhere." (where {move_to} is the configured value)
+         - Abort command before worktree creation (step 7)
+         - **Note:** This check applies regardless of `status_action` timing (whether status update happens at step 6 for `commit_only`/`commit_and_push`, or at step 8 for `commit_only_branch`), because the status will be updated eventually
+       - If work item status matches configured `start.move_to` and `--skip-status-check` flag is provided:
+         - Skip status update step (step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`), proceed directly to worktree creation (step 7)
+         - Allows resuming work or reviewing work item in different location
+       - If work item status does not match configured `start.move_to`: Continue with normal status update flow (step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`)
    - **Status Update:** Optionally move work item to configured status folder (`start.move_to`, defaults to "doing") (controlled by `start.status_action`)
      - **File Location:** Reuses the `moveWorkItem` function from `move.go` (with `commitFlag=false`) to ensure consistency:
        - The function handles finding the work item file, validating target status, moving the file to `.work/{status_folder}/` directory, and updating the status field in frontmatter
@@ -181,17 +192,19 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
 
    **c) Polyrepo**
    - Multiple separate repositories
-   - **Default behavior:** Creates separate worktrees for each repository
+   - **Default behavior:** Creates separate worktrees for each repository, including the main project (repository where `kira.yml` is located)
+   - **Main project worktree:** The main project always gets a worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/main/` (or `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{main-project-name}/` if project name can be derived)
    - Worktree per project: `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{project.mount}/` (see "Worktree Location" section for `worktree_root` defaults)
-   - Branch: `{work-item-id}-{kebab-case-work-item-title}` (same branch name in each repo)
+   - Branch: `{work-item-id}-{kebab-case-work-item-title}` (same branch name in each repo, including main project)
    - **Repo Root Grouping:** Projects sharing the same `repo_root` are grouped into a single worktree:
      - **Purpose 1 - Monorepo grouping:** When multiple projects share the same root directory (e.g., a monorepo), they share one worktree
      - **Purpose 2 - Nested folder structures:** When repos are configured in nested folder structures, `repo_root` specifies the common root directory
      - Create ONE worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{sanitized-repo-root}/`
+       - `sanitized-repo-root` is created by: extracting directory name from `repo_root` using `filepath.Base(repo_root)`, then applying kebab-case sanitization (lowercase, replace spaces/underscores with hyphens) - see "Path Sanitization" section in "Worktree Location" for details
      - Create ONE branch in that worktree: `{work-item-id}-{kebab-case-work-item-title}`
      - All projects with the same `repo_root` share that worktree and branch
      - Skip worktree creation for subsequent projects with the same `repo_root`
-   - IDE opens at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}` with all project worktrees
+   - IDE opens at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}` with all project worktrees (including main project)
 
    **Workspace Behavior Inference:**
 
@@ -219,7 +232,9 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
       - Creates: Multiple worktrees at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/` (grouped by `repo_root` if present)
       - IDE opens: At `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}` (worktree root)
       - Projects sharing `repo_root`: Grouped into single worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{sanitized-repo-root}/`
+        - `sanitized-repo-root` is created by: extracting directory name from `repo_root` using `filepath.Base(repo_root)`, then applying kebab-case sanitization (lowercase, replace spaces/underscores with hyphens) - see "Path Sanitization" section in "Worktree Location" for details
       - Projects without `repo_root`: Each gets own worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{project.mount}/`
+        - `project.mount` values are also sanitized using kebab-case (same algorithm) if they contain spaces or special characters
       - See "Worktree Location" section for `worktree_root` defaults
       - **Detection:**
         - First check: If ANY project has `repo_root` → polyrepo (immediate)
@@ -249,6 +264,8 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
     # Optional: setup command/script for main project (repository where kira.yml is located)
     # Can be a command string (e.g., "docker compose up -d") or path to script (e.g., "./scripts/setup.sh")
     # Executed in the worktree directory after IDE opening (allows user to start working while setup runs)
+    # Note: Main project is never listed in workspace.projects, but it always gets a worktree created
+    #   For polyrepo, runs in main project worktree at {worktree_root}/{work-item-id}-{kebab-case-work-item-title}/main/
     setup: docker compose up -d       # optional: command or script path for main project setup
 
     # Optional: projects list
@@ -279,7 +296,7 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
          # No repo_root = standalone repository (gets own worktree)
          kind: service
         draft_pr: false                # explicit override (uses workspace default)
-        remote: upstream               # optional: override remote name for this project (defaults to "origin" or git.remote)
+        remote: upstream               # optional: override remote name for this project (see "Remote Name Resolution" section for priority order)
         setup: ./scripts/setup.sh      # optional: command or script path for project-specific setup
    ```
 
@@ -289,6 +306,7 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
    - If both "main" and "master" branches exist: fail with error: "Error: Both 'main' and 'master' branches exist. Cannot auto-detect trunk branch. Configure `git.trunk_branch` explicitly in kira.yml to specify which branch to use."
    - If `start` section is omitted: `status_action` defaults to `commit_and_push` (meaning status is updated, committed, and pushed to trunk branch)
    - If `start.move_to` is omitted or empty: defaults to `"doing"`
+   - **Validation:** After applying defaults, validate that `start.move_to` (or default "doing") is a valid status key in `cfg.StatusFolders`. If invalid, fail with error at config load time: `"Error: Invalid status '{invalid_status}'. Status must be one of the following: {valid_statuses}. Please check your configuration and try again."` (where `{valid_statuses}` is a comma-separated list of all keys in `cfg.StatusFolders`, sorted alphabetically)
    - If `start.status_action` is omitted: defaults to `commit_and_push` (meaning status is updated, committed, and pushed to trunk branch)
    - If `start.status_commit_message` is omitted: defaults to `"Move {type} {id} to {move_to}"` (uses configured `move_to` value, or "doing" if not configured)
    - If `workspace` section is omitted: treated as standalone (default behavior)
@@ -364,10 +382,11 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
    Projects: ../frontend, ../orders-service
    Common parent: /path/to (detected from project paths)
    Worktree root: /path/to/proj_worktrees/{work-item-id}-{kebab-case-work-item-title}
+   ├── main/              (worktree for main project - repository where kira.yml is located)
    ├── frontend/          (separate git worktree from ../frontend repo)
    ├── orders-service/    (separate git worktree from ../orders-service repo)
    └── ...
-   Branch: {work-item-id}-{kebab-case-work-item-title} (same branch name created in each separate repo)
+   Branch: {work-item-id}-{kebab-case-work-item-title} (same branch name created in each repo, including main project)
    IDE opens: /path/to/proj_worktrees/{work-item-id}-{kebab-case-work-item-title}
 
    Inference: Projects have `path` fields pointing to separate git repositories → polyrepo behavior
@@ -393,12 +412,13 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
    Projects: ../monorepo/frontend, ../monorepo/backend, ../orders-service
    Common parent: /path/to (detected from project paths)
    Worktree root: /path/to/proj_worktrees/{work-item-id}-{kebab-case-work-item-title}
+   ├── main/              (worktree for main project - repository where kira.yml is located)
    ├── monorepo/          (ONE worktree at repo_root, shared by frontend + backend)
    │   ├── frontend/      (component within monorepo worktree)
    │   └── backend/       (component within monorepo worktree)
    ├── orders-service/    (separate git worktree - standalone)
    └── ...
-   Branch: {work-item-id}-{kebab-case-work-item-title} (one branch in monorepo worktree, one branch in orders-service worktree)
+   Branch: {work-item-id}-{kebab-case-work-item-title} (one branch in main project worktree, one branch in monorepo worktree, one branch in orders-service worktree)
    IDE opens: /path/to/proj_worktrees/{work-item-id}-{kebab-case-work-item-title}
 
    Inference: Projects have `path` fields → polyrepo behavior
@@ -426,6 +446,7 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
      # Optional: remote name (defaults to "origin")
      # Used for pulling latest changes and pushing commits
      # Useful when repository uses a non-standard remote name (e.g., "upstream", "github", "gitlab")
+     # See "Remote Name Resolution" section for priority order
      remote: origin
    ```
 
@@ -437,6 +458,8 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
    start:
      # Optional: status folder to move work item to (defaults to "doing")
      # Specifies which status folder the work item should be moved to when starting work
+     # Must be a valid status key from cfg.StatusFolders (e.g., "backlog", "todo", "doing", "review", "done", "archived")
+     # Invalid values will cause config load to fail with error
      move_to: doing  # e.g., "doing", "in-progress", "active", "working", etc.
 
      # Optional: defaults to "commit_and_push" (meaning status is updated, committed, and pushed to trunk branch)
@@ -496,8 +519,9 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
      - No log messages about IDE (silently skip)
    - **`--ide` flag override:** If `--ide <command>` flag is provided (and `--no-ide` not set):
      - Use flag value as IDE command (overrides `ide.command` from config)
-     - Ignore `ide.args` from config (execute command with no args)
-     - Execute: `{flag-command} {worktree-path}` (no args passed)
+     - Ignore `ide.args` from config (flag value takes precedence)
+     - **Shell expansion support:** Users can pass arguments via shell expansion (e.g., `--ide "cursor --new-window"`). The flag value can include both the command and its arguments, and will be executed as-is by the shell.
+     - Execute: `{flag-command} {worktree-path}` (where `{flag-command}` may include arguments if provided via shell expansion)
    - **Config-based:** If neither flag provided, `ide.command` must be configured in `kira.yml` - no auto-detection
    - If no IDE command found (flag or config): Skip IDE opening, log info message, continue with worktree creation
    - **Configuration-driven:** All IDE behavior is controlled via `kira.yml`:
@@ -508,7 +532,7 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
      ```
    - **IDE Already Open Behavior:**
      - When using config: Behavior is entirely controlled by `ide.args` configuration
-     - When using `--ide` flag: No args are passed (user can rely on IDE's default behavior or shell expansion)
+     - When using `--ide` flag: Arguments can be included in the flag value via shell expansion (e.g., `--ide "cursor --new-window"`). The command is executed as-is by the shell, allowing users to pass any arguments needed.
      - User configures appropriate args for their IDE (e.g., `["--new-window"]` to open in new window, or IDE-specific flags)
      - If IDE launch fails: Log warning and continue (worktree creation succeeds)
      - No hardcoded IDE-specific logic - all behavior comes from configuration or flag
@@ -572,7 +596,9 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
        - **Note:** In this edge case, worktrees are placed at the parent of the first project's parent directory, which may not be ideal. Consider explicitly setting `worktree_root` in configuration for projects in completely different directory trees.
      - **Worktree paths:**
        - Projects with same `repo_root`: `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{sanitized-repo-root}/`
+         - `sanitized-repo-root` is created by: extracting directory name from `repo_root` using `filepath.Base(repo_root)`, then applying kebab-case sanitization (lowercase, replace spaces/underscores with hyphens) - see "Path Sanitization" section above
        - Projects without `repo_root`: `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{project.mount}/`
+         - `project.mount` values are also sanitized using kebab-case (same algorithm) if they contain spaces or special characters
      - **Example:** `../../monorepo_worktrees/123-fix-bug/monorepo/` (for grouped projects) or `../../monorepo_worktrees/123-fix-bug/frontend/` (for standalone project)
 
    **Override Mechanism:**
@@ -584,12 +610,26 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
      worktree_root: ../my-custom-worktrees  # Overrides default derivation
    ```
 
+   **Path Sanitization:**
+
+   All path values (`worktree_root`, `repo_root`, `project.path`) must be sanitized and validated before use, following the same patterns as other file operations in the codebase (see `docs/security/golang-secure-coding.md`):
+
+   - **Path cleaning:** Use `filepath.Clean()` to normalize paths and remove path traversal attempts (`..`, `.`, etc.)
+   - **Absolute path resolution:** Resolve all paths to absolute paths using `filepath.Abs()` before validation
+   - **Path traversal validation:** After cleaning, check that the resolved path doesn't contain `..` components (if `filepath.Clean()` still results in a path containing `..` after resolution, this indicates an invalid path)
+   - **Directory name sanitization:** For directory names derived from `repo_root` values (used in `sanitized-repo-root`):
+     - Extract the directory name using `filepath.Base(repo_root)` to get the final directory component
+     - Apply kebab-case sanitization (same algorithm as title sanitization): convert to lowercase, replace spaces and underscores with hyphens
+     - This ensures directory names are safe for filesystem use and consistent with other sanitized names in the codebase
+   - **Invalid path characters:** Paths containing invalid filesystem characters (OS-specific) should be rejected with appropriate error messages
+   - **Error handling:** If path sanitization or validation fails, abort with error: `"Error: Invalid path '{path}'. Path contains invalid characters or path traversal attempts. Please check your configuration and try again."`
+
    **Path Resolution:**
 
    - All paths are resolved relative to the repository root where `kira.yml` is located
    - Relative paths use `../` to go up directory levels
    - Absolute paths are supported but not recommended (reduces portability)
-   - Paths are normalized using `filepath.Clean()` before use
+   - Paths are sanitized and normalized using `filepath.Clean()` before use (see "Path Sanitization" section above)
 
    **Examples by Workspace Type:**
 
@@ -605,6 +645,31 @@ When working with multi-project workspaces (monorepo or polyrepo configurations)
      - Common prefix: `../services/`
      - Default: `../../services_worktrees/`
      - Worktrees: `../../services_worktrees/123-fix-bug/frontend/` and `../../services_worktrees/123-fix-bug/backend/`
+
+### Remote Name Resolution
+
+**Remote Name Resolution Priority:**
+
+Remote name resolution follows a consistent priority order across all operations (pull, push, etc.):
+
+**For Main Repository (Standalone/Monorepo):**
+1. Use `git.remote` if configured in `kira.yml`
+2. Otherwise, default to `"origin"`
+
+**For Polyrepo Projects:**
+For each project in `workspace.projects`, determine remote name in order of precedence:
+1. `project.remote` if configured (project-specific override)
+2. `git.remote` if configured (workspace default)
+3. `"origin"` as final default
+
+**Examples:**
+- Standalone with `git.remote: upstream` → uses `"upstream"`
+- Standalone without `git.remote` → uses `"origin"`
+- Polyrepo project with `project.remote: upstream` → uses `"upstream"` for that project
+- Polyrepo project without `project.remote` but with `git.remote: github` → uses `"github"` for that project
+- Polyrepo project without `project.remote` or `git.remote` → uses `"origin"` for that project
+
+**Note:** This priority order applies consistently to all git operations that require a remote name (pull, push, etc.).
 
 ### Error Handling
 
@@ -632,34 +697,81 @@ Warning messages follow a similar format but use "Warning:" prefix and typically
   - `"Warning: Work item {id} has no title field. Using work item ID '{id}' for worktree directory and branch name."`
 
 1. **Validation Errors**
+   - **Invalid `start.move_to` value:** Error: `"Error: Invalid status '{invalid_status}'. Status must be one of the following: {valid_statuses}. Please check your configuration and try again."` (where `{invalid_status}` is the configured `start.move_to` value, and `{valid_statuses}` is a comma-separated list of all keys in `cfg.StatusFolders`, sorted alphabetically). This error occurs at config load time, before command execution begins.
+   - **Invalid work item ID:** Error: `"Error: Invalid work item ID '{id}'. Work item ID contains invalid characters or doesn't match expected format. Work item IDs must be valid identifiers."` (occurs before any sanitization or worktree creation)
+   - **Empty sanitized title:** Error: `"Error: Work item '{id}' title sanitization resulted in empty string. Title cannot be sanitized to a valid name. Please update the work item title to include valid characters."` (occurs after kebab-case conversion if result is empty)
+   - **Invalid path:** Error: `"Error: Invalid path '{path}'. Path contains invalid characters or path traversal attempts. Please check your configuration and try again."` (occurs when `worktree_root`, `repo_root`, or `project.path` values fail path sanitization or validation - see "Path Sanitization" section in "Worktree Location" for details)
+   - **Not on trunk branch:** Error: `"Error: Start command can only be run from trunk branch. Please checkout the trunk branch and try again."` (occurs after trunk branch determination, before any pull operations or worktree creation)
    - **Work item not found:** Error: `"Error: Work item '{id}' not found. No work item file exists with that ID. Check the work item ID and try again."`
    - **Work item missing title:** Warning: `"Warning: Work item {id} has no title field. Using work item ID '{id}' for worktree directory and branch name."` Use just work item ID as fallback, continue execution
    - **Invalid git repository:** Error: `"Error: Not a git repository. Current directory is not a git repository. Run this command from within a git repository."`
    - **Worktree path already exists:**
-     - Check if target worktree path already exists
-     - If path exists and is a valid git worktree:
-       - Check if worktree is for the same work item (by checking if branch name matches `{work-item-id}-{kebab-case-work-item-title}` or if work item ID is in the path)
-       - If same work item: Error: `"Error: Worktree already exists at {path} for work item {id}. A worktree for this work item already exists. Use \`--override\` to remove existing worktree and create a new one, or use the existing worktree."`
-       - If different work item: Error: `"Error: Worktree path {path} already exists for a different work item. Path conflicts with existing worktree. Use \`--override\` to remove existing worktree, or choose a different work item."`
-     - If path exists but is not a valid git worktree: Error: `"Error: Path {path} already exists but is not a valid git worktree. Cannot create worktree at this location. Remove it manually and try again, or use \`--override\` to remove it automatically."`
-     - If path doesn't exist: Proceed with worktree creation
-     - **With `--override` flag:** Remove existing worktree (using `git worktree remove` if valid git worktree) or directory before creating new one
+     - **Standalone/Monorepo:** Check if target worktree path already exists
+       - If path exists and is a valid git worktree:
+         - Check if worktree is for the same work item (by checking if branch name matches `{work-item-id}-{kebab-case-work-item-title}` or if work item ID is in the path)
+         - If same work item: Error: `"Error: Worktree already exists at {path} for work item {id}. A worktree for this work item already exists. Use \`--override\` to remove existing worktree and create a new one, or use the existing worktree."`
+         - If different work item: Error: `"Error: Worktree path {path} already exists for a different work item. Path conflicts with existing worktree. Use \`--override\` to remove existing worktree, or choose a different work item."`
+       - If path exists but is not a valid git worktree: Error: `"Error: Path {path} already exists but is not a valid git worktree. Cannot create worktree at this location. Remove it manually and try again, or use \`--override\` to remove it automatically."`
+       - If path doesn't exist: Proceed with worktree creation
+       - **With `--override` flag:** Remove existing worktree or directory before creating new one
+         - If path is a valid git worktree: Remove using `git worktree remove <path>` (or `git worktree remove --force` if worktree has uncommitted changes)
+         - If path is not a valid git worktree: Remove using `os.RemoveAll`
+         - If removal fails: Abort with error: `"Error: Failed to remove existing worktree at {path}. Cannot proceed with --override. {error-details}. Resolve the issue and try again."` (where `{error-details}` includes the specific error from the removal operation)
+         - Only proceed with worktree creation after successful removal
+     - **Polyrepo:** Check all worktree paths before creating any (all-or-nothing approach):
+       - **Pre-validation (before Phase 1 worktree creation):** For each worktree that will be created (main project and all projects in `workspace.projects`):
+         - Check if target worktree path already exists
+         - If path exists: Determine if it's a valid git worktree and check if it's for the same work item
+         - Track path status per worktree: `pathStatus map[string]PathStatus` where key is worktree path and value indicates: `not_exists`, `valid_worktree_same_item`, `valid_worktree_different_item`, or `invalid_worktree`
+       - **All-or-nothing validation:** After checking all paths:
+         - If ANY path exists (regardless of type) and `--override` flag is NOT provided:
+           - If path is valid git worktree for same work item: Error listing all affected paths: `"Error: Worktree already exists at one or more paths for work item {id}: {path-list}. A worktree for this work item already exists. Use \`--override\` to remove existing worktrees and create new ones, or use the existing worktrees."`
+           - If path is valid git worktree for different work item: Error listing all affected paths: `"Error: Worktree path(s) already exist for different work items: {path-list}. Path conflicts with existing worktrees. Use \`--override\` to remove existing worktrees, or choose a different work item."`
+           - If path is not a valid git worktree: Error listing all affected paths: `"Error: Path(s) already exist but are not valid git worktrees: {path-list}. Cannot create worktrees at these locations. Remove them manually and try again, or use \`--override\` to remove them automatically."`
+         - If ANY path exists and `--override` flag IS provided: Remove all existing paths before creating worktrees
+           - **All-or-nothing removal:** `--override` applies to all conflicting worktree paths for the work item (main project and all projects in `workspace.projects`). All paths must be successfully removed before proceeding.
+           - **Removal method:** For each conflicting path:
+             - If path is a valid git worktree: Remove using `git worktree remove <path>` (or `git worktree remove --force` if worktree has uncommitted changes)
+             - If path is not a valid git worktree (invalid worktree or non-worktree directory): Remove using `os.RemoveAll`
+           - **Failure handling:** If removal fails for any path (e.g., worktree is locked, permission denied, file system error), abort with error: `"Error: Failed to remove existing worktree at {path}. Cannot proceed with --override. {error-details}. Resolve the issue and try again."` (where `{error-details}` includes the specific error from the removal operation). Do not continue with worktree creation if any removal fails.
+           - **Success:** Only after all conflicting paths are successfully removed, proceed with worktree creation (Phase 1)
+         - If NO paths exist: Proceed with worktree creation
+       - **Phase 1 worktree creation:** After validation passes (or `--override` removes existing paths), create all worktrees
    - **Branch already exists:**
-     - Check if branch `{work-item-id}-{kebab-case-work-item-title}` already exists in repository before creating worktree
-     - If branch exists:
-       - Check what commit the branch points to
-       - If branch points to trunk branch commit (same commit): Branch exists but has no commits, likely from previous worktree that was removed
-         - Error: `"Error: Branch {branch-name} already exists and points to trunk. Branch exists but has no commits. Use \`--reuse-branch\` to checkout existing branch in new worktree, or delete the branch first: \`git branch -d {branch-name}\`"`
-         - With `--reuse-branch` flag: Create worktree without `-b` flag, then checkout existing branch: `git worktree add <path> <trunk-branch>` followed by `git checkout {branch-name}`
-       - If branch points to different commit (has commits): Branch has work
-         - Error: `"Error: Branch {branch-name} already exists and has commits. Branch contains work that would be lost. Delete the branch first if you want to start fresh: \`git branch -D {branch-name}\`, or use a different work item."`
-     - If branch doesn't exist: Create new branch using `git worktree add <path> -b <branch-name> <trunk-branch>`
+     - **Standalone/Monorepo:** Check if branch `{work-item-id}-{kebab-case-work-item-title}` already exists in repository before creating worktree
+       - If branch exists:
+         - Check what commit the branch points to
+         - If branch points to trunk branch commit (same commit): Branch exists but has no commits, likely from previous worktree that was removed
+           - Error: `"Error: Branch {branch-name} already exists and points to trunk. Branch exists but has no commits. Use \`--reuse-branch\` to checkout existing branch in new worktree, or delete the branch first: \`git branch -d {branch-name}\`"`
+           - With `--reuse-branch` flag: Create worktree without `-b` flag, then checkout existing branch: `git worktree add <path> <trunk-branch>` followed by `git checkout {branch-name}`
+         - If branch points to different commit (has commits): Branch has work
+           - Error: `"Error: Branch {branch-name} already exists and has commits. Branch contains work that would be lost. Delete the branch first if you want to start fresh: \`git branch -D {branch-name}\`, or use a different work item."`
+       - If branch doesn't exist: Create new branch using `git worktree add <path> -b <branch-name> <trunk-branch>`
+     - **Polyrepo:** Check branch existence in each repository independently before creating any worktrees (all-or-nothing approach):
+       - **Pre-validation (before Phase 1 worktree creation):** For each repository (main project and all projects in `workspace.projects`):
+         - Check if branch `{work-item-id}-{kebab-case-work-item-title}` exists using `git show-ref --verify --quiet refs/heads/{branch-name}` in that repository
+         - If branch exists:
+           - Get branch commit hash using `git rev-parse {branch-name}` in that repository
+           - Get trunk branch commit hash using `git rev-parse <trunk-branch>` in that repository (using project-specific trunk branch if configured)
+           - Compare commits:
+             - If commits match (branch points to trunk): Branch exists but has no commits
+             - If commits don't match (branch has commits): Branch has work
+         - Track branch status per repository: `branchStatus map[string]BranchStatus` where key is repository path and value indicates: `not_exists`, `points_to_trunk`, or `has_commits`
+       - **All-or-nothing validation:** After checking all repositories:
+         - If ANY branch has commits: Abort with error listing all repositories where branch has commits: `"Error: Branch {branch-name} already exists and has commits in one or more repositories: {repo-list}. Branch contains work that would be lost. Delete the branches first if you want to start fresh, or use a different work item."`
+         - If ALL branches point to trunk (or don't exist): Continue with worktree creation
+           - If `--reuse-branch` flag is provided: Use existing branches in Phase 2 (checkout existing branches instead of creating new ones)
+           - If `--reuse-branch` flag is NOT provided: Abort with error listing all repositories where branch exists: `"Error: Branch {branch-name} already exists and points to trunk in one or more repositories: {repo-list}. Branch exists but has no commits. Use \`--reuse-branch\` to checkout existing branches in new worktrees, or delete the branches first: \`git branch -d {branch-name}\` (run in each repository)"`
+         - If SOME branches exist (point to trunk) and SOME don't exist: Treat as if all point to trunk (apply `--reuse-branch` logic consistently across all repositories)
+       - **Phase 2 branch creation:** After all worktrees created successfully:
+         - If `--reuse-branch` flag is provided: For each worktree where branch exists, checkout existing branch instead of creating new one
+         - If `--reuse-branch` flag is NOT provided: Create new branches in all worktrees (branches that existed pointing to trunk will be overwritten)
 
 2. **Git Errors**
    - **Trunk branch not found:** Error: `"Error: Trunk branch '{branch-name}' not found. Configured branch does not exist and auto-detection failed. Verify the branch name in \`git.trunk_branch\` configuration or ensure 'main' or 'master' branch exists."`
    - **Both "main" and "master" branches exist:** Error: `"Error: Both 'main' and 'master' branches exist. Cannot auto-detect trunk branch. Configure \`git.trunk_branch\` explicitly in kira.yml to specify which branch to use."`
-   - **Remote not found:** Warning: `"Warning: No remote '{remote-name}' configured. Skipping pull step. Worktree will be created from local trunk branch."` (where remote-name is from `git.remote` or "origin" default), skip pull step, continue with worktree creation
-   - **For polyrepo:** Each project uses its configured remote (`project.remote` or `git.remote` or "origin" default)
+   - **Remote not found:** Warning: `"Warning: No remote '{remote-name}' configured. Skipping pull step. Worktree will be created from local trunk branch."` (where remote-name is determined using priority order - see "Remote Name Resolution" section), skip pull step, continue with worktree creation
+   - **For polyrepo:** Each project uses its configured remote (determined using priority order - see "Remote Name Resolution" section)
    - **For polyrepo:** If some projects have remote and others don't: Skip pull for projects without remote (log warning per project: `"Warning: No remote '{project-remote-name}' configured for project '{project-name}'. Skipping pull step."`), pull for projects with remote, continue with worktree creation
    - **Uncommitted changes in trunk branch (before pull):** Error: `"Error: Trunk branch has uncommitted changes. Cannot proceed with pull operation. Commit or stash changes before starting work."`
    - **Pull merge conflicts:** Error: `"Error: Failed to merge latest changes from {remote-name}/{trunk-branch}. Merge conflicts detected. Resolve conflicts manually and try again."` Include git output in error message
@@ -670,8 +782,8 @@ Warning messages follow a similar format but use "Warning:" prefix and typically
    - **Status commit failure:** Error: `"Error: Failed to commit status change. Git commit operation failed. Check git output for details and resolve any issues."` Include git output, abort worktree creation (for commit_only/commit_and_push)
    - **Status push failure:** Error: `"Error: Failed to push status change to {remote-name}/{trunk-branch}. Git push operation failed. Check git output for details and resolve any issues."` Include git output, abort worktree creation (for commit_and_push)
    - **Worktree creation failure:** Error: `"Error: Failed to create worktree at {path}. Git worktree creation failed. Check git output for details and resolve any issues."` Include git output
-   - **Polyrepo worktree creation failure:** If any project's worktree creation fails, rollback all successfully created worktrees using `git worktree remove`, abort command with error: `"Error: Failed to create worktree for project '{project-name}'. Worktree creation failed for one or more projects. All worktrees have been rolled back. Check git output for details and resolve any issues."`
-   - **Polyrepo branch creation failure:** If any project's branch creation fails, rollback all successfully created worktrees using `git worktree remove`, abort command with error: `"Error: Failed to create branch for project '{project-name}'. Branch creation failed for one or more projects. All worktrees have been rolled back. Check git output for details and resolve any issues."`
+   - **Polyrepo worktree creation failure:** If any project's worktree creation fails, attempt to rollback all successfully created worktrees using `rollbackWorktrees()` helper function. If rollback succeeds, abort command with error: `"Error: Failed to create worktree for project '{project-name}'. Worktree creation failed for one or more projects. All worktrees have been rolled back. Check git output for details and resolve any issues."` If rollback fails, abort command with error: `"Error: Failed to create worktree for project '{project-name}'. Worktree creation failed for one or more projects. Rollback also failed: {rollback-error}. Some worktrees may remain. Check git output for details and resolve any issues."`
+   - **Polyrepo branch creation/checkout failure:** If any project's branch creation/checkout fails, attempt to rollback all successfully created worktrees using `rollbackWorktrees()` helper function. If rollback succeeds, abort command with error: `"Error: Failed to create/checkout branch for project '{project-name}'. Branch creation/checkout failed for one or more projects. All worktrees have been rolled back. Check git output for details and resolve any issues."` If rollback fails, abort command with error: `"Error: Failed to create/checkout branch for project '{project-name}'. Branch creation/checkout failed for one or more projects. Rollback also failed: {rollback-error}. Some worktrees may remain. Check git output for details and resolve any issues."`
    - **Branch checkout failure (with `--reuse-branch`):** Error: `"Error: Failed to checkout branch '{branch-name}' in worktree. Branch checkout operation failed. Check git output for details and resolve any issues."` Include git output
    - **Missing project repository (polyrepo):** Error: `"Error: Project repository not found at {path}. Path does not exist or is not a git repository. Verify path exists and is a git repository, or update project configuration in kira.yml."` Abort entire command (all-or-nothing)
 
@@ -711,7 +823,8 @@ kira start <work-item-id> --trunk-branch develop
 # Skip IDE opening (useful for agents or CI/CD environments - takes precedence over all IDE config)
 kira start <work-item-id> --no-ide
 
-# Override IDE command (overrides ide.command from config, ignores ide.args - no args passed)
+# Override IDE command (overrides ide.command from config, ignores ide.args)
+# Arguments can be passed via shell expansion: --ide "cursor --new-window"
 kira start <work-item-id> --ide <command>
 # Example: kira start 009 --ide cursor
 # Example: kira start 009 --ide "$KIRA_IDE"  (shell expands $KIRA_IDE before passing to kira)
@@ -732,42 +845,59 @@ kira start <work-item-id> --dry-run
 **Dry Run Mode (`--dry-run` flag):**
 
 If `--dry-run` flag is provided, the command will:
-- Preview what would be done without executing any operations
-- Show what worktrees would be created (paths and locations)
-- Show what branches would be created (names)
-- Show what status changes would be made (current status → target status)
-- Show what git operations would be performed (pull, commit, push)
-- Show what setup commands would be executed
-- Show what IDE would be opened (if configured)
+- **Validation:** Perform all validation steps (steps 1-3 and step 5 status check) as normal - these don't modify state
+  - Validate work item exists
+  - Infer workspace behavior
+  - Determine trunk branch
+  - **Status check (step 5):** Perform status check if `status_action` is not `none`
+    - If work item is already in target status and `--skip-status-check` is NOT provided: Show error that would occur: "Error: Work item {id} is already in '{move_to}' status. Work item status matches target status. Use --skip-status-check to restart work or review elsewhere."
+    - If work item is already in target status and `--skip-status-check` IS provided: Show that status check would be skipped and status update would be skipped
+    - If work item is not in target status: Show that status would be updated
+- **Preview generation:** After validation passes, generate structured preview without executing:
+  - Show what worktrees would be created (paths and locations)
+  - Show what branches would be created (names)
+  - Show what status changes would be made (current status → target status from `start.move_to`, or "no change" if `--skip-status-check` is provided or `status_action` is `none`)
+  - Show what git operations would be performed (pull, commit, push)
+  - Show what setup commands would be executed (if configured)
+  - Show what IDE would be opened (if configured)
 - **Does NOT execute:**
   - No git operations (no pull, no worktree creation, no branch creation, no commits, no pushes)
   - No file moves or status updates
   - No IDE opening
   - No setup command execution
-- Output format: Clear, structured preview showing all planned operations
-- Exit code: 0 (success) if preview can be generated, non-zero if there are errors that would prevent execution
+- **Output format:** Clear, structured preview showing all planned operations
+- **Exit code:**
+  - 0 (success) if preview can be generated successfully
+  - Non-zero if validation errors occurred (e.g., work item not found, status check would fail without `--skip-status-check`)
 
 **Command Execution Order:**
 
-**Note:** If `--dry-run` flag is provided, skip all execution steps (steps 4-10) and only perform validation (steps 1-3) and preview generation. Show what would be done without executing any operations.
+**Note:** If `--dry-run` flag is provided:
+- Perform validation steps (steps 1-3 and step 5 status check) as normal - these don't modify state
+- If validation fails (e.g., work item not found, status check would fail without `--skip-status-check`): Exit with non-zero code and show error
+- If validation passes: Generate preview showing what would be done, then exit with code 0
+- Skip all execution steps (steps 4, 6-10) - no git operations, no file moves, no IDE opening, no setup execution
 
 1. Validate work item exists
 2. **Infer workspace behavior** (see "Workspace Behavior Inference" section for detailed logic)
-3. **Determine trunk branch:** (See "Git Operations" section in Implementation Notes for detailed algorithm and exact commands)
-   - Detect trunk branch using configured value or auto-detection
+3. **Determine trunk branch and validate current branch:** (See "Git Operations" section in Implementation Notes for detailed algorithm and exact commands)
+   - Determine trunk branch (configured or auto-detected)
+   - Validate that current branch (from `git rev-parse --abbrev-ref HEAD`) matches trunk branch
+   - If not on trunk branch, fail with error: "Error: Start command can only be run from trunk branch. Please checkout the trunk branch and try again."
    - Handle conflicts when both "main" and "master" exist
 4. **Pull latest changes from remote:** (See "Git Operations" section in Implementation Notes for detailed pull strategy and exact command sequences)
    - Pull latest changes from remote on trunk branch (and all project repos for polyrepo)
    - Use `git fetch` + `git merge` approach (not `git pull`) for more control
    - Handle missing remotes, uncommitted changes, merge conflicts, and network errors
-5. **Check work item status:**
+5. **Check work item status:** (Only if `status_action` is not `none` - if `status_action` is `none`, skip this step entirely)
    - Get configured status folder from `start.move_to` (defaults to "doing" if not configured)
+   - **Note:** This check applies regardless of when status update occurs (step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`), because the status will be updated eventually
    - If work item status already matches configured status and `--skip-status-check` flag is not provided:
-     - Fail with error: "Work item {id} is already in '{move_to}' status. Use --skip-status-check to restart work or review elsewhere." (where {move_to} is the configured value)
+     - Fail with error: "Error: Work item {id} is already in '{move_to}' status. Work item status matches target status. Use --skip-status-check to restart work or review elsewhere." (where {move_to} is the configured value)
    - If work item status matches configured status and `--skip-status-check` flag is provided:
-     - Skip status update step, proceed directly to worktree creation
+     - Skip status update step (step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`), proceed directly to worktree creation
      - Allows resuming work or reviewing work item in different location
-   - If work item status does not match configured status: Continue with normal flow
+   - If work item status does not match configured status: Continue with normal flow (status update will occur at step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`)
 6. **If `status_action` is not `none`:** (See "Git Operations" section in Implementation Notes for detailed status management and commit operations)
    - Move work item to configured status folder (`start.move_to`, defaults to "doing")
    - If `status_action` is `commit_only` or `commit_and_push`: Commit (and optionally push) status change on trunk branch before worktree creation
@@ -783,9 +913,11 @@ If `--dry-run` flag is provided, the command will:
    - Polyrepo: Open at worktree root (`{worktree_root}/{work-item-id}-{kebab-case-work-item-title}`, see "Worktree Location" section for defaults)
 10. Run setup commands/scripts (if configured):
    - **Main project setup:** If `workspace.setup` is configured:
+     - **Main project definition:** The main project is the repository where `kira.yml` is located
+     - **Note:** The main project is never listed in `workspace.projects` (it's the repository containing `kira.yml`), but it always gets a worktree created
      - Execute setup command/script in main project worktree directory
      - For standalone/monorepo: Run in `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}`
-     - For polyrepo: Run in main project worktree (if main project has its own worktree)
+     - For polyrepo: Run in main project worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/main/` (or `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{main-project-name}/`)
    - **Project-specific setup:** For each project in polyrepo with `project.setup` configured:
      - Execute setup command/script in that project's worktree directory
      - Run in the worktree path where the project is located
@@ -803,9 +935,16 @@ If `--dry-run` flag is provided, the command will:
 
 0. **Dry Run Mode**
    - [ ] `--dry-run` flag shows preview of what would be done without executing
+   - [ ] Performs all validation steps (steps 1-3 and step 5 status check) as normal - these don't modify state
+   - [ ] **Status check in dry-run:**
+     - [ ] If `status_action` is not `none`: Performs status check (step 5) during dry-run
+     - [ ] If work item is already in target status and `--skip-status-check` is NOT provided: Exits with non-zero code and shows error that would occur
+     - [ ] If work item is already in target status and `--skip-status-check` IS provided: Shows in preview that status check would be skipped and status update would be skipped
+     - [ ] If work item is not in target status: Shows in preview that status would be updated from current to target status
+     - [ ] If `status_action` is `none`: Skips status check and shows "no status change" in preview
    - [ ] Shows what worktrees would be created (paths and locations)
    - [ ] Shows what branches would be created (names)
-   - [ ] Shows what status changes would be made (current status → target status from `start.move_to`)
+   - [ ] Shows what status changes would be made (current status → target status from `start.move_to`, or "no change" if `--skip-status-check` is provided or `status_action` is `none`)
    - [ ] Shows what git operations would be performed (pull, commit, push)
    - [ ] Shows what setup commands would be executed (if configured)
    - [ ] Shows what IDE would be opened (if configured)
@@ -814,28 +953,32 @@ If `--dry-run` flag is provided, the command will:
    - [ ] Does NOT open IDE
    - [ ] Does NOT run setup commands
    - [ ] Output format is clear and structured
-   - [ ] Exit code is 0 if preview can be generated, non-zero if there are errors that would prevent execution
+   - [ ] Exit code is 0 if preview can be generated successfully, non-zero if validation errors occurred (e.g., work item not found, status check would fail without `--skip-status-check`)
 
 1. **Work Item Resolution**
    - [ ] Command accepts work item ID and locates the corresponding file
    - [ ] Command fails with clear error if work item ID not found
    - [ ] Command extracts title and status from work item metadata correctly
    - [ ] If title is missing or "unknown": Uses work item ID as fallback, logs warning "Warning: Work item {id} has no title field. Using work item ID '{id}' for worktree directory and branch name."
+   - [ ] Status check only executes if `status_action` is not `none` (if `status_action` is `none`, skips status check entirely)
    - [ ] Command checks work item status after git pull (step 4) and before worktree creation (step 7) - executes as step 5
+   - [ ] Status check applies regardless of when status update occurs (step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`), because status will be updated eventually
    - [ ] Command fails with clear error if work item is already in configured status (`start.move_to`, defaults to "doing") (unless `--skip-status-check` flag)
-   - [ ] `--skip-status-check` flag allows command to proceed when work item is in "doing" status
-   - [ ] When `--skip-status-check` is used: Skips status update step (step 6), proceeds directly to worktree creation (step 7)
+   - [ ] `--skip-status-check` flag allows command to proceed when work item is in target status
+   - [ ] When `--skip-status-check` is used: Skips status update step (step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`), proceeds directly to worktree creation (step 7)
 
 2. **Git Worktree Creation**
    - [ ] Determines trunk branch: uses `git.trunk_branch` if configured, otherwise auto-detects (main/master)
    - [ ] If both "main" and "master" branches exist: fails with clear error asking user to configure `git.trunk_branch`
    - [ ] Validates trunk branch exists, errors clearly if not found
-   - [ ] Checks for remote 'origin' existence using `git remote get-url origin` before pulling
-   - [ ] If remote 'origin' doesn't exist: Logs warning "Warning: No remote 'origin' configured. Skipping pull step. Worktree will be created from local trunk branch." and skips pull step
+   - [ ] Determines remote name using priority order (see "Remote Name Resolution" section)
+   - [ ] Checks for remote existence using `git remote get-url <remote-name>` before pulling (where remote-name is determined using priority order)
+   - [ ] If remote doesn't exist: Logs warning "Warning: No remote '{remote-name}' configured. Skipping pull step. Worktree will be created from local trunk branch." and skips pull step
    - [ ] Continues with worktree creation even if remote doesn't exist
-   - [ ] For polyrepo: Checks each project repository independently; skips pull for projects without remote (logs warning per project)
+   - [ ] For polyrepo: Determines remote name per project using priority order (see "Remote Name Resolution" section)
+   - [ ] For polyrepo: Checks each project repository independently; skips pull for projects without remote (logs warning per project with the remote name that was checked)
    - [ ] Checks for uncommitted changes in trunk branch before pull; aborts with clear error if found
-   - [ ] Explicitly checks out trunk branch using `git checkout <trunk_branch>` before pulling
+   - [ ] Validates that current branch is trunk branch before any operations (does not checkout trunk branch - command must be run from trunk branch)
    - [ ] Pulls latest changes using `git fetch` + `git merge` (not `git pull`) for more control: `git fetch <remote-name> <trunk_branch>` followed by `git merge <remote-name>/<trunk_branch>`
    - [ ] Handles pull merge conflicts: aborts with clear error showing git output
    - [ ] Handles diverged branches: aborts with clear error message
@@ -847,21 +990,33 @@ If `--dry-run` flag is provided, the command will:
    - [ ] Creates git worktree from trunk branch
    - [ ] Worktree directory name uses sanitized work item title
    - [ ] Worktree is created in appropriate location (configurable)
-   - [ ] Checks if worktree path already exists before creation
-   - [ ] If worktree exists for same work item: Errors with message suggesting `--override` flag
-   - [ ] If worktree exists for different work item: Errors with message suggesting `--override` flag
-   - [ ] If path exists but is not valid git worktree: Errors with message suggesting manual removal or `--override`
-   - [ ] With `--override` flag: Removes existing worktree (using `git worktree remove`) or directory before creating new one
+   - [ ] **Standalone/Monorepo:** Checks if worktree path already exists before creation
+   - [ ] **Standalone/Monorepo:** If worktree exists for same work item: Errors with message suggesting `--override` flag
+   - [ ] **Standalone/Monorepo:** If worktree exists for different work item: Errors with message suggesting `--override` flag
+   - [ ] **Standalone/Monorepo:** If path exists but is not valid git worktree: Errors with message suggesting manual removal or `--override`
+   - [ ] **Standalone/Monorepo:** With `--override` flag: Removes existing worktree (using `git worktree remove` for valid worktrees, `os.RemoveAll` for invalid paths) before creating new one
+   - [ ] **Standalone/Monorepo:** With `--override` flag: If removal fails, aborts with error and does not create worktree
+   - [ ] **Polyrepo:** Checks all worktree paths before creating any (all-or-nothing approach)
+   - [ ] **Polyrepo:** Validates all paths before Phase 1 worktree creation - if ANY path exists and `--override` is NOT provided: Aborts with error listing all affected paths
+   - [ ] **Polyrepo:** If ANY path exists and `--override` IS provided: Removes all existing paths (valid worktrees using `git worktree remove`, invalid paths using `os.RemoveAll`) before creating worktrees
+   - [ ] **Polyrepo with --override:** `--override` applies to all conflicting worktree paths for the work item (main project and all projects in `workspace.projects`)
+   - [ ] **Polyrepo with --override:** All paths must be successfully removed before proceeding - if removal fails for any path, aborts with error and does not create any worktrees
+   - [ ] **Polyrepo:** Error messages list all affected paths when multiple paths conflict
    - [ ] Command handles git repository detection correctly
 
 3. **Branch Creation**
-   - [ ] Checks if branch `{work-item-id}-{kebab-case-work-item-title}` already exists in repository before creating worktree
+   - [ ] **Standalone/Monorepo:** Checks if branch `{work-item-id}-{kebab-case-work-item-title}` already exists in repository before creating worktree
+   - [ ] **Polyrepo:** Checks branch existence in each repository independently before creating any worktrees (all-or-nothing approach)
+   - [ ] **Polyrepo:** Validates all repositories before Phase 1 worktree creation - if ANY branch has commits, aborts with error listing all affected repositories
+   - [ ] **Polyrepo:** If ALL branches point to trunk (or don't exist) and `--reuse-branch` is NOT provided: Aborts with error listing all repositories where branch exists
+   - [ ] **Polyrepo:** If SOME branches exist and SOME don't: Treats consistently (applies `--reuse-branch` logic across all repositories)
    - [ ] Creates branch with format: `{work-item-id}-{kebab-case-work-item-title}`
    - [ ] Branch name is valid for git (no invalid characters)
    - [ ] Branch is checked out in the new worktree
    - [ ] If branch exists and points to trunk commit: Errors with message suggesting `--reuse-branch` flag or branch deletion
    - [ ] If branch exists and has commits: Errors with message requiring branch deletion or different work item
    - [ ] With `--reuse-branch` flag: Creates worktree without `-b` flag, changes to worktree directory, then checks out existing branch using `git checkout {branch-name}`
+   - [ ] **Polyrepo with `--reuse-branch`:** For each worktree where branch exists, checks out existing branch instead of creating new one
    - [ ] Branch creation explicitly changes to worktree directory before running `git checkout -b` command
    - [ ] If branch doesn't exist: Creates new branch using `git worktree add <path> -b <branch-name> <trunk-branch>`
 
@@ -877,18 +1032,25 @@ If `--dry-run` flag is provided, the command will:
    - [ ] Reads workspace configuration from `kira.yml` when present
    - [ ] Standalone and Monorepo: Creates single worktree and branch (same behavior)
    - [ ] Monorepo: Projects configuration provides LLM context only (does not affect worktree/branch)
+   - [ ] Polyrepo: Always creates worktree for main project (repository where `kira.yml` is located) at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/main/`
    - [ ] Polyrepo: Groups projects by `repo_root` value
    - [ ] Polyrepo: Creates ONE worktree at `repo_root` for each unique root value
    - [ ] Polyrepo: Creates ONE branch per repo_root group (shared by all projects in group)
    - [ ] Polyrepo: Skips worktree creation for subsequent projects with the same `repo_root`
    - [ ] Polyrepo: Creates separate worktree for each project without `repo_root` (standalone)
-   - [ ] Polyrepo: Uses consistent branch naming: `{work-item-id}-{kebab-case-work-item-title}` across all worktrees
-   - [ ] Polyrepo: Organizes worktrees at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{repo_root or project.mount}/`
+   - [ ] Polyrepo: Uses consistent branch naming: `{work-item-id}-{kebab-case-work-item-title}` across all worktrees (including main project)
+   - [ ] Polyrepo: Organizes worktrees at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{main/ or repo_root or project.mount}/`
    - [ ] Polyrepo: Validates all project repositories exist before creating any worktrees
    - [ ] Polyrepo: Errors clearly if project repository not found, aborts entire command (all-or-nothing)
+   - [ ] Polyrepo: Checks branch existence in each repository independently before creating any worktrees (all-or-nothing approach)
+   - [ ] Polyrepo: If ANY branch has commits: Aborts with error listing all repositories where branch has commits (all-or-nothing)
+   - [ ] Polyrepo: If ALL branches point to trunk (or don't exist) and `--reuse-branch` is NOT provided: Aborts with error listing all repositories where branch exists
+   - [ ] Polyrepo: If ALL branches point to trunk (or don't exist) and `--reuse-branch` IS provided: Continues with worktree creation, checks out existing branches in Phase 2
+   - [ ] Polyrepo: If SOME branches exist and SOME don't: Treats consistently (applies `--reuse-branch` logic across all repositories)
    - [ ] Polyrepo: Creates all worktrees first (Phase 1), then creates branches (Phase 2) for easier rollback
    - [ ] Polyrepo: If any worktree creation fails: Rolls back all successfully created worktrees using `git worktree remove`, aborts command with error
-   - [ ] Polyrepo: If any branch creation fails: Rolls back all successfully created worktrees using `git worktree remove`, aborts command with error
+   - [ ] Polyrepo: If any branch creation/checkout fails: Rolls back all successfully created worktrees using `git worktree remove`, aborts command with error
+   - [ ] Polyrepo with `--reuse-branch`: For each worktree where branch exists, checks out existing branch instead of creating new one
    - [ ] Polyrepo: Tracks all successfully created worktrees for rollback purposes
    - [ ] Handles mixed setup: some projects grouped by repo_root, others standalone
    - [ ] Respects draft_pr configuration at workspace and project levels
@@ -897,7 +1059,7 @@ If `--dry-run` flag is provided, the command will:
    - [ ] Checks `--no-ide` flag first (highest priority)
    - [ ] If `--no-ide` flag provided: Skips IDE opening entirely, no log messages (useful for agents)
    - [ ] If `--no-ide` not set: Checks `--ide` flag next
-   - [ ] If `--ide <command>` flag provided: Uses flag value as IDE command, ignores `ide.args` from config, executes with no args
+   - [ ] If `--ide <command>` flag provided: Uses flag value as IDE command (may include arguments via shell expansion), ignores `ide.args` from config, executes command as-is
    - [ ] If neither flag provided: Requires `ide.command` configuration in `kira.yml` - no auto-detection
    - [ ] If no IDE command found (flag or config): Skips IDE opening, logs info message, continues with worktree creation
    - [ ] Standalone/Monorepo: Opens IDE in worktree directory (if IDE command found)
@@ -905,12 +1067,15 @@ If `--dry-run` flag is provided, the command will:
    - [ ] IDE opens with correct branch checked out (if IDE command found)
    - [ ] Command continues successfully even if IDE launch fails
    - [ ] When using config: Respects IDE configuration from `kira.yml` (`ide.command` and `ide.args`)
-   - [ ] When using `--ide` flag: Overrides `ide.command` and ignores `ide.args` (no hardcoded IDE logic)
+   - [ ] When using `--ide` flag: Overrides `ide.command` and ignores `ide.args` (arguments can be included in flag value via shell expansion, e.g., `--ide "cursor --new-window"`)
    - [ ] If IDE command not found: Logs warning and continues (worktree creation succeeds)
    - [ ] If IDE launch fails: Logs warning and continues (worktree creation succeeds)
    - [ ] Worktree creation succeeds regardless of IDE behavior
    - [ ] **Setup Commands/Scripts:**
-     - [ ] If `workspace.setup` configured: Executes setup command/script in main project worktree directory
+     - [ ] If `workspace.setup` configured: Executes setup command/script in main project worktree directory (main project is repository where `kira.yml` is located)
+     - [ ] Main project is never listed in `workspace.projects` (it's the repository containing `kira.yml`), but it always gets a worktree created
+     - [ ] For standalone/monorepo: Runs `workspace.setup` in main project worktree
+     - [ ] For polyrepo: Runs `workspace.setup` in main project worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/main/`
      - [ ] If `project.setup` configured: Executes setup command/script in project worktree directory (for polyrepo)
      - [ ] Setup runs after IDE opening (allows user to start working while setup runs in background)
      - [ ] For script paths: Executes with appropriate shell (bash for .sh, python for .py, etc.)
@@ -920,10 +1085,12 @@ If `--dry-run` flag is provided, the command will:
      - [ ] If setup fails: Logs error and aborts command (setup is critical for environment preparation)
 
 6. **Status Management**
-   - [ ] If `status_action: none`: Work item status is not changed, proceed to worktree creation
-   - [ ] If `status_action: commit_only`: Updates status to configured status folder (`start.move_to`, defaults to "doing") and commits on trunk branch before worktree creation
-   - [ ] If `status_action: commit_and_push`: Updates status to configured status folder (`start.move_to`, defaults to "doing"), commits and pushes to trunk branch before worktree creation
-   - [ ] If `status_action: commit_only_branch`: Updates status to configured status folder (`start.move_to`, defaults to "doing") and commits on new branch after worktree creation
+   - [ ] If `status_action: none`: Work item status is not changed, proceed to worktree creation (status check at step 5 is skipped)
+   - [ ] Status check (step 5) applies for all `status_action` values except `none`, regardless of when status update occurs (step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`)
+   - [ ] If `status_action: commit_only`: Updates status to configured status folder (`start.move_to`, defaults to "doing") and commits on trunk branch before worktree creation (at step 6)
+   - [ ] If `status_action: commit_and_push`: Updates status to configured status folder (`start.move_to`, defaults to "doing"), commits and pushes to trunk branch before worktree creation (at step 6)
+   - [ ] If `status_action: commit_only_branch`: Updates status to configured status folder (`start.move_to`, defaults to "doing") and commits on new branch after worktree creation (at step 8)
+   - [ ] When `--skip-status-check` is used with `commit_only_branch`: Skips status update at step 8, proceeds directly after worktree creation
    - [ ] Updates work item status field correctly when status is changed
    - [ ] Validates work item before status update (when status is changed)
    - [ ] Respects `--status-action` flag (overrides config with: none|commit_only|commit_and_push|commit_only_branch)
@@ -939,11 +1106,11 @@ If `--dry-run` flag is provided, the command will:
    - [ ] If both "main" and "master" branches exist: fails with clear error asking user to configure `git.trunk_branch`
    - [ ] Handles custom trunk branch names (develop, trunk, production, etc.)
    - [ ] Errors clearly if trunk branch doesn't exist
-   - [ ] Determines remote name: Uses `git.remote` if configured, otherwise defaults to "origin"
-   - [ ] Checks for remote existence using `git remote get-url <remote-name>` before pulling
+   - [ ] Determines remote name using priority order (see "Remote Name Resolution" section)
+   - [ ] Checks for remote existence using `git remote get-url <remote-name>` before pulling (where remote-name is determined using priority order)
    - [ ] If remote doesn't exist: Logs warning "Warning: No remote '{remote-name}' configured. Skipping pull step. Worktree will be created from local trunk branch." and skips pull step
    - [ ] Continues with worktree creation even if remote doesn't exist
-   - [ ] For polyrepo: For each project, determines remote name: Uses `project.remote` if configured, otherwise uses `git.remote` (or "origin" if `git.remote` is also omitted)
+   - [ ] For polyrepo: For each project, determines remote name using priority order (see "Remote Name Resolution" section)
    - [ ] For polyrepo: Checks each project repository independently using its configured remote name; skips pull for projects without remote (logs warning per project with the remote name checked), pulls for projects with remote
    - [ ] Checks for uncommitted changes in trunk branch before pulling
    - [ ] Aborts with clear error if uncommitted changes found: "Trunk branch has uncommitted changes. Commit or stash changes before starting work."
@@ -961,29 +1128,47 @@ If `--dry-run` flag is provided, the command will:
 
 2. **Work Item States**
    - [ ] Works with work items in any status folder
+   - [ ] Status check only executes if `status_action` is not `none` (if `status_action` is `none`, skips status check entirely)
    - [ ] Checks work item status after git pull (step 4) and before worktree creation (step 7) - executes as step 5
+   - [ ] Status check applies regardless of when status update occurs (step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`), because status will be updated eventually
    - [ ] If work item is already in configured status (`start.move_to`, defaults to "doing"): Fails unless `--skip-status-check` flag is provided
    - [ ] `--skip-status-check` flag allows restarting work or reviewing work item elsewhere
-   - [ ] When `--skip-status-check` is used: Skips status update step (step 6), proceeds directly to worktree creation (step 7)
+   - [ ] When `--skip-status-check` is used: Skips status update step (step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`), proceeds directly to worktree creation (step 7)
    - [ ] Handles work items with special characters in title
    - [ ] Handles very long work item titles (truncates appropriately)
    - [ ] Handles work items with missing title field: Uses work item ID as fallback, logs warning "Warning: Work item {id} has no title field. Using work item ID '{id}' for worktree directory and branch name."
-   - [ ] When title is missing: Worktree directory becomes `{work-item-id}-{work-item-id}` and branch becomes `{work-item-id}-{work-item-id}`
+   - [ ] When title is missing: Worktree directory becomes `{work-item-id}` and branch becomes `{work-item-id}`
+   - [ ] **Title sanitization uses same algorithm as `kira new`:** Converts to lowercase, replaces spaces and underscores with hyphens (same as `kebabCase()` function in `internal/commands/new.go`)
+   - [ ] **Unicode characters:** Unicode characters are converted to lowercase as-is (no special normalization), same as `kira new`
+   - [ ] **Invalid work item ID:** Command fails with error "Error: Invalid work item ID '{id}'. Work item ID contains invalid characters or doesn't match expected format. Work item IDs must be valid identifiers." if ID contains invalid characters or doesn't match format
+   - [ ] **Empty sanitized title:** Command fails with error "Error: Work item '{id}' title sanitization resulted in empty string. Title cannot be sanitized to a valid name. Please update the work item title to include valid characters." if sanitization results in empty string
+   - [ ] **Path sanitization:** All path values (`worktree_root`, `repo_root`, `project.path`) are sanitized using `filepath.Clean()` and validated before use (consistent with other file operations in codebase)
+   - [ ] **Invalid path:** Command fails with error "Error: Invalid path '{path}'. Path contains invalid characters or path traversal attempts. Please check your configuration and try again." if path sanitization or validation fails
+   - [ ] **Directory name sanitization:** `sanitized-repo-root` is created by extracting directory name from `repo_root` using `filepath.Base()` and applying kebab-case sanitization (lowercase, replace spaces/underscores with hyphens)
+   - [ ] **Trunk branch validation:** Command validates that current branch (from `git rev-parse --abbrev-ref HEAD`) matches the determined trunk branch before any operations
+   - [ ] **Not on trunk branch:** Command fails with error "Error: Start command can only be run from trunk branch. Please checkout the trunk branch and try again." if current branch is not the trunk branch
 
 3. **File System**
    - [ ] Handles permission errors gracefully
    - [ ] Works with relative and absolute paths
    - [ ] Handles spaces in directory names
    - [ ] Works on Windows, macOS, and Linux
-   - [ ] Handles worktree path already exists for same work item (errors with suggestion to use `--override`)
-   - [ ] Handles worktree path already exists for different work item (errors with suggestion to use `--override`)
-   - [ ] Handles path exists but is not a valid git worktree (errors with suggestion to use `--override`)
-   - [ ] `--override` flag removes existing valid git worktree using `git worktree remove`
-   - [ ] `--override` flag removes existing invalid worktree directory using filesystem operations
-   - [ ] `--override` flag handles worktree with uncommitted changes (uses `git worktree remove --force`)
+   - [ ] **Standalone/Monorepo:** Handles worktree path already exists for same work item (errors with suggestion to use `--override`)
+   - [ ] **Standalone/Monorepo:** Handles worktree path already exists for different work item (errors with suggestion to use `--override`)
+   - [ ] **Standalone/Monorepo:** Handles path exists but is not a valid git worktree (errors with suggestion to use `--override`)
+   - [ ] **Standalone/Monorepo:** `--override` flag removes existing valid git worktree using `git worktree remove`
+   - [ ] **Standalone/Monorepo:** `--override` flag removes existing invalid worktree directory using filesystem operations
+   - [ ] **Standalone/Monorepo:** `--override` flag handles worktree with uncommitted changes (uses `git worktree remove --force`)
+   - [ ] **Polyrepo:** Checks all worktree paths before creating any (all-or-nothing approach)
+   - [ ] **Polyrepo:** If ANY path exists and `--override` is NOT provided: Aborts with error listing all affected paths
+   - [ ] **Polyrepo:** If ANY path exists and `--override` IS provided: Removes all existing paths before creating worktrees (all-or-nothing: all must succeed or command aborts)
+   - [ ] **Polyrepo:** Error messages list all affected paths when multiple paths conflict
 
 4. **Setup Behavior**
-   - [ ] If `workspace.setup` configured: Executes in main project worktree directory
+   - [ ] If `workspace.setup` configured: Executes in main project worktree directory (main project is repository where `kira.yml` is located)
+   - [ ] Main project is never listed in `workspace.projects` (it's the repository containing `kira.yml`), but it always gets a worktree created
+   - [ ] For standalone/monorepo: Runs `workspace.setup` in main project worktree
+   - [ ] For polyrepo: Runs `workspace.setup` in main project worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/main/`
    - [ ] If `project.setup` configured: Executes in project worktree directory (for polyrepo)
    - [ ] Setup runs after IDE opening (allows user to start working while setup runs in background)
    - [ ] Handles script paths (e.g., `./scripts/setup.sh`) by detecting and using appropriate shell
@@ -997,12 +1182,12 @@ If `--dry-run` flag is provided, the command will:
    - [ ] Checks `--no-ide` flag first (highest priority)
    - [ ] If `--no-ide` flag provided: Skips IDE opening entirely, no log messages (useful for agents)
    - [ ] If `--no-ide` not set: Checks `--ide` flag next
-   - [ ] If `--ide <command>` flag provided: Uses flag value, ignores `ide.args` from config, executes with no args
+   - [ ] If `--ide <command>` flag provided: Uses flag value (may include arguments via shell expansion), ignores `ide.args` from config, executes command as-is
    - [ ] If neither flag provided: Requires `ide.command` configuration - no auto-detection
    - [ ] If no IDE command found (flag or config): Skips IDE opening, logs info message, continues
    - [ ] All IDE behavior is controlled by `--ide` flag or `ide.command`/`ide.args` configuration (no hardcoded IDE logic)
    - [ ] When using config: User configures appropriate args for their IDE in `kira.yml` (e.g., `["--new-window"]` to open in new window)
-   - [ ] When using `--ide` flag: No args are passed (user can rely on shell expansion like `--ide "$KIRA_IDE"`)
+   - [ ] When using `--ide` flag: Arguments can be included in flag value via shell expansion (e.g., `--ide "cursor --new-window"` or `--ide "$KIRA_IDE"`). Command is executed as-is by the shell.
    - [ ] If IDE command not found: Logs warning and continues (worktree creation succeeds)
    - [ ] If IDE launch fails: Logs warning "Warning: Failed to launch IDE. Worktree created successfully. You can manually open the IDE at {path}."
    - [ ] Worktree creation succeeds regardless of IDE behavior
@@ -1016,25 +1201,43 @@ If `--dry-run` flag is provided, the command will:
    - [ ] Polyrepo: If any branch creation fails, rolls back all successfully created worktrees
    - [ ] Polyrepo: Rollback removes worktrees in reverse order of creation
    - [ ] Polyrepo: Rollback handles worktrees with uncommitted changes (uses `git worktree remove --force`)
-   - [ ] Polyrepo: Rollback continues attempting to remove other worktrees even if one removal fails
-   - [ ] Polyrepo: Error messages clearly indicate which project failed and that rollback was performed
+   - [ ] Polyrepo: Rollback aborts immediately if any removal fails (does not continue attempting to remove other worktrees)
+   - [ ] Polyrepo: If rollback fails, error message indicates which worktree failed to remove and that rollback was aborted: "Error: Failed to remove worktree at {path} during rollback. Rollback aborted. {error-details}. Resolve the issue and try again."
+   - [ ] Polyrepo: Error messages clearly indicate which project failed and whether rollback succeeded or was aborted
 
 7. **Error Scenarios** (Explicit test cases for all error conditions mentioned in Error Handling section)
 
    **Validation Errors:**
+   - [ ] **Invalid `start.move_to` value:** Config load fails with error: "Error: Invalid status '{invalid_status}'. Status must be one of the following: {valid_statuses}. Please check your configuration and try again." (where `{invalid_status}` is the configured `start.move_to` value, and `{valid_statuses}` is a comma-separated list of all keys in `cfg.StatusFolders`, sorted alphabetically). Command does not execute.
+   - [ ] **Invalid work item ID:** Command fails with error: "Error: Invalid work item ID '{id}'. Work item ID contains invalid characters or doesn't match expected format. Work item IDs must be valid identifiers." Command does not execute.
+   - [ ] **Empty sanitized title:** Command fails with error: "Error: Work item '{id}' title sanitization resulted in empty string. Title cannot be sanitized to a valid name. Please update the work item title to include valid characters." Command does not execute.
+   - [ ] **Invalid path:** Command fails with error: "Error: Invalid path '{path}'. Path contains invalid characters or path traversal attempts. Please check your configuration and try again." (when `worktree_root`, `repo_root`, or `project.path` values fail path sanitization or validation) Command does not execute.
+   - [ ] **Not on trunk branch:** Command fails with error: "Error: Start command can only be run from trunk branch. Please checkout the trunk branch and try again." (occurs after trunk branch determination, before any pull operations or worktree creation) Command does not execute.
    - [ ] **Work item not found:** Command fails with error: "Error: Work item '{id}' not found. No work item file exists with that ID. Check the work item ID and try again."
    - [ ] **Work item missing title:** Command logs warning "Warning: Work item {id} has no title field. Using work item ID '{id}' for worktree directory and branch name." and continues execution using work item ID as fallback
    - [ ] **Invalid git repository:** Command fails with error: "Error: Not a git repository. Current directory is not a git repository. Run this command from within a git repository."
    - [ ] **Worktree path already exists (same work item):** Command fails with error: "Error: Worktree already exists at {path} for work item {id}. A worktree for this work item already exists. Use `--override` to remove existing worktree and create a new one, or use the existing worktree."
    - [ ] **Worktree path already exists (different work item):** Command fails with error: "Error: Worktree path {path} already exists for a different work item. Path conflicts with existing worktree. Use `--override` to remove existing worktree, or choose a different work item."
    - [ ] **Path exists but not valid git worktree:** Command fails with error: "Error: Path {path} already exists but is not a valid git worktree. Cannot create worktree at this location. Remove it manually and try again, or use `--override` to remove it automatically."
+   - [ ] **Polyrepo worktree path already exists (same work item):** Command fails with error listing all affected paths: "Error: Worktree already exists at one or more paths for work item {id}: {path-list}. A worktree for this work item already exists. Use `--override` to remove existing worktrees and create new ones, or use the existing worktrees."
+   - [ ] **Polyrepo worktree path already exists (different work item):** Command fails with error listing all affected paths: "Error: Worktree path(s) already exist for different work items: {path-list}. Path conflicts with existing worktrees. Use `--override` to remove existing worktrees, or choose a different work item."
+   - [ ] **Polyrepo path exists but not valid git worktree:** Command fails with error listing all affected paths: "Error: Path(s) already exist but are not valid git worktrees: {path-list}. Cannot create worktrees at these locations. Remove them manually and try again, or use `--override` to remove them automatically."
+   - [ ] **Polyrepo worktree path validation:** Checks all worktree paths before creating any (all-or-nothing approach)
+   - [ ] **Polyrepo with --override:** Removes all existing paths (valid worktrees using `git worktree remove`, invalid paths using `os.RemoveAll`) before creating worktrees
+   - [ ] **Polyrepo with --override:** `--override` applies to all conflicting worktree paths for the work item (main project and all projects in `workspace.projects`)
+   - [ ] **Polyrepo with --override failure:** If removal fails for any path (e.g., worktree locked, permission denied), aborts with error: "Error: Failed to remove existing worktree at {path}. Cannot proceed with --override. {error-details}. Resolve the issue and try again." and does not create any worktrees
+   - [ ] **Standalone/Monorepo with --override failure:** If removal fails, aborts with error: "Error: Failed to remove existing worktree at {path}. Cannot proceed with --override. {error-details}. Resolve the issue and try again." and does not create worktree
    - [ ] **Branch already exists (points to trunk):** Command fails with error: "Error: Branch {branch-name} already exists and points to trunk. Branch exists but has no commits. Use `--reuse-branch` to checkout existing branch in new worktree, or delete the branch first: `git branch -d {branch-name}`"
    - [ ] **Branch already exists (has commits):** Command fails with error: "Error: Branch {branch-name} already exists and has commits. Branch contains work that would be lost. Delete the branch first if you want to start fresh: `git branch -D {branch-name}`, or use a different work item."
+   - [ ] **Polyrepo branch already exists (has commits):** Command fails with error listing all repositories: "Error: Branch {branch-name} already exists and has commits in one or more repositories: {repo-list}. Branch contains work that would be lost. Delete the branches first if you want to start fresh, or use a different work item."
+   - [ ] **Polyrepo branch already exists (points to trunk, no --reuse-branch):** Command fails with error listing all repositories: "Error: Branch {branch-name} already exists and points to trunk in one or more repositories: {repo-list}. Branch exists but has no commits. Use `--reuse-branch` to checkout existing branches in new worktrees, or delete the branches first: `git branch -d {branch-name}` (run in each repository)"
+   - [ ] **Polyrepo branch existence check:** Checks branch existence in each repository independently before creating any worktrees (all-or-nothing approach)
+   - [ ] **Polyrepo with --reuse-branch:** For each worktree where branch exists, checks out existing branch instead of creating new one
 
    **Git Errors:**
    - [ ] **Trunk branch not found:** Command fails with error: "Error: Trunk branch '{branch-name}' not found. Configured branch does not exist and auto-detection failed. Verify the branch name in `git.trunk_branch` configuration or ensure 'main' or 'master' branch exists."
    - [ ] **Both 'main' and 'master' branches exist:** Command fails with error: "Error: Both 'main' and 'master' branches exist. Cannot auto-detect trunk branch. Configure `git.trunk_branch` explicitly in kira.yml to specify which branch to use."
-   - [ ] **Repository without remote origin:** Command logs warning "Warning: No remote '{remote-name}' configured. Skipping pull step. Worktree will be created from local trunk branch." and continues with worktree creation
+   - [ ] **Repository without remote:** Command logs warning "Warning: No remote '{remote-name}' configured. Skipping pull step. Worktree will be created from local trunk branch." (where remote-name is determined using priority order - see "Remote Name Resolution" section) and continues with worktree creation
    - [ ] **Uncommitted changes in trunk branch (before pull):** Command fails with error: "Error: Trunk branch has uncommitted changes. Cannot proceed with pull operation. Commit or stash changes before starting work."
    - [ ] **Uncommitted changes in trunk branch (for commit_only/commit_and_push):** Command fails with error: "Error: Trunk branch has uncommitted changes. Cannot commit status change. Commit or stash changes before starting work."
    - [ ] **Pull merge conflicts:** Command fails with error: "Error: Failed to merge latest changes from {remote-name}/{trunk-branch}. Merge conflicts detected. Resolve conflicts manually and try again." (includes git output)
@@ -1044,8 +1247,9 @@ If `--dry-run` flag is provided, the command will:
    - [ ] **Status commit failure:** Command fails with error: "Error: Failed to commit status change. Git commit operation failed. Check git output for details and resolve any issues." (includes git output, aborts worktree creation)
    - [ ] **Status push failure:** Command fails with error: "Error: Failed to push status change to {remote-name}/{trunk-branch}. Git push operation failed. Check git output for details and resolve any issues." (includes git output, aborts worktree creation)
    - [ ] **Worktree creation failure:** Command fails with error: "Error: Failed to create worktree at {path}. Git worktree creation failed. Check git output for details and resolve any issues." (includes git output)
-   - [ ] **Polyrepo worktree creation failure:** Command fails with error: "Error: Failed to create worktree for project '{project-name}'. Worktree creation failed for one or more projects. All worktrees have been rolled back. Check git output for details and resolve any issues."
-   - [ ] **Polyrepo branch creation failure:** Command fails with error: "Error: Failed to create branch for project '{project-name}'. Branch creation failed for one or more projects. All worktrees have been rolled back. Check git output for details and resolve any issues."
+   - [ ] **Polyrepo worktree creation failure:** Command attempts rollback. If rollback succeeds, fails with error: "Error: Failed to create worktree for project '{project-name}'. Worktree creation failed for one or more projects. All worktrees have been rolled back. Check git output for details and resolve any issues." If rollback fails, fails with error: "Error: Failed to create worktree for project '{project-name}'. Worktree creation failed for one or more projects. Rollback also failed: {rollback-error}. Some worktrees may remain. Check git output for details and resolve any issues."
+   - [ ] **Polyrepo branch creation/checkout failure:** Command attempts rollback. If rollback succeeds, fails with error: "Error: Failed to create/checkout branch for project '{project-name}'. Branch creation/checkout failed for one or more projects. All worktrees have been rolled back. Check git output for details and resolve any issues." If rollback fails, fails with error: "Error: Failed to create/checkout branch for project '{project-name}'. Branch creation/checkout failed for one or more projects. Rollback also failed: {rollback-error}. Some worktrees may remain. Check git output for details and resolve any issues."
+   - [ ] **Polyrepo rollback failure:** If rollback itself fails (e.g., worktree is locked, permission denied), command aborts immediately with error: "Error: Failed to remove worktree at {path} during rollback. Rollback aborted. {error-details}. Resolve the issue and try again." Does not continue attempting to remove other worktrees.
    - [ ] **Branch checkout failure (with --reuse-branch):** Command fails with error: "Error: Failed to checkout branch '{branch-name}' in worktree. Branch checkout operation failed. Check git output for details and resolve any issues." (includes git output)
    - [ ] **Missing project repository (polyrepo):** Command fails with error: "Error: Project repository not found at {path}. Path does not exist or is not a git repository. Verify path exists and is a git repository, or update project configuration in kira.yml." (aborts entire command)
 
@@ -1084,6 +1288,31 @@ If `--dry-run` flag is provided, the command will:
 
 ## Implementation Notes
 
+### Concurrent Execution Safety
+
+**Concurrent Execution Handling:**
+
+The `kira start` command is designed to support concurrent execution for different work items, which is essential for agentic workflows where multiple tasks are worked on simultaneously.
+
+- **Partial protection via work item state change:** Concurrent execution is partially handled by the change of state for the work item file. When `kira start` moves a work item to a different status folder (e.g., from "backlog" to "doing"), this file system operation provides some natural protection against concurrent modifications of the same work item.
+
+- **No explicit file locking:** The `kira start` command does not implement explicit file locking mechanisms or additional race condition protections beyond the natural file system operations.
+
+- **Concurrent execution for different work items:** Multiple `kira start` commands can run simultaneously for different work items without conflicts, as each work item operates on its own file and creates its own isolated worktree.
+
+- **Same work item concurrent execution:** If two `kira start` commands run simultaneously for the same work item, the behavior depends on timing:
+  - If both commands attempt to move the work item file at the same time, one will succeed and the other may fail with a "file not found" error or may detect the work item is already in the target status.
+  - The status check (step 5) provides some protection: if one command successfully moves the work item, the second command will detect it's already in the target status and fail (unless `--skip-status-check` is provided).
+  - Worktree creation conflicts are handled by the existing worktree path validation logic (see "Error Handling" section).
+
+- **No additional safety measures:** Further measures of safety (such as file locking, mutexes, or transaction-like operations) are not a concern for the `kira start` command at this point. The command relies on:
+  1. Natural file system operations (file moves are atomic on most filesystems)
+  2. Git worktree validation (prevents duplicate worktree creation)
+  3. Status check validation (prevents duplicate status updates)
+  4. Branch existence checks (prevents duplicate branch creation)
+
+- **Recommendation for users:** For maximum safety when running concurrent commands, users should ensure different work items are used for each concurrent `kira start` execution, or use appropriate coordination mechanisms at the workflow level if concurrent execution of the same work item is required.
+
 ### Architecture
 
 **Architectural Recommendation: Centralized Command Execution**
@@ -1110,16 +1339,29 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
 
 0. **Dry Run Mode Implementation**
    - **Flag detection:** Check for `--dry-run` flag early in command execution (before any state-modifying operations)
-   - **Validation:** Perform all validation steps (work item exists, trunk branch detection, status check) as normal - these don't modify state
-   - **Preview generation:** After validation, generate structured preview without executing:
+   - **Validation:** Perform all validation steps as normal - these don't modify state:
+     - Step 1: Validate work item exists
+     - Step 2: Infer workspace behavior
+     - Step 3: Determine trunk branch
+     - Step 4: Pull latest changes (skip if `--dry-run` - this is a git operation, but we need to check for uncommitted changes)
+     - Step 5: **Status check** (if `status_action` is not `none`):
+       - Check current work item status
+       - If work item is already in target status and `--skip-status-check` is NOT provided:
+         - Exit with non-zero code and show error: "Error: Work item {id} is already in '{move_to}' status. Work item status matches target status. Use --skip-status-check to restart work or review elsewhere."
+         - Do NOT generate preview (validation failed)
+       - If work item is already in target status and `--skip-status-check` IS provided:
+         - Show in preview that status check would be skipped and status update would be skipped
+       - If work item is not in target status:
+         - Show in preview that status would be updated from current status to target status
+   - **Preview generation:** After validation passes, generate structured preview without executing:
      - **Worktrees:** List all worktrees that would be created with their full paths (e.g., `../my-project_worktrees/123-fix-bug/`)
      - **Branches:** List all branches that would be created with their names (e.g., `123-fix-bug`)
-     - **Status changes:** Show current status → target status (from `start.move_to` config, defaults to "doing")
+     - **Status changes:** Show current status → target status (from `start.move_to` config, defaults to "doing"), or "no change" if `--skip-status-check` is provided or `status_action` is `none`
      - **Git operations:** List what git commands would be executed:
        - `git fetch <remote> <trunk_branch>` + `git merge <remote>/<trunk_branch>` (if remote exists)
        - `git worktree add <path> -b <branch> <trunk>` (worktree creation)
-       - `git commit` (if `status_action` requires commit)
-       - `git push` (if `status_action` is `commit_and_push`)
+       - `git commit` (if `status_action` requires commit and status check passes)
+       - `git push` (if `status_action` is `commit_and_push` and status check passes)
      - **Setup commands:** List what setup commands/scripts would be executed (if `workspace.setup` or `project.setup` configured)
      - **IDE:** Show what IDE command would be executed (if `ide.command` configured or `--ide` flag provided)
    - **Output format:** Use structured output with clear sections and indentation for readability
@@ -1146,6 +1388,7 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
        - Check if both "main" and "master" branches exist using `git show-ref --verify --quiet refs/heads/main` and `git show-ref --verify --quiet refs/heads/master`
        - If both branches exist: fail with error: "Both 'main' and 'master' branches exist. Configure `git.trunk_branch` explicitly in kira.yml to specify which branch to use."
        - Validate trunk branch exists, error if not found
+       - **Validate current branch is trunk:** After determining trunk branch, check if current branch (from `git rev-parse --abbrev-ref HEAD`) matches the trunk branch. If not, fail with error: "Error: Start command can only be run from trunk branch. Please checkout the trunk branch and try again." This validation occurs before any pull operations or worktree creation.
      - **Polyrepo:** For each project:
        - **Priority order:** Check `project.trunk_branch` first, then `git.trunk_branch`, then auto-detect
        - **Per-project override:** If `project.trunk_branch` is configured, use that value for this project
@@ -1156,7 +1399,7 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
          - Otherwise: fail with error: "Both 'main' and 'master' branches exist in {project.path}. Configure `git.trunk_branch` (workspace-level) or `trunk_branch` in project config to specify which branch to use."
        - **Validation:** Validate trunk branch exists in each project's repository, error if not found
    - **Pull Latest Changes:**
-     - **Remote Name Resolution:**
+     - **Remote Name Resolution:** See "Remote Name Resolution" section for priority order
        - For main repository: Use `git.remote` if configured, otherwise default to "origin"
        - For polyrepo projects: For each project, determine remote name in order of precedence:
          1. `project.remote` if configured
@@ -1167,17 +1410,17 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
        - Skip pull step, continue with worktree creation
      - Check for uncommitted changes in trunk branch using `git status --porcelain`; if output is non-empty, abort with error: "Error: Trunk branch has uncommitted changes. Cannot proceed with pull operation. Commit or stash changes before starting work."
      - **Standalone/Monorepo pull sequence:**
-       - Determine remote name: Use `git.remote` if configured, otherwise default to "origin"
-       - **Ensure we're on trunk branch:** Explicitly checkout trunk branch (configured or auto-detected) using `git checkout <trunk_branch>`
+       - Determine remote name using priority order (see "Remote Name Resolution" section): Use `git.remote` if configured, otherwise default to "origin"
+       - **Note:** Trunk branch checkout is not needed since validation ensures we're already on trunk branch (see trunk branch validation step above). The command must be run from the trunk branch.
        - **Pull latest changes:** Use `git fetch` + `git merge` for more control (rather than `git pull`):
-         - Run `git fetch <remote-name> <trunk_branch>` to fetch latest changes (where remote-name is from `git.remote` or "origin" default)
+         - Run `git fetch <remote-name> <trunk_branch>` to fetch latest changes (where remote-name is determined using priority order)
          - Run `git merge <remote-name>/<trunk_branch>` to merge remote changes into local trunk branch
      - **Polyrepo pull sequence:** For each project:
-       - Determine remote name: Use `project.remote` if configured, otherwise `git.remote` (or "origin" if `git.remote` is also omitted)
+       - Determine remote name using priority order (see "Remote Name Resolution" section): Use `project.remote` if configured, then `git.remote` if configured, then "origin" as final default
        - Check if remote exists: Run `git remote get-url <project-remote-name>` in each project's repository directory
        - If remote doesn't exist: Skip pull for this project (log warning: "Warning: No remote '{project-remote-name}' configured for project '{project-name}'. Skipping pull step.")
        - If remote exists:
-         - **Ensure we're on trunk branch:** Explicitly checkout trunk branch using `git checkout <trunk-branch>` (using project-specific trunk branch if `project.trunk_branch` is configured)
+         - **Note:** Trunk branch checkout is not needed for main repository since validation ensures we're already on trunk branch (see trunk branch validation step above). The command must be run from the trunk branch.
          - **Pull latest changes:** Use `git fetch` + `git merge` for more control:
            - Run `git fetch <project-remote-name> <trunk-branch>` to fetch latest changes
            - Run `git merge <project-remote-name>/<trunk-branch>` to merge remote changes into local trunk branch
@@ -1187,17 +1430,20 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
      - For polyrepo: Perform above steps sequentially for all project repositories; abort entire command if any project's pull fails (all-or-nothing approach)
      - This ensures everything is up-to-date before any operations
    - **Work Item Status Check:** (Executes as step 5 in Command Execution Order, after git pull and before worktree creation)
+     - **Note:** This check only applies if `status_action` is not `none` (if `status_action` is `none`, skip this check entirely since no status update will occur)
      - After git pull completes successfully (step 4), check current work item status
      - This ensures we're checking the most up-to-date work item status after pulling latest changes
      - Get configured status from `start.move_to` (defaults to "doing")
-     - If status matches configured value and `--skip-status-check` flag is not provided:
-       - Return error: "Error: Work item {id} is already in '{move_to}' status. Work item status matches target status. Use --skip-status-check to restart work or review elsewhere." (where {move_to} is the configured value)
-       - Abort command before worktree creation (step 7)
-     - If status is "doing" and `--skip-status-check` flag is provided:
-       - Skip status update step (don't move file or update status field)
-       - Proceed directly to worktree creation (step 7)
-       - Allows resuming work or reviewing work item in different location
-     - If status does not match configured `start.move_to`: Continue with normal status management flow (step 6)
+     - **Check logic:**
+       - If status matches configured value and `--skip-status-check` flag is not provided:
+         - Return error: "Error: Work item {id} is already in '{move_to}' status. Work item status matches target status. Use --skip-status-check to restart work or review elsewhere." (where {move_to} is the configured value)
+         - Abort command before worktree creation (step 7)
+         - **Note:** This check applies regardless of when status update occurs (step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`), because the status will be updated eventually
+       - If status matches configured value and `--skip-status-check` flag is provided:
+         - Skip status update step (step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch` - don't move file or update status field)
+         - Proceed directly to worktree creation (step 7)
+         - Allows resuming work or reviewing work item in different location
+       - If status does not match configured `start.move_to`: Continue with normal status management flow (status update will occur at step 6 for `commit_only`/`commit_and_push`, or step 8 for `commit_only_branch`)
    - **Status Management:**
      - If `status_action` is not `none`:
        - Call `moveWorkItem(cfg, workItemID, move_to, false)` from `move.go` (with `commitFlag=false`) to move file and update status
@@ -1214,20 +1460,21 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
          - Commit with configured message template (or default) on new branch
      - If `status_action: none`: Skip status update, proceed directly to worktree creation
    - **Worktree Creation:**
-     - Check if target worktree path already exists
-     - If path exists:
-       - Check if `--override` flag is provided
-       - If `--override` flag is provided:
-         - If path is a valid git worktree: Remove it using `git worktree remove <path>` (or `git worktree remove --force` if worktree has uncommitted changes)
-         - If path is not a valid git worktree: Remove directory using `os.RemoveAll`
-         - Then proceed with worktree creation
-       - If `--override` flag is not provided:
-         - Check if path is a valid git worktree (check for `.git` file pointing to main repo)
-         - If valid git worktree:
-           - Check if branch name matches `{work-item-id}-{kebab-case-work-item-title}` or if work item ID is in path
-           - If same work item: Error: `"Error: Worktree already exists at {path} for work item {id}. A worktree for this work item already exists. Use \`--override\` to remove existing worktree and create a new one, or use the existing worktree."`
-           - If different work item: Error: `"Error: Worktree path {path} already exists for a different work item. Path conflicts with existing worktree. Use \`--override\` to remove existing worktree, or choose a different work item."`
-         - If not valid git worktree: Error: `"Error: Path {path} already exists but is not a valid git worktree. Cannot create worktree at this location. Remove it manually and try again, or use \`--override\` to remove it automatically."`
+     - **Standalone/Monorepo:** Check if target worktree path already exists
+       - If path exists:
+         - Check if `--override` flag is provided
+         - If `--override` flag is provided:
+           - If path is a valid git worktree: Remove it using `git worktree remove <path>` (or `git worktree remove --force` if worktree has uncommitted changes)
+           - If path is not a valid git worktree: Remove directory using `os.RemoveAll`
+           - Then proceed with worktree creation
+         - If `--override` flag is not provided:
+           - Check if path is a valid git worktree (check for `.git` file pointing to main repo)
+           - If valid git worktree:
+             - Check if branch name matches `{work-item-id}-{kebab-case-work-item-title}` or if work item ID is in path
+             - If same work item: Error: `"Error: Worktree already exists at {path} for work item {id}. A worktree for this work item already exists. Use \`--override\` to remove existing worktree and create a new one, or use the existing worktree."`
+             - If different work item: Error: `"Error: Worktree path {path} already exists for a different work item. Path conflicts with existing worktree. Use \`--override\` to remove existing worktree, or choose a different work item."`
+           - If not valid git worktree: Error: `"Error: Path {path} already exists but is not a valid git worktree. Cannot create worktree at this location. Remove it manually and try again, or use \`--override\` to remove it automatically."`
+     - **Polyrepo:** Worktree path validation happens in pre-validation phase (before Phase 1 worktree creation) - see "Workspace Handling" section for details
      - Use trunk branch (configured or auto-detected)
      - **Branch Existence Check:**
        - Before creating worktree, check if branch `{work-item-id}-{kebab-case-work-item-title}` exists using `git show-ref --verify --quiet refs/heads/{branch-name}`
@@ -1256,13 +1503,17 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
        - After all worktrees are created successfully:
        - For each worktree:
          - **Change to worktree directory:** Change directory to worktree path (use `os.Chdir()` or `exec.Command` with `Dir` field set to worktree path)
-         - **Create and checkout branch:** Run `git checkout -b <branch-name>` (executed in worktree directory)
-         - If branch creation fails: Rollback all worktrees using `git worktree remove <path>` for each, abort command with error: `"Error: Failed to create branch for project '{project-name}'. Branch creation failed for one or more projects. All worktrees have been rolled back. Check git output for details and resolve any issues."`
+         - **Branch creation logic:**
+           - If `--reuse-branch` flag is provided AND branch exists in this repository (from pre-validation):
+             - **Checkout existing branch:** Run `git checkout {branch-name}` (executed in worktree directory) - branch already exists, just checkout
+           - If `--reuse-branch` flag is NOT provided OR branch doesn't exist:
+             - **Create and checkout branch:** Run `git checkout -b <branch-name>` (executed in worktree directory)
+         - If branch creation/checkout fails: Attempt to rollback all worktrees using `rollbackWorktrees()` helper function. If rollback succeeds, abort command with error indicating all worktrees were rolled back. If rollback fails, abort command with error indicating rollback failed and some worktrees may remain.
    - **Status Commit Operations:**
      - **For `commit_only` or `commit_and_push`:**
        - Stage work item file: `git add <work-item-path>` (file is at new location after `moveWorkItem` call)
        - Commit on trunk branch: `git commit -m "<commit-message>"` (where commit message is from template or default)
-       - If `commit_and_push`: Push to remote: `git push <remote-name> <trunk-branch>` (where remote-name is from `git.remote` or "origin" default)
+       - If `commit_and_push`: Push to remote: `git push <remote-name> <trunk-branch>` (where remote-name is determined using priority order - see "Remote Name Resolution" section)
        - **Execution context:** Commands run in main repository directory (trunk branch)
      - **For `commit_only_branch`:**
        - Stage work item file: `git add <work-item-path>` (file is at new location after `moveWorkItem` call)
@@ -1272,11 +1523,13 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
 
 3. **Work Item Parsing**
    - Reuse `extractWorkItemMetadata` function from `move.go`
+   - **Work item ID validation:** Validate that work item ID contains only valid characters and matches expected format (see "Title Sanitization" section for details)
    - Extract title and sanitize for directory/branch names (see "Title Sanitization" section below for detailed sanitization rules)
    - **Handle missing title:** If title is empty or "unknown":
      - Use just the work item ID as fallback
      - Log warning: "Warning: Work item {id} has no title field. Using work item ID '{id}' for worktree directory and branch name."
-     - This ensures worktree directory and branch names are always valid: `{work-item-id}-{work-item-id}` when title is missing
+     - This ensures worktree directory and branch names are always valid: `{work-item-id}` when title is missing
+   - **Empty sanitized title validation:** If title sanitization results in empty string, fail with error (see "Title Sanitization" section for details)
    - Validate work item exists using `findWorkItemFile` from `utils.go`
 
 4. **Configuration Extension**
@@ -1326,7 +1579,7 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
         Kind         string `yaml:"kind"`         // app|service|library|infra
         Description  string `yaml:"description"`
         DraftPR      *bool  `yaml:"draft_pr"`     // nil = use workspace default
-        Remote       string `yaml:"remote"`      // default: "" (use git.remote or "origin")
+        Remote       string `yaml:"remote"`      // default: "" (see "Remote Name Resolution" section for priority order)
         TrunkBranch  string `yaml:"trunk_branch"` // optional: per-project trunk branch override (defaults to workspace.git.trunk_branch or auto-detected)
         Setup        string `yaml:"setup"`       // optional: command or script path for project-specific setup
     }
@@ -1336,11 +1589,12 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
      - If `git.trunk_branch` is omitted or empty: auto-detect (check "main" first, then "master")
      - If `start` is nil: use defaults (move_to: "doing", status_action: "commit_and_push")
      - If `start.move_to` is omitted or empty: default to "doing"
+     - **Validation:** After applying defaults, validate that `start.move_to` (or default "doing") is a valid status key in `cfg.StatusFolders`. If invalid, fail with error at config load time: `"Error: Invalid status '{invalid_status}'. Status must be one of the following: {valid_statuses}. Please check your configuration and try again."` (where `{valid_statuses}` is a comma-separated list of all keys in `cfg.StatusFolders`, sorted alphabetically)
      - If `start.status_action` is omitted: default to "commit_and_push"
      - Validate `start.status_action` is one of: "none", "commit_only", "commit_and_push", "commit_only_branch"
      - If `start.status_commit_message` is empty: use default template "Move {type} {id} to {move_to}" (uses configured `move_to` value, or "doing" if not configured)
      - If `git.remote` is omitted or empty: default to "origin"
-     - For polyrepo projects: If `project.remote` is omitted or empty: use `git.remote` (or "origin" if `git.remote` is also omitted)
+     - For polyrepo projects: If `project.remote` is omitted or empty: use priority order (see "Remote Name Resolution" section) - `git.remote` if configured, otherwise "origin"
      - For polyrepo projects: If `project.trunk_branch` is omitted or empty: use `git.trunk_branch` (or auto-detect if `git.trunk_branch` is also omitted)
      - If `workspace` is nil: treat as standalone
      - **Infer workspace behavior:**
@@ -1356,11 +1610,19 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
      - If `project.repo_root` is empty: project is standalone (gets own worktree)
 
 5. **Title Sanitization**
+   - **Kebab-case conversion algorithm:** Use the same algorithm as `kira new` command (defined in `internal/commands/new.go`):
+     1. Convert entire string to lowercase using `strings.ToLower()`
+     2. Replace all spaces (`" "`) with hyphens (`"-"`) using `strings.ReplaceAll()`
+     3. Replace all underscores (`"_"`) with hyphens (`"-"`) using `strings.ReplaceAll()`
+     - **Unicode handling:** Unicode characters are handled the same way as in `kira new`: converted to lowercase as-is (no special Unicode normalization). Unicode characters that are valid in git branch names and directory names are preserved.
+   - **Work item ID validation:** Before sanitization, validate that the work item ID contains only valid characters:
+     - Work item IDs must match the format specified in `cfg.Validation.IDFormat` (default: `"^\\d{3}$"` - three digits)
+     - If work item ID contains invalid characters (e.g., path traversal characters like `../`, or characters that don't match the ID format), fail with error: `"Error: Invalid work item ID '{id}'. Work item ID contains invalid characters or doesn't match expected format. Work item IDs must be valid identifiers."`
+     - This validation should occur before any sanitization or worktree creation
    - **Handle missing title:** If title is empty or "unknown" (from `extractWorkItemMetadata`):
-     - Use just the work item ID as fallback
+     - Use just the work item ID as fallback (e.g., `"123"` → worktree directory `"123"`, branch `"123"`)
      - Log warning: "Warning: Work item {id} has no title field. Using work item ID '{id}' for worktree directory and branch name."
-   - Convert title to kebab-case
-   - Remove special characters invalid for git
+   - **Empty sanitized title validation:** After kebab-case conversion, if the sanitized title results in an empty string (e.g., title contained only special characters that were removed), fail with error: `"Error: Work item '{id}' title sanitization resulted in empty string. Title cannot be sanitized to a valid name. Please update the work item title to include valid characters."`
    - **Branch name length limit:**
      - Git allows branch names up to 255 characters, but very long names are unwieldy and hard to work with
      - **Recommended approach:** Truncate sanitized title to 100 characters
@@ -1369,7 +1631,10 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
        - Branch names remain readable and manageable (100 chars is sufficient for most descriptive titles)
        - Uniqueness is preserved even when different long titles truncate to the same 100 characters
        - No need to check for existing branch collisions (hash ensures uniqueness)
-   - Handle edge cases (all special chars, etc.)
+   - **Final validation:** After all sanitization steps, ensure the final worktree directory name and branch name are valid:
+     - Must not be empty (handled above)
+     - Must not contain path traversal characters (`../`, `..\\`, etc.)
+     - Must be valid for git branch names (no leading/trailing dots, no consecutive dots, no `.lock` suffix, etc.)
 
 6. **IDE Detection**
    - **Configuration priority:** Check flags in order: `--no-ide` (highest), then `--ide <command>`, then `ide.command` from `kira.yml`
@@ -1379,8 +1644,9 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
      - No log messages about IDE (silently skip)
    - **Flag override:** If `--ide <command>` flag is provided (and `--no-ide` not set):
      - Use flag value as IDE command (overrides `ide.command` from config)
-     - Ignore `ide.args` from config (no args passed)
-     - Execute: `{flag-command} {worktree-path}` (no args)
+     - Ignore `ide.args` from config (flag value takes precedence)
+     - **Shell expansion support:** Users can pass arguments via shell expansion (e.g., `--ide "cursor --new-window"`). The flag value can include both the command and its arguments, and will be executed as-is by the shell.
+     - Execute: `{flag-command} {worktree-path}` (where `{flag-command}` may include arguments if provided via shell expansion)
    - **Config-based:** If neither flag provided, use `ide.command` from `kira.yml` - no auto-detection
    - If no IDE command found (flag or config): Skip IDE opening, log info message "Info: No IDE configured. Worktree created at {path}. Configure `ide.command` in kira.yml or use `--ide <command>` flag to automatically open IDE.", continue
    - **No hardcoded logic:** All IDE behavior comes from flags (`--no-ide`, `--ide`) or `ide.command`/`ide.args` configuration
@@ -1388,7 +1654,7 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
      - Check if `--no-ide` flag is provided
      - If `--no-ide` provided: Skip IDE opening (no execution, no log messages)
      - If `--no-ide` not provided: Check if `--ide <command>` flag is provided
-     - If `--ide` flag provided: Execute `{flag-command} {worktree-path}` (no args)
+     - If `--ide` flag provided: Execute `{flag-command} {worktree-path}` (where `{flag-command}` may include arguments if provided via shell expansion)
      - If `--ide` flag not provided: Check if `ide.command` is configured
      - If configured: Execute `{ide.command} {ide.args...} {worktree-path}` (with args from config)
      - Use configured args exactly as specified - no automatic flag appending
@@ -1400,9 +1666,11 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
 
 7. **Setup Commands/Scripts**
    - **Main project setup:** If `workspace.setup` is configured:
+     - **Main project definition:** The main project is the repository where `kira.yml` is located
+     - **Note:** The main project is never listed in `workspace.projects` (it's the repository containing `kira.yml`), but it always gets a worktree created
      - Execute setup command/script in main project worktree directory
      - For standalone/monorepo: Run in `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}`
-     - For polyrepo: Run in main project worktree (if main project has its own worktree)
+     - For polyrepo: Run in main project worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/main/` (or `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{main-project-name}/`)
    - **Project-specific setup:** For each project in polyrepo with `project.setup` configured:
      - Execute setup command/script in that project's worktree directory
      - Run in the worktree path where the project is located
@@ -1440,26 +1708,63 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
      - **Pre-validation:** Before creating any worktrees:
        - Validate all project paths exist and are git repositories
        - If any project path is invalid or not a git repository: Abort with error listing all invalid projects (all-or-nothing)
+       - **Worktree path existence check:** Check all worktree paths before creating any (all-or-nothing approach):
+         - For each worktree that will be created (main project and all projects in `workspace.projects`):
+           - Determine target worktree path (main project: `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/main/`, projects: based on `repo_root` grouping or `project.mount`)
+           - Check if target worktree path already exists
+           - If path exists: Determine if it's a valid git worktree and check if it's for the same work item (by checking branch name or work item ID in path)
+           - Track path status per worktree: `pathStatus map[string]PathStatus` where key is worktree path and value indicates: `not_exists`, `valid_worktree_same_item`, `valid_worktree_different_item`, or `invalid_worktree`
+         - **All-or-nothing path validation:** After checking all paths:
+           - If ANY path exists (regardless of type) and `--override` flag is NOT provided:
+             - If path is valid git worktree for same work item: Abort with error listing all affected paths
+             - If path is valid git worktree for different work item: Abort with error listing all affected paths
+             - If path is not a valid git worktree: Abort with error listing all affected paths
+           - If ANY path exists and `--override` flag IS provided: Remove all existing paths before creating worktrees
+             - **All-or-nothing removal:** `--override` applies to all conflicting worktree paths for the work item (main project and all projects in `workspace.projects`). All paths must be successfully removed before proceeding.
+             - **Removal method:** For each conflicting path:
+               - If path is a valid git worktree: Remove using `git worktree remove <path>` (or `git worktree remove --force` if worktree has uncommitted changes)
+               - If path is not a valid git worktree (invalid worktree or non-worktree directory): Remove using `os.RemoveAll`
+             - **Failure handling:** If removal fails for any path (e.g., worktree is locked, permission denied, file system error), abort with error: `"Error: Failed to remove existing worktree at {path}. Cannot proceed with --override. {error-details}. Resolve the issue and try again."` (where `{error-details}` includes the specific error from the removal operation). Do not continue with worktree creation if any removal fails.
+             - **Success:** Only after all conflicting paths are successfully removed, proceed with worktree creation (Phase 1)
+           - If NO paths exist: Proceed with worktree creation
+       - **Branch existence check:** Check branch `{work-item-id}-{kebab-case-work-item-title}` existence in each repository independently (main project and all projects in `workspace.projects`):
+         - For each repository: Check if branch exists using `git show-ref --verify --quiet refs/heads/{branch-name}` in that repository
+         - If branch exists: Get branch commit hash and trunk branch commit hash, compare to determine if branch points to trunk or has commits
+         - Track branch status per repository: `branchStatus map[string]BranchStatus`
+       - **All-or-nothing branch validation:** After checking all repositories:
+         - If ANY branch has commits: Abort with error listing all repositories where branch has commits (all-or-nothing)
+         - If ALL branches point to trunk (or don't exist) and `--reuse-branch` is NOT provided: Abort with error listing all repositories where branch exists
+         - If ALL branches point to trunk (or don't exist) and `--reuse-branch` IS provided: Continue with worktree creation, will checkout existing branches in Phase 2
+         - If SOME branches exist and SOME don't: Treat consistently (apply `--reuse-branch` logic across all repositories)
      - **Phase 1 - Worktree Creation:** Create all worktrees first (makes rollback easier)
        - Initialize empty list to track successfully created worktrees: `createdWorktrees []string`
+       - **Main project worktree:** Always create worktree for main project (repository where `kira.yml` is located) first
+         - Create worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/main/` (or use project name if derivable)
+         - If creation succeeds: Add worktree path to `createdWorktrees` list
+         - If creation fails: Attempt to rollback all worktrees in `createdWorktrees` using `rollbackWorktrees()` helper function. If rollback succeeds, abort command with error indicating all worktrees were rolled back. If rollback fails, abort command with error indicating rollback failed and some worktrees may remain.
        - **Group projects by `repo_root`:**
          - Group projects that share the same `repo_root` value
          - **Purpose:** Groups projects sharing the same root directory (monorepo case) or handles nested folder structures
          - For each unique `repo_root`:
            - Create ONE worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{sanitized-repo-root}/`
+             - `sanitized-repo-root` is created by: extracting directory name from `repo_root` using `filepath.Base(repo_root)`, then applying kebab-case sanitization (lowercase, replace spaces/underscores with hyphens) - see "Path Sanitization" section in "Worktree Location" for details
            - If creation succeeds: Add worktree path to `createdWorktrees` list
-           - If creation fails: Rollback all worktrees in `createdWorktrees` using `git worktree remove <path>` for each, abort command with error
+           - If creation fails: Attempt to rollback all worktrees in `createdWorktrees` using `rollbackWorktrees()` helper function. If rollback succeeds, abort command with error indicating all worktrees were rolled back. If rollback fails, abort command with error indicating rollback failed and some worktrees may remain.
            - Track which projects are in each group to skip duplicate worktree creation
        - **Standalone projects** (no `repo_root`):
          - For each project without `repo_root`:
            - Create separate worktree at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}/{project.mount}/`
            - If creation succeeds: Add worktree path to `createdWorktrees` list
-           - If creation fails: Rollback all worktrees in `createdWorktrees` using `git worktree remove <path>` for each, abort command with error
+           - If creation fails: Attempt to rollback all worktrees in `createdWorktrees` using `rollbackWorktrees()` helper function. If rollback succeeds, abort command with error indicating all worktrees were rolled back. If rollback fails, abort command with error indicating rollback failed and some worktrees may remain.
      - **Phase 2 - Branch Creation:** After all worktrees created successfully:
-       - For each worktree in `createdWorktrees`:
+       - For each worktree in `createdWorktrees` (including main project worktree):
          - **Change to worktree directory:** Change directory to worktree path (use `os.Chdir()` or `exec.Command` with `Dir` field set to worktree path)
-         - **Create and checkout branch:** Run `git checkout -b {work-item-id}-{kebab-case-work-item-title}` (executed in worktree directory)
-         - If branch creation fails: Rollback all worktrees in `createdWorktrees` using `git worktree remove <path>` for each, abort command with error
+         - **Branch creation logic:**
+           - If `--reuse-branch` flag is provided AND branch exists in this repository (from pre-validation `branchStatus` map):
+             - **Checkout existing branch:** Run `git checkout {work-item-id}-{kebab-case-work-item-title}` (executed in worktree directory) - branch already exists, just checkout
+           - If `--reuse-branch` flag is NOT provided OR branch doesn't exist:
+             - **Create and checkout branch:** Run `git checkout -b {work-item-id}-{kebab-case-work-item-title}` (executed in worktree directory)
+         - If branch creation/checkout fails: Attempt to rollback all worktrees in `createdWorktrees` using `rollbackWorktrees()` helper function. If rollback succeeds, abort command with error indicating all worktrees were rolled back. If rollback fails, abort command with error indicating rollback failed and some worktrees may remain.
      - Use consistent naming: `{work-item-id}-{kebab-case-work-item-title}` for both worktree directories and branches
      - IDE opens at `{worktree_root}/{work-item-id}-{kebab-case-work-item-title}` (worktree root)
    - **Rollback Helper Function:**
@@ -1467,7 +1772,8 @@ Currently, Kira executes commands directly using `exec.CommandContext` in multip
        - Iterates through list of worktree paths in reverse order
        - For each worktree: Run `git worktree remove <path>` (or `git worktree remove --force` if worktree has uncommitted changes)
        - Log each removal attempt
-       - Return error if any removal fails (but continue attempting to remove others)
+       - **Failure handling:** If any removal fails (e.g., worktree is locked, permission denied, file system error), abort rollback immediately and return error: `"Error: Failed to remove worktree at {path} during rollback. Rollback aborted. {error-details}. Resolve the issue and try again."` (where `{error-details}` includes the specific error from the removal operation). Do not continue attempting to remove other worktrees if any removal fails.
+       - **Success:** Only return `nil` if all worktrees are successfully removed
    - Apply defaults for missing configuration values
    - Store draft_pr configuration for future PR creation
 
