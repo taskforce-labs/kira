@@ -29,3 +29,5 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 20. [2025-12-08] kira env branching: when kira work creates worktrees and branches the env files a treated so that multiple instances of the project can run locally
 21. [2025-12-10] kira review: this would create a worktree, checkout the branch of a PR so the reviewer can run locally
 22. [2025-12-14] kira review context: an ability to include context history into the reivew - helpful when working with agents
+23. [2026-01-05] id prefix: allow ids to have a prefix possibly via a template to add flexability to how it's formatted
+24. [2026-01-05] non-numeric ids: allow ids to be generated with a short unique hash
