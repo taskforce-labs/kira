@@ -439,11 +439,15 @@ else
   exit 1
 fi
 
-# Test 16: start command - validation (Phase 1)
+# Test 16: start command - git operations (Phase 2)
 echo ""
-echo "🧪 Test 16: start command - validation"
-"$KIRA_BIN" init --force > /dev/null
+echo "🧪 Test 16: start command - git operations"
+
+# Reset to clean state for start tests
+rm -rf .git > /dev/null 2>&1
 git init > /dev/null 2>&1
+"$KIRA_BIN" init --force > /dev/null
+git checkout -b main > /dev/null 2>&1
 git config user.email test@example.com
 git config user.name "Test User"
 git add .
@@ -464,13 +468,37 @@ EOF
 git add .work/1_todo/003-start-test.prd.md
 git commit -m "Add work item" > /dev/null 2>&1
 
-# Test: Valid work item validation succeeds
-if "$KIRA_BIN" start 003 2>&1 | grep -q "Work item 003 validated successfully"; then
-  echo "✅ Start command validates work item correctly"
+# Test: Start command creates worktree and branch
+START_OUTPUT=$("$KIRA_BIN" start 003 2>&1)
+if echo "$START_OUTPUT" | grep -q "Successfully started work on 003"; then
+  echo "✅ Start command creates worktree and branch correctly"
 else
-  echo "❌ Start command validation failed"
+  echo "❌ Start command failed"
+  echo "Output: $START_OUTPUT"
   exit 1
 fi
+
+# Verify worktree was created
+WORKTREE_ROOT=$(dirname "$(pwd)")
+WORKTREE_NAME=$(basename "$(pwd)")_worktrees
+if [ -d "$WORKTREE_ROOT/$WORKTREE_NAME/003-start-test-feature" ]; then
+  echo "✅ Worktree directory created"
+else
+  echo "❌ Worktree directory not found at $WORKTREE_ROOT/$WORKTREE_NAME/003-start-test-feature"
+  exit 1
+fi
+
+# Verify branch was created
+if git branch --list "003-start-test-feature" | grep -q "003-start-test-feature"; then
+  echo "✅ Branch created"
+else
+  echo "❌ Branch not created"
+  exit 1
+fi
+
+# Cleanup worktree for subsequent tests
+git worktree remove "$WORKTREE_ROOT/$WORKTREE_NAME/003-start-test-feature" --force > /dev/null 2>&1
+git branch -D 003-start-test-feature > /dev/null 2>&1
 
 # Test: Dry-run mode shows preview
 DRY_RUN_OUTPUT=$("$KIRA_BIN" start 003 --dry-run 2>&1)
@@ -529,6 +557,8 @@ created: 2024-01-01
 
 # Already Doing Feature
 EOF
+git add .work/2_doing/004-already-doing.prd.md
+git commit -m "Add already doing work item" > /dev/null 2>&1
 
 # Test: Work item already in target status (doing) without --skip-status-check
 if "$KIRA_BIN" start 004 2>&1 | grep -qi "already in 'doing' status"; then
@@ -538,19 +568,31 @@ else
   exit 1
 fi
 
-# Test: Work item already in target status WITH --skip-status-check
-if "$KIRA_BIN" start 004 --skip-status-check 2>&1 | grep -q "Work item 004 validated successfully"; then
+# Test: Work item already in target status WITH --skip-status-check succeeds
+START_SKIP_OUTPUT=$("$KIRA_BIN" start 004 --skip-status-check 2>&1)
+if echo "$START_SKIP_OUTPUT" | grep -q "Successfully started work on 004"; then
   echo "✅ Work item in target status allowed with --skip-status-check"
+  # Cleanup
+  WORKTREE_ROOT=$(dirname "$(pwd)")
+  WORKTREE_NAME=$(basename "$(pwd)")_worktrees
+  git worktree remove "$WORKTREE_ROOT/$WORKTREE_NAME/004-already-doing-feature" --force > /dev/null 2>&1
+  git branch -D 004-already-doing-feature > /dev/null 2>&1
 else
   echo "❌ Work item in target status should be allowed with --skip-status-check"
+  echo "Output: $START_SKIP_OUTPUT"
   exit 1
 fi
 
 # Test: status-action=none skips status check
-if "$KIRA_BIN" start 004 --status-action none 2>&1 | grep -q "Work item 004 validated successfully"; then
+START_NONE_OUTPUT=$("$KIRA_BIN" start 004 --status-action none 2>&1)
+if echo "$START_NONE_OUTPUT" | grep -q "Successfully started work on 004"; then
   echo "✅ status-action=none skips status check correctly"
+  # Cleanup
+  git worktree remove "$WORKTREE_ROOT/$WORKTREE_NAME/004-already-doing-feature" --force > /dev/null 2>&1
+  git branch -D 004-already-doing-feature > /dev/null 2>&1
 else
   echo "❌ status-action=none should skip status check"
+  echo "Output: $START_NONE_OUTPUT"
   exit 1
 fi
 

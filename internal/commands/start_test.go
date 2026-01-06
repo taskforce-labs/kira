@@ -518,3 +518,359 @@ func TestStartContext(t *testing.T) {
 		assert.True(t, ctx.Flags.DryRun)
 	})
 }
+
+// ============================================================================
+// Phase 2: Git Operations Tests
+// ============================================================================
+
+func TestBranchStatus(t *testing.T) {
+	t.Run("BranchNotExists is default", func(t *testing.T) {
+		var status BranchStatus
+		assert.Equal(t, BranchNotExists, status)
+	})
+
+	t.Run("BranchStatus values are distinct", func(t *testing.T) {
+		assert.NotEqual(t, BranchNotExists, BranchPointsToTrunk)
+		assert.NotEqual(t, BranchNotExists, BranchHasCommits)
+		assert.NotEqual(t, BranchPointsToTrunk, BranchHasCommits)
+	})
+}
+
+func TestResolveRemoteName(t *testing.T) {
+	t.Run("returns origin when no config", func(t *testing.T) {
+		cfg := &config.Config{}
+		result := resolveRemoteName(cfg, nil)
+		assert.Equal(t, "origin", result)
+	})
+
+	t.Run("returns git.remote when configured", func(t *testing.T) {
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				Remote: "upstream",
+			},
+		}
+		result := resolveRemoteName(cfg, nil)
+		assert.Equal(t, "upstream", result)
+	})
+
+	t.Run("returns project.remote when project has remote", func(t *testing.T) {
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				Remote: "upstream",
+			},
+		}
+		project := &config.ProjectConfig{
+			Remote: "github",
+		}
+		result := resolveRemoteName(cfg, project)
+		assert.Equal(t, "github", result)
+	})
+
+	t.Run("falls back to git.remote when project has no remote", func(t *testing.T) {
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				Remote: "upstream",
+			},
+		}
+		project := &config.ProjectConfig{
+			Name: "test",
+		}
+		result := resolveRemoteName(cfg, project)
+		assert.Equal(t, "upstream", result)
+	})
+
+	t.Run("falls back to origin when project and git have no remote", func(t *testing.T) {
+		cfg := &config.Config{}
+		project := &config.ProjectConfig{
+			Name: "test",
+		}
+		result := resolveRemoteName(cfg, project)
+		assert.Equal(t, "origin", result)
+	})
+}
+
+func TestDetermineTrunkBranch(t *testing.T) {
+	t.Run("uses flag value when provided in dry-run", func(t *testing.T) {
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+			},
+		}
+		result, err := determineTrunkBranch(cfg, "develop", "", true)
+		require.NoError(t, err)
+		assert.Equal(t, "develop", result)
+	})
+
+	t.Run("uses config value when no flag in dry-run", func(t *testing.T) {
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "production",
+			},
+		}
+		result, err := determineTrunkBranch(cfg, "", "", true)
+		require.NoError(t, err)
+		assert.Equal(t, "production", result)
+	})
+
+	t.Run("auto-detects main in dry-run", func(t *testing.T) {
+		cfg := &config.Config{}
+		result, err := determineTrunkBranch(cfg, "", "", true)
+		require.NoError(t, err)
+		assert.Equal(t, "main", result)
+	})
+}
+
+func TestAutoDetectTrunkBranch(t *testing.T) {
+	t.Run("returns main in dry-run mode", func(t *testing.T) {
+		result, err := autoDetectTrunkBranch("", true)
+		require.NoError(t, err)
+		assert.Equal(t, "main", result)
+	})
+}
+
+func TestHandleExistingWorktree(t *testing.T) {
+	t.Run("returns nil for non-existent path", func(t *testing.T) {
+		err := handleExistingWorktree("/non/existent/path", "001", false, false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("returns error for existing worktree without override", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		worktreePath := filepath.Join(tmpDir, "001-my-feature")
+		require.NoError(t, os.MkdirAll(worktreePath, 0o700))
+
+		// Create .git as a file (worktree indicator)
+		gitFile := filepath.Join(worktreePath, ".git")
+		require.NoError(t, os.WriteFile(gitFile, []byte("gitdir: /some/path"), 0o600))
+
+		err := handleExistingWorktree(worktreePath, "001", false, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "worktree already exists")
+	})
+
+	t.Run("returns error for different work item worktree without override", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		worktreePath := filepath.Join(tmpDir, "002-other-feature")
+		require.NoError(t, os.MkdirAll(worktreePath, 0o700))
+
+		// Create .git as a file (worktree indicator)
+		gitFile := filepath.Join(worktreePath, ".git")
+		require.NoError(t, os.WriteFile(gitFile, []byte("gitdir: /some/path"), 0o600))
+
+		err := handleExistingWorktree(worktreePath, "001", false, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "different work item")
+	})
+
+	t.Run("returns error for invalid path without override", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		invalidPath := filepath.Join(tmpDir, "invalid-path")
+		require.NoError(t, os.MkdirAll(invalidPath, 0o700))
+		// No .git file/dir - invalid worktree
+
+		err := handleExistingWorktree(invalidPath, "001", false, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a valid git worktree")
+	})
+
+	t.Run("removes invalid path with override in dry-run", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		invalidPath := filepath.Join(tmpDir, "invalid-path")
+		require.NoError(t, os.MkdirAll(invalidPath, 0o700))
+
+		// With dry-run, should not actually remove
+		err := handleExistingWorktree(invalidPath, "001", true, true)
+		assert.NoError(t, err)
+
+		// Path should still exist (dry-run)
+		_, statErr := os.Stat(invalidPath)
+		assert.NoError(t, statErr)
+	})
+}
+
+func TestResolvePolyrepoProjects(t *testing.T) {
+	t.Run("returns nil when no workspace config", func(t *testing.T) {
+		cfg := &config.Config{}
+		result, err := resolvePolyrepoProjects(cfg, "/repo")
+		require.NoError(t, err)
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns nil when no projects", func(t *testing.T) {
+		cfg := &config.Config{
+			Workspace: &config.WorkspaceConfig{},
+		}
+		result, err := resolvePolyrepoProjects(cfg, "/repo")
+		require.NoError(t, err)
+		assert.Nil(t, result)
+	})
+
+	t.Run("resolves relative paths", func(t *testing.T) {
+		cfg := &config.Config{
+			Workspace: &config.WorkspaceConfig{
+				Projects: []config.ProjectConfig{
+					{Name: "frontend", Path: "../frontend", Mount: "fe"},
+				},
+			},
+		}
+		result, err := resolvePolyrepoProjects(cfg, "/Users/test/main")
+		require.NoError(t, err)
+		require.Len(t, result, 1)
+		assert.Equal(t, "frontend", result[0].Name)
+		assert.Equal(t, "/Users/test/frontend", result[0].Path)
+		assert.Equal(t, "fe", result[0].Mount)
+	})
+
+	t.Run("preserves absolute paths", func(t *testing.T) {
+		cfg := &config.Config{
+			Workspace: &config.WorkspaceConfig{
+				Projects: []config.ProjectConfig{
+					{Name: "frontend", Path: "/absolute/frontend", Mount: "fe"},
+				},
+			},
+		}
+		result, err := resolvePolyrepoProjects(cfg, "/Users/test/main")
+		require.NoError(t, err)
+		require.Len(t, result, 1)
+		assert.Equal(t, "/absolute/frontend", result[0].Path)
+	})
+
+	t.Run("uses project trunk_branch when set", func(t *testing.T) {
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+			},
+			Workspace: &config.WorkspaceConfig{
+				Projects: []config.ProjectConfig{
+					{Name: "frontend", Path: "../frontend", TrunkBranch: "develop"},
+				},
+			},
+		}
+		result, err := resolvePolyrepoProjects(cfg, "/Users/test/main")
+		require.NoError(t, err)
+		require.Len(t, result, 1)
+		assert.Equal(t, "develop", result[0].TrunkBranch)
+	})
+
+	t.Run("falls back to git.trunk_branch when project has none", func(t *testing.T) {
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "production",
+			},
+			Workspace: &config.WorkspaceConfig{
+				Projects: []config.ProjectConfig{
+					{Name: "frontend", Path: "../frontend"},
+				},
+			},
+		}
+		result, err := resolvePolyrepoProjects(cfg, "/Users/test/main")
+		require.NoError(t, err)
+		require.Len(t, result, 1)
+		assert.Equal(t, "production", result[0].TrunkBranch)
+	})
+
+	t.Run("uses project remote when set", func(t *testing.T) {
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				Remote: "upstream",
+			},
+			Workspace: &config.WorkspaceConfig{
+				Projects: []config.ProjectConfig{
+					{Name: "frontend", Path: "../frontend", Remote: "github"},
+				},
+			},
+		}
+		result, err := resolvePolyrepoProjects(cfg, "/Users/test/main")
+		require.NoError(t, err)
+		require.Len(t, result, 1)
+		assert.Equal(t, "github", result[0].Remote)
+	})
+}
+
+func TestGroupProjectsByRepoRoot(t *testing.T) {
+	t.Run("groups projects with same repo_root", func(t *testing.T) {
+		projects := []PolyrepoProject{
+			{Name: "frontend", Path: "/monorepo/frontend", RepoRoot: "/monorepo"},
+			{Name: "backend", Path: "/monorepo/backend", RepoRoot: "/monorepo"},
+			{Name: "orders", Path: "/orders-service"},
+		}
+
+		result := groupProjectsByRepoRoot(projects)
+
+		// Should have 2 groups: /monorepo and /orders-service
+		assert.Len(t, result, 2)
+		assert.Len(t, result["/monorepo"], 2)
+		assert.Len(t, result["/orders-service"], 1)
+	})
+
+	t.Run("uses path as key for standalone projects", func(t *testing.T) {
+		projects := []PolyrepoProject{
+			{Name: "frontend", Path: "/frontend"},
+			{Name: "backend", Path: "/backend"},
+		}
+
+		result := groupProjectsByRepoRoot(projects)
+
+		assert.Len(t, result, 2)
+		assert.Contains(t, result, "/frontend")
+		assert.Contains(t, result, "/backend")
+	})
+}
+
+func TestValidatePolyrepoProjects(t *testing.T) {
+	t.Run("returns nil in dry-run mode", func(t *testing.T) {
+		projects := []PolyrepoProject{
+			{Name: "frontend", Path: "/non/existent"},
+		}
+		err := validatePolyrepoProjects(projects, true)
+		assert.NoError(t, err)
+	})
+
+	t.Run("returns nil for projects without path", func(t *testing.T) {
+		projects := []PolyrepoProject{
+			{Name: "frontend"},
+		}
+		err := validatePolyrepoProjects(projects, false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("returns error for non-existent path", func(t *testing.T) {
+		projects := []PolyrepoProject{
+			{Name: "frontend", Path: "/non/existent/path"},
+		}
+		err := validatePolyrepoProjects(projects, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("returns nil for valid git repo", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".git"), 0o700))
+
+		projects := []PolyrepoProject{
+			{Name: "frontend", Path: tmpDir},
+		}
+		err := validatePolyrepoProjects(projects, false)
+		assert.NoError(t, err)
+	})
+}
+
+func TestPolyrepoProject(t *testing.T) {
+	t.Run("holds all fields", func(t *testing.T) {
+		project := PolyrepoProject{
+			Name:        "frontend",
+			Path:        "/path/to/frontend",
+			Mount:       "fe",
+			RepoRoot:    "/path/to/monorepo",
+			TrunkBranch: "develop",
+			Remote:      "upstream",
+		}
+
+		assert.Equal(t, "frontend", project.Name)
+		assert.Equal(t, "/path/to/frontend", project.Path)
+		assert.Equal(t, "fe", project.Mount)
+		assert.Equal(t, "/path/to/monorepo", project.RepoRoot)
+		assert.Equal(t, "develop", project.TrunkBranch)
+		assert.Equal(t, "upstream", project.Remote)
+	})
+}

@@ -2,6 +2,7 @@
 package commands
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -9,11 +10,33 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"kira/internal/config"
 )
+
+// BranchStatus represents the status of a branch
+type BranchStatus int
+
+const (
+	// BranchNotExists indicates the branch does not exist
+	BranchNotExists BranchStatus = iota
+	// BranchPointsToTrunk indicates the branch exists but points to trunk (no commits)
+	BranchPointsToTrunk
+	// BranchHasCommits indicates the branch exists and has commits beyond trunk
+	BranchHasCommits
+)
+
+// gitCommandTimeout is the default timeout for git commands
+const gitCommandTimeout = 30 * time.Second
+
+// defaultTrunkBranch is the default trunk branch name used in dry-run mode
+const defaultTrunkBranch = "main"
+
+// defaultMasterBranch is the fallback trunk branch name
+const defaultMasterBranch = "master"
 
 // WorkspaceBehavior represents the inferred workspace type
 type WorkspaceBehavior int
@@ -157,19 +180,90 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// In Phase 1, we only do validation - no git operations yet
+	// If dry-run, show preview and exit
 	if flags.DryRun {
 		return printDryRunPreview(ctx)
 	}
 
-	// Phase 1: Only validation implemented
-	// Git operations will be added in Phase 2
-	fmt.Printf("Work item %s validated successfully.\n", workItemID)
-	fmt.Printf("  Title: %s\n", ctx.Metadata.title)
+	// Execute git operations
+	return executeGitOperations(ctx)
+}
+
+// executeGitOperations performs all git operations for the start command
+func executeGitOperations(ctx *StartContext) error {
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return fmt.Errorf("not a git repository: current directory is not a git repository. Run this command from within a git repository")
+	}
+
+	// Step 1: Determine trunk branch
+	trunkBranch, err := determineTrunkBranch(ctx.Config, ctx.Flags.TrunkBranch, repoRoot, ctx.Flags.DryRun)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Using trunk branch: %s\n", trunkBranch)
+
+	// Step 2: Validate we're on trunk branch
+	if err := validateOnTrunkBranch(trunkBranch, repoRoot, ctx.Flags.DryRun); err != nil {
+		return err
+	}
+
+	// Step 3: Resolve remote name
+	remoteName := resolveRemoteName(ctx.Config, nil)
+
+	// Step 4: Check for uncommitted changes
+	hasUncommitted, err := checkUncommittedChanges(repoRoot, ctx.Flags.DryRun)
+	if err != nil {
+		return err
+	}
+	if hasUncommitted {
+		return fmt.Errorf("trunk branch has uncommitted changes: cannot proceed with pull operation. Commit or stash changes before starting work")
+	}
+
+	// Step 5: Pull latest changes
+	if ctx.Behavior == WorkspaceBehaviorPolyrepo {
+		// Pull for all projects in polyrepo
+		if err := pullAllProjects(ctx, trunkBranch, remoteName); err != nil {
+			return err
+		}
+	} else {
+		// Pull for standalone/monorepo
+		remoteExists, err := checkRemoteExists(remoteName, repoRoot, ctx.Flags.DryRun)
+		if err != nil {
+			return err
+		}
+
+		if !remoteExists {
+			fmt.Printf("Warning: No remote '%s' configured. Skipping pull step. Worktree will be created from local trunk branch.\n", remoteName)
+		} else {
+			fmt.Printf("Pulling latest changes from %s/%s\n", remoteName, trunkBranch)
+			if err := pullLatestChanges(remoteName, trunkBranch, repoRoot, ctx.Flags.DryRun); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Step 6: Create worktree directory if needed
+	if err := os.MkdirAll(ctx.WorktreeRoot, 0o750); err != nil {
+		return fmt.Errorf("failed to create worktree root directory: %w", err)
+	}
+
+	// Step 7: Create worktree(s) and branch(es)
+	if ctx.Behavior == WorkspaceBehaviorPolyrepo {
+		if err := executePolyrepoStart(ctx, trunkBranch); err != nil {
+			return err
+		}
+	} else {
+		if err := executeStandaloneStart(ctx, trunkBranch); err != nil {
+			return err
+		}
+	}
+
+	// Print success message
+	worktreePath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
+	fmt.Printf("\nSuccessfully started work on %s\n", ctx.WorkItemID)
+	fmt.Printf("  Worktree: %s\n", worktreePath)
 	fmt.Printf("  Branch: %s\n", ctx.BranchName)
-	fmt.Printf("  Worktree root: %s\n", ctx.WorktreeRoot)
-	fmt.Printf("  Workspace behavior: %s\n", ctx.Behavior)
-	fmt.Println("\nNote: Git operations will be implemented in Phase 2")
 
 	return nil
 }
@@ -585,26 +679,82 @@ func printDryRunPreview(ctx *StartContext) error {
 	fmt.Println("[DRY RUN] Would perform the following operations:")
 	fmt.Println()
 
+	printDryRunWorkItem(ctx)
+	printDryRunWorkspace(ctx)
+
+	trunkBranch := determineDryRunTrunkBranch(ctx)
+	remoteName := resolveRemoteName(ctx.Config, nil)
+	worktreePath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
+
+	printDryRunGitOps(ctx, trunkBranch, remoteName, worktreePath)
+	printDryRunPolyrepo(ctx, worktreePath)
+	printDryRunStatus(ctx)
+	printDryRunIDE(ctx)
+	printDryRunSetup(ctx)
+
+	return nil
+}
+
+func printDryRunWorkItem(ctx *StartContext) {
 	fmt.Printf("Work Item:\n")
 	fmt.Printf("  ID: %s\n", ctx.WorkItemID)
 	fmt.Printf("  Title: %s\n", ctx.Metadata.title)
 	fmt.Printf("  Current Status: %s\n", ctx.Metadata.currentStatus)
 	fmt.Println()
+}
 
+func printDryRunWorkspace(ctx *StartContext) {
 	fmt.Printf("Workspace:\n")
 	fmt.Printf("  Behavior: %s\n", ctx.Behavior)
 	fmt.Printf("  Worktree Root: %s\n", ctx.WorktreeRoot)
 	fmt.Println()
+}
 
+func determineDryRunTrunkBranch(ctx *StartContext) string {
+	if ctx.Flags.TrunkBranch != "" {
+		return ctx.Flags.TrunkBranch
+	}
+	if ctx.Config.Git != nil && ctx.Config.Git.TrunkBranch != "" {
+		return ctx.Config.Git.TrunkBranch
+	}
+	return defaultTrunkBranch
+}
+
+func printDryRunGitOps(ctx *StartContext, trunkBranch, remoteName, worktreePath string) {
 	fmt.Printf("Git Operations:\n")
+	fmt.Printf("  Trunk Branch: %s\n", trunkBranch)
+	fmt.Printf("  Remote: %s\n", remoteName)
 	fmt.Printf("  Branch Name: %s\n", ctx.BranchName)
-
-	// Determine worktree path
-	worktreePath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
 	fmt.Printf("  Worktree Path: %s\n", worktreePath)
 	fmt.Println()
 
-	// Status change info
+	fmt.Printf("Commands:\n")
+	fmt.Printf("  [DRY RUN] git fetch %s %s\n", remoteName, trunkBranch)
+	fmt.Printf("  [DRY RUN] git merge %s/%s\n", remoteName, trunkBranch)
+	fmt.Printf("  [DRY RUN] git worktree add -b %s %s %s\n", ctx.BranchName, worktreePath, trunkBranch)
+	fmt.Println()
+}
+
+func printDryRunPolyrepo(ctx *StartContext, worktreePath string) {
+	if ctx.Behavior != WorkspaceBehaviorPolyrepo || ctx.Config.Workspace == nil {
+		return
+	}
+
+	fmt.Printf("Polyrepo Projects:\n")
+	fmt.Printf("  Main Project: %s/main/\n", worktreePath)
+	for _, p := range ctx.Config.Workspace.Projects {
+		if p.Path != "" {
+			mount := p.Mount
+			if mount == "" {
+				mount = p.Name
+			}
+			fmt.Printf("  %s: %s/%s/\n", p.Name, worktreePath, mount)
+		}
+	}
+	fmt.Println()
+}
+
+func printDryRunStatus(ctx *StartContext) {
 	statusAction := ctx.Config.Start.StatusAction
 	if ctx.Flags.StatusAction != "" {
 		statusAction = ctx.Flags.StatusAction
@@ -618,32 +768,33 @@ func printDryRunPreview(ctx *StartContext) error {
 		fmt.Printf("  Status Action: %s\n", statusAction)
 	}
 	fmt.Println()
+}
 
-	// IDE info
+func printDryRunIDE(ctx *StartContext) {
 	fmt.Printf("IDE:\n")
-	if ctx.Flags.NoIDE {
+	switch {
+	case ctx.Flags.NoIDE:
 		fmt.Println("  Action: Skip (--no-ide flag)")
-	} else if ctx.Flags.IDECommand != "" {
+	case ctx.Flags.IDECommand != "":
 		fmt.Printf("  Command: %s\n", ctx.Flags.IDECommand)
-	} else if ctx.Config.IDE != nil && ctx.Config.IDE.Command != "" {
+	case ctx.Config.IDE != nil && ctx.Config.IDE.Command != "":
 		fmt.Printf("  Command: %s\n", ctx.Config.IDE.Command)
 		if len(ctx.Config.IDE.Args) > 0 {
 			fmt.Printf("  Args: %s\n", strings.Join(ctx.Config.IDE.Args, " "))
 		}
-	} else {
+	default:
 		fmt.Println("  Action: Skip (no IDE configured)")
 	}
 	fmt.Println()
+}
 
-	// Setup commands
+func printDryRunSetup(ctx *StartContext) {
 	fmt.Printf("Setup:\n")
 	if ctx.Config.Workspace != nil && ctx.Config.Workspace.Setup != "" {
 		fmt.Printf("  Main Project: %s\n", ctx.Config.Workspace.Setup)
 	} else {
 		fmt.Println("  Main Project: None configured")
 	}
-
-	return nil
 }
 
 // getValidStatuses returns a sorted list of valid status keys
@@ -654,4 +805,950 @@ func getValidStatuses(cfg *config.Config) []string {
 	}
 	sort.Strings(statuses)
 	return statuses
+}
+
+// ============================================================================
+// Phase 2: Git Operations
+// ============================================================================
+
+// determineTrunkBranch determines the trunk branch using priority order:
+// 1. --trunk-branch flag
+// 2. git.trunk_branch config
+// 3. Auto-detect: check "main" first, then "master"
+// Returns error if both main and master exist (ambiguous)
+func determineTrunkBranch(cfg *config.Config, flagValue, dir string, dryRun bool) (string, error) {
+	// Priority 1: Flag value
+	if flagValue != "" {
+		// Verify the branch exists
+		exists, err := branchExists(flagValue, dir, dryRun)
+		if err != nil {
+			return "", err
+		}
+		if !exists && !dryRun {
+			return "", fmt.Errorf("trunk branch '%s' not found: configured branch does not exist", flagValue)
+		}
+		return flagValue, nil
+	}
+
+	// Priority 2: Config value
+	if cfg.Git != nil && cfg.Git.TrunkBranch != "" {
+		exists, err := branchExists(cfg.Git.TrunkBranch, dir, dryRun)
+		if err != nil {
+			return "", err
+		}
+		if !exists && !dryRun {
+			return "", fmt.Errorf("trunk branch '%s' not found: configured branch does not exist and auto-detection failed. Verify the branch name in `git.trunk_branch` configuration or ensure 'main' or 'master' branch exists", cfg.Git.TrunkBranch)
+		}
+		return cfg.Git.TrunkBranch, nil
+	}
+
+	// Priority 3: Auto-detect
+	return autoDetectTrunkBranch(dir, dryRun)
+}
+
+// autoDetectTrunkBranch auto-detects trunk branch (main or master)
+// Returns error if both exist or neither exists
+func autoDetectTrunkBranch(dir string, dryRun bool) (string, error) {
+	if dryRun {
+		// In dry-run mode, assume "main" exists
+		return defaultTrunkBranch, nil
+	}
+
+	mainExists, err := branchExists(defaultTrunkBranch, dir, false)
+	if err != nil {
+		return "", fmt.Errorf("failed to check for '%s' branch: %w", defaultTrunkBranch, err)
+	}
+
+	masterExists, err := branchExists(defaultMasterBranch, dir, false)
+	if err != nil {
+		return "", fmt.Errorf("failed to check for '%s' branch: %w", defaultMasterBranch, err)
+	}
+
+	if mainExists && masterExists {
+		return "", fmt.Errorf("both '%s' and '%s' branches exist: cannot auto-detect trunk branch. Configure `git.trunk_branch` explicitly in kira.yml to specify which branch to use", defaultTrunkBranch, defaultMasterBranch)
+	}
+
+	if mainExists {
+		return defaultTrunkBranch, nil
+	}
+
+	if masterExists {
+		return defaultMasterBranch, nil
+	}
+
+	return "", fmt.Errorf("trunk branch not found: neither '%s' nor '%s' branch exists. Create a trunk branch or configure `git.trunk_branch` in kira.yml", defaultTrunkBranch, defaultMasterBranch)
+}
+
+// branchExists checks if a branch exists in the repository
+func branchExists(branchName, dir string, dryRun bool) (bool, error) {
+	if dryRun {
+		return true, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Use git show-ref to check if branch exists
+	_, err := executeCommand(ctx, "git", []string{"show-ref", "--verify", "--quiet", "refs/heads/" + branchName}, dir, false)
+	if err != nil {
+		// Exit code 1 means branch doesn't exist, which is not an error
+		if strings.Contains(err.Error(), "exit status 1") {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
+}
+
+// validateOnTrunkBranch validates that the current branch is the trunk branch
+func validateOnTrunkBranch(trunkBranch, dir string, dryRun bool) error {
+	if dryRun {
+		return nil
+	}
+
+	currentBranch, err := getCurrentBranch(dir)
+	if err != nil {
+		return fmt.Errorf("failed to determine current branch: %w", err)
+	}
+
+	if currentBranch != trunkBranch {
+		return fmt.Errorf("start command can only be run from trunk branch '%s', currently on '%s': checkout the trunk branch and try again", trunkBranch, currentBranch)
+	}
+
+	return nil
+}
+
+// getCurrentBranch returns the current branch name
+func getCurrentBranch(dir string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	output, err := executeCommand(ctx, "git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, dir, false)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(output), nil
+}
+
+// resolveRemoteName determines the remote name using priority order:
+// For main repo: git.remote or "origin"
+// For polyrepo project: project.remote > git.remote > "origin"
+func resolveRemoteName(cfg *config.Config, project *config.ProjectConfig) string {
+	// For polyrepo project
+	if project != nil {
+		if project.Remote != "" {
+			return project.Remote
+		}
+	}
+
+	// Workspace/main repo default
+	if cfg.Git != nil && cfg.Git.Remote != "" {
+		return cfg.Git.Remote
+	}
+
+	return "origin"
+}
+
+// checkRemoteExists checks if a remote exists in the repository
+func checkRemoteExists(remoteName, dir string, dryRun bool) (bool, error) {
+	if dryRun {
+		return true, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	_, err := executeCommand(ctx, "git", []string{"remote", "get-url", remoteName}, dir, false)
+	if err != nil {
+		// Remote doesn't exist
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// checkUncommittedChanges checks if there are uncommitted changes in the repository
+func checkUncommittedChanges(dir string, dryRun bool) (bool, error) {
+	if dryRun {
+		return false, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	output, err := executeCommand(ctx, "git", []string{"status", "--porcelain"}, dir, false)
+	if err != nil {
+		return false, fmt.Errorf("failed to check git status: %w", err)
+	}
+
+	return strings.TrimSpace(output) != "", nil
+}
+
+// pullLatestChanges pulls latest changes from remote using fetch + merge
+func pullLatestChanges(remoteName, trunkBranch, dir string, dryRun bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Fetch from remote
+	_, err := executeCommand(ctx, "git", []string{"fetch", remoteName, trunkBranch}, dir, dryRun)
+	if err != nil {
+		if strings.Contains(err.Error(), "Could not resolve host") ||
+			strings.Contains(err.Error(), "unable to access") ||
+			strings.Contains(err.Error(), "Connection refused") {
+			return fmt.Errorf("failed to fetch changes from %s: network error occurred. Check network connection and try again: %w", remoteName, err)
+		}
+		return fmt.Errorf("failed to fetch changes from %s/%s: %w", remoteName, trunkBranch, err)
+	}
+
+	if dryRun {
+		return nil
+	}
+
+	// Merge from remote
+	mergeCtx, mergeCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer mergeCancel()
+
+	_, err = executeCommand(mergeCtx, "git", []string{"merge", remoteName + "/" + trunkBranch}, dir, false)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "CONFLICT") || strings.Contains(errStr, "Automatic merge failed") {
+			return fmt.Errorf("failed to merge latest changes from %s/%s: merge conflicts detected. Resolve conflicts manually and try again", remoteName, trunkBranch)
+		}
+		if strings.Contains(errStr, "diverged") || strings.Contains(errStr, "have diverged") {
+			return fmt.Errorf("trunk branch has diverged from %s/%s: local and remote branches have different commits. Rebase or merge manually before starting work", remoteName, trunkBranch)
+		}
+		return fmt.Errorf("failed to merge changes from %s/%s: %w", remoteName, trunkBranch, err)
+	}
+
+	return nil
+}
+
+// checkBranchStatus checks the status of a branch relative to trunk
+func checkBranchStatus(branchName, trunkBranch, dir string, dryRun bool) (BranchStatus, error) {
+	if dryRun {
+		return BranchNotExists, nil
+	}
+
+	// Check if branch exists
+	exists, err := branchExists(branchName, dir, false)
+	if err != nil {
+		return BranchNotExists, err
+	}
+
+	if !exists {
+		return BranchNotExists, nil
+	}
+
+	// Get commit hashes for comparison
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	branchCommit, err := executeCommand(ctx, "git", []string{"rev-parse", branchName}, dir, false)
+	if err != nil {
+		return BranchNotExists, fmt.Errorf("failed to get branch commit: %w", err)
+	}
+
+	trunkCtx, trunkCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer trunkCancel()
+
+	trunkCommit, err := executeCommand(trunkCtx, "git", []string{"rev-parse", trunkBranch}, dir, false)
+	if err != nil {
+		return BranchNotExists, fmt.Errorf("failed to get trunk commit: %w", err)
+	}
+
+	if strings.TrimSpace(branchCommit) == strings.TrimSpace(trunkCommit) {
+		return BranchPointsToTrunk, nil
+	}
+
+	return BranchHasCommits, nil
+}
+
+// createWorktree creates a git worktree at the specified path
+func createWorktree(worktreePath, trunkBranch string, dryRun bool) error {
+	// Get repo root to run git command from
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return fmt.Errorf("failed to get repository root: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Create worktree without branch (we'll create branch separately)
+	_, err = executeCommand(ctx, "git", []string{"worktree", "add", "--detach", worktreePath, trunkBranch}, repoRoot, dryRun)
+	if err != nil {
+		return fmt.Errorf("failed to create worktree at %s: %w", worktreePath, err)
+	}
+
+	return nil
+}
+
+// createWorktreeWithBranch creates a git worktree with a new branch
+func createWorktreeWithBranch(worktreePath, branchName, trunkBranch string, dryRun bool) error {
+	// Get repo root to run git command from
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return fmt.Errorf("failed to get repository root: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Create worktree with new branch
+	_, err = executeCommand(ctx, "git", []string{"worktree", "add", "-b", branchName, worktreePath, trunkBranch}, repoRoot, dryRun)
+	if err != nil {
+		return fmt.Errorf("failed to create worktree at %s with branch %s: %w", worktreePath, branchName, err)
+	}
+
+	return nil
+}
+
+// createBranchInWorktree creates or checks out a branch in an existing worktree
+func createBranchInWorktree(branchName, worktreePath string, reuseBranch, dryRun bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	var args []string
+	if reuseBranch {
+		// Checkout existing branch
+		args = []string{"checkout", branchName}
+	} else {
+		// Create and checkout new branch
+		args = []string{"checkout", "-b", branchName}
+	}
+
+	_, err := executeCommand(ctx, "git", args, worktreePath, dryRun)
+	if err != nil {
+		if reuseBranch {
+			return fmt.Errorf("failed to checkout branch '%s' in worktree: %w", branchName, err)
+		}
+		return fmt.Errorf("failed to create branch '%s' in worktree: %w", branchName, err)
+	}
+
+	return nil
+}
+
+// removeWorktree removes a git worktree
+func removeWorktree(worktreePath string, force, dryRun bool) error {
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return fmt.Errorf("failed to get repository root: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	args := []string{"worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, worktreePath)
+
+	_, err = executeCommand(ctx, "git", args, repoRoot, dryRun)
+	if err != nil {
+		return fmt.Errorf("failed to remove worktree at %s: %w", worktreePath, err)
+	}
+
+	return nil
+}
+
+// rollbackWorktrees removes worktrees in reverse order (for polyrepo failure handling)
+func rollbackWorktrees(worktrees []string, dryRun bool) error {
+	// Remove in reverse order
+	for i := len(worktrees) - 1; i >= 0; i-- {
+		worktreePath := worktrees[i]
+		fmt.Printf("Rolling back worktree: %s\n", worktreePath)
+
+		err := removeWorktree(worktreePath, true, dryRun)
+		if err != nil {
+			return fmt.Errorf("failed to remove worktree at %s during rollback: rollback aborted: %w", worktreePath, err)
+		}
+	}
+
+	return nil
+}
+
+// handleExistingWorktree handles an existing worktree path based on --override flag
+func handleExistingWorktree(worktreePath, workItemID string, override, dryRun bool) error {
+	status, err := checkWorktreeExists(worktreePath, workItemID)
+	if err != nil {
+		return err
+	}
+
+	switch status {
+	case WorktreeNotExists:
+		return nil // Nothing to do
+
+	case WorktreeValidSameItem:
+		if !override {
+			return fmt.Errorf("worktree already exists at %s for work item %s: use `--override` to remove existing worktree and create a new one, or use the existing worktree", worktreePath, workItemID)
+		}
+		// Remove existing worktree
+		fmt.Printf("Removing existing worktree at %s (--override)\n", worktreePath)
+		return removeWorktree(worktreePath, true, dryRun)
+
+	case WorktreeValidDifferentItem:
+		if !override {
+			return fmt.Errorf("worktree path %s already exists for a different work item: use `--override` to remove existing worktree, or choose a different work item", worktreePath)
+		}
+		// Remove existing worktree
+		fmt.Printf("Removing existing worktree at %s (--override)\n", worktreePath)
+		return removeWorktree(worktreePath, true, dryRun)
+
+	case WorktreeInvalidPath:
+		if !override {
+			return fmt.Errorf("path %s already exists but is not a valid git worktree: remove it manually and try again, or use `--override` to remove it automatically", worktreePath)
+		}
+		// Remove the directory
+		fmt.Printf("Removing existing path at %s (--override)\n", worktreePath)
+		if !dryRun {
+			if err := os.RemoveAll(worktreePath); err != nil {
+				return fmt.Errorf("failed to remove existing path at %s: %w", worktreePath, err)
+			}
+		}
+		return nil
+	}
+
+	return nil
+}
+
+// executeStandaloneStart executes the start command for standalone/monorepo workspaces
+func executeStandaloneStart(ctx *StartContext, trunkBranch string) error {
+	worktreePath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
+
+	// Handle existing worktree
+	if err := handleExistingWorktree(worktreePath, ctx.WorkItemID, ctx.Flags.Override, ctx.Flags.DryRun); err != nil {
+		return err
+	}
+
+	// Check branch status and create worktree accordingly
+	if err := createWorktreeForBranch(ctx, worktreePath, trunkBranch); err != nil {
+		return err
+	}
+
+	fmt.Printf("Created worktree at %s with branch %s\n", worktreePath, ctx.BranchName)
+	return nil
+}
+
+// createWorktreeForBranch creates worktree based on branch status
+func createWorktreeForBranch(ctx *StartContext, worktreePath, trunkBranch string) error {
+	branchStatus, err := checkBranchStatus(ctx.BranchName, trunkBranch, "", ctx.Flags.DryRun)
+	if err != nil {
+		return fmt.Errorf("failed to check branch status: %w", err)
+	}
+
+	switch branchStatus {
+	case BranchHasCommits:
+		return fmt.Errorf("branch %s already exists and has commits: delete the branch first if you want to start fresh: `git branch -D %s`, or use a different work item", ctx.BranchName, ctx.BranchName)
+
+	case BranchPointsToTrunk:
+		return handleExistingBranchWorktree(ctx, worktreePath, trunkBranch)
+
+	case BranchNotExists:
+		return createWorktreeWithBranch(worktreePath, ctx.BranchName, trunkBranch, ctx.Flags.DryRun)
+
+	default:
+		return createWorktreeWithBranch(worktreePath, ctx.BranchName, trunkBranch, ctx.Flags.DryRun)
+	}
+}
+
+// handleExistingBranchWorktree handles worktree creation when branch exists and points to trunk
+func handleExistingBranchWorktree(ctx *StartContext, worktreePath, trunkBranch string) error {
+	if !ctx.Flags.ReuseBranch {
+		return fmt.Errorf("branch %s already exists and points to trunk: use `--reuse-branch` to checkout existing branch in new worktree, or delete the branch first: `git branch -d %s`", ctx.BranchName, ctx.BranchName)
+	}
+
+	// Create worktree without branch, then checkout existing branch
+	if err := createWorktree(worktreePath, trunkBranch, ctx.Flags.DryRun); err != nil {
+		return err
+	}
+
+	if err := createBranchInWorktree(ctx.BranchName, worktreePath, true, ctx.Flags.DryRun); err != nil {
+		// Rollback worktree creation
+		_ = removeWorktree(worktreePath, true, ctx.Flags.DryRun)
+		return err
+	}
+
+	return nil
+}
+
+// PolyrepoProject represents a project in a polyrepo workspace with resolved paths
+type PolyrepoProject struct {
+	Name        string
+	Path        string // Absolute path to the project repository
+	Mount       string // Folder name in worktree
+	RepoRoot    string // Shared root (if any)
+	TrunkBranch string // Project-specific trunk branch
+	Remote      string // Project-specific remote
+}
+
+// resolvePolyrepoProjects resolves all projects in a polyrepo workspace
+func resolvePolyrepoProjects(cfg *config.Config, repoRoot string) ([]PolyrepoProject, error) {
+	if cfg.Workspace == nil || len(cfg.Workspace.Projects) == 0 {
+		return nil, nil
+	}
+
+	var projects []PolyrepoProject
+	for _, p := range cfg.Workspace.Projects {
+		project := PolyrepoProject{
+			Name:     p.Name,
+			Mount:    p.Mount,
+			RepoRoot: p.RepoRoot,
+			Remote:   resolveRemoteName(cfg, &p),
+		}
+
+		// Resolve path
+		if p.Path != "" {
+			if filepath.IsAbs(p.Path) {
+				project.Path = p.Path
+			} else {
+				project.Path = filepath.Join(repoRoot, p.Path)
+			}
+			project.Path = filepath.Clean(project.Path)
+		}
+
+		// Resolve trunk branch with priority: project.trunk_branch > git.trunk_branch > auto-detect
+		if p.TrunkBranch != "" {
+			project.TrunkBranch = p.TrunkBranch
+		} else if cfg.Git != nil && cfg.Git.TrunkBranch != "" {
+			project.TrunkBranch = cfg.Git.TrunkBranch
+		}
+		// If still empty, will be auto-detected per project
+
+		projects = append(projects, project)
+	}
+
+	return projects, nil
+}
+
+// groupProjectsByRepoRoot groups projects by their repo_root value
+func groupProjectsByRepoRoot(projects []PolyrepoProject) map[string][]PolyrepoProject {
+	groups := make(map[string][]PolyrepoProject)
+
+	for _, p := range projects {
+		key := p.RepoRoot
+		if key == "" {
+			// Standalone projects use their own path as key
+			key = p.Path
+		}
+		groups[key] = append(groups[key], p)
+	}
+
+	return groups
+}
+
+// validatePolyrepoProjects validates all project repositories exist
+func validatePolyrepoProjects(projects []PolyrepoProject, dryRun bool) error {
+	if dryRun {
+		return nil
+	}
+
+	for _, p := range projects {
+		if p.Path == "" {
+			continue
+		}
+
+		// Check if path exists and is a git repository
+		if !isExternalGitRepo(p.Path) {
+			return fmt.Errorf("project repository not found at %s: path does not exist or is not a git repository. Verify path exists and is a git repository, or update project configuration in kira.yml", p.Path)
+		}
+	}
+
+	return nil
+}
+
+// preValidatePolyrepoWorktrees checks all worktree paths before creating any
+func preValidatePolyrepoWorktrees(ctx *StartContext, worktreePaths map[string]string) error {
+	if ctx.Flags.DryRun {
+		return nil
+	}
+
+	var conflictingPaths []string
+
+	for _, worktreePath := range worktreePaths {
+		status, err := checkWorktreeExists(worktreePath, ctx.WorkItemID)
+		if err != nil {
+			return err
+		}
+
+		if status != WorktreeNotExists {
+			conflictingPaths = append(conflictingPaths, worktreePath)
+		}
+	}
+
+	if len(conflictingPaths) > 0 {
+		if !ctx.Flags.Override {
+			return fmt.Errorf("worktree path(s) already exist: %s. Use `--override` to remove existing worktrees and create new ones", strings.Join(conflictingPaths, ", "))
+		}
+
+		// Remove all conflicting paths
+		for _, path := range conflictingPaths {
+			if err := handleExistingWorktree(path, ctx.WorkItemID, true, ctx.Flags.DryRun); err != nil {
+				return fmt.Errorf("failed to remove existing worktree at %s: cannot proceed with --override: %w", path, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// preValidatePolyrepoBranches checks branch existence in all repositories
+func preValidatePolyrepoBranches(ctx *StartContext, projects []PolyrepoProject, mainRepoTrunkBranch string) error {
+	if ctx.Flags.DryRun {
+		return nil
+	}
+
+	var branchesWithCommits []string
+	var branchesPointingToTrunk []string
+
+	// Check main repo
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return err
+	}
+
+	withCommits, pointsToTrunk := checkMainRepoBranch(ctx, mainRepoTrunkBranch, repoRoot)
+	branchesWithCommits = append(branchesWithCommits, withCommits...)
+	branchesPointingToTrunk = append(branchesPointingToTrunk, pointsToTrunk...)
+
+	// Check each project
+	projectWithCommits, projectPointsToTrunk, err := checkProjectBranches(ctx, projects)
+	if err != nil {
+		return err
+	}
+	branchesWithCommits = append(branchesWithCommits, projectWithCommits...)
+	branchesPointingToTrunk = append(branchesPointingToTrunk, projectPointsToTrunk...)
+
+	return validateBranchResults(ctx, branchesWithCommits, branchesPointingToTrunk)
+}
+
+func checkMainRepoBranch(ctx *StartContext, mainRepoTrunkBranch, repoRoot string) (withCommits, pointsToTrunk []string) {
+	status, err := checkBranchStatus(ctx.BranchName, mainRepoTrunkBranch, repoRoot, false)
+	if err != nil {
+		return nil, nil
+	}
+
+	switch status {
+	case BranchHasCommits:
+		return []string{"main project"}, nil
+	case BranchPointsToTrunk:
+		return nil, []string{"main project"}
+	default:
+		return nil, nil
+	}
+}
+
+func checkProjectBranches(ctx *StartContext, projects []PolyrepoProject) (withCommits, pointsToTrunk []string, err error) {
+	for _, p := range projects {
+		if p.Path == "" {
+			continue
+		}
+
+		trunkBranch := p.TrunkBranch
+		if trunkBranch == "" {
+			trunkBranch, err = autoDetectTrunkBranch(p.Path, false)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to detect trunk branch for project %s: %w", p.Name, err)
+			}
+		}
+
+		status, err := checkBranchStatus(ctx.BranchName, trunkBranch, p.Path, false)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to check branch status in project %s: %w", p.Name, err)
+		}
+
+		switch status {
+		case BranchHasCommits:
+			withCommits = append(withCommits, p.Name)
+		case BranchPointsToTrunk:
+			pointsToTrunk = append(pointsToTrunk, p.Name)
+		}
+	}
+
+	return withCommits, pointsToTrunk, nil
+}
+
+func validateBranchResults(ctx *StartContext, branchesWithCommits, branchesPointingToTrunk []string) error {
+	// If any branch has commits, abort
+	if len(branchesWithCommits) > 0 {
+		return fmt.Errorf("branch %s already exists and has commits in: %s. Delete the branches first if you want to start fresh, or use a different work item",
+			ctx.BranchName, strings.Join(branchesWithCommits, ", "))
+	}
+
+	// If any branch points to trunk and --reuse-branch is not provided, abort
+	if len(branchesPointingToTrunk) > 0 && !ctx.Flags.ReuseBranch {
+		return fmt.Errorf("branch %s already exists and points to trunk in: %s. Use `--reuse-branch` to checkout existing branches in new worktrees, or delete the branches first",
+			ctx.BranchName, strings.Join(branchesPointingToTrunk, ", "))
+	}
+
+	return nil
+}
+
+// executePolyrepoStart executes the start command for polyrepo workspaces
+func executePolyrepoStart(ctx *StartContext, trunkBranch string) error {
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return err
+	}
+
+	// Resolve and validate projects
+	projects, err := resolvePolyrepoProjects(ctx.Config, repoRoot)
+	if err != nil {
+		return err
+	}
+
+	if err := validatePolyrepoProjects(projects, ctx.Flags.DryRun); err != nil {
+		return err
+	}
+
+	// Build worktree paths
+	baseWorktreePath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
+	mainWorktreePath := filepath.Join(baseWorktreePath, "main")
+	worktreePaths := buildPolyrepoWorktreePaths(projects, baseWorktreePath, mainWorktreePath)
+
+	// Pre-validate
+	if err := preValidatePolyrepoWorktrees(ctx, worktreePaths); err != nil {
+		return err
+	}
+	if err := preValidatePolyrepoBranches(ctx, projects, trunkBranch); err != nil {
+		return err
+	}
+
+	// Phase 1: Create worktrees
+	createdWorktrees, err := createPolyrepoWorktrees(ctx, projects, repoRoot, trunkBranch, mainWorktreePath, baseWorktreePath)
+	if err != nil {
+		return err
+	}
+
+	// Phase 2: Create branches
+	if err := createPolyrepoBranches(ctx, projects, createdWorktrees, mainWorktreePath, baseWorktreePath); err != nil {
+		return err
+	}
+
+	fmt.Printf("Created polyrepo worktrees at %s with branch %s\n", baseWorktreePath, ctx.BranchName)
+	return nil
+}
+
+// buildPolyrepoWorktreePaths builds a map of project names to worktree paths
+func buildPolyrepoWorktreePaths(projects []PolyrepoProject, baseWorktreePath, mainWorktreePath string) map[string]string {
+	worktreePaths := make(map[string]string)
+	worktreePaths["main"] = mainWorktreePath
+
+	processedRoots := make(map[string]bool)
+	for _, p := range projects {
+		if p.Path == "" {
+			continue
+		}
+
+		worktreePath := getProjectWorktreePath(p, baseWorktreePath, processedRoots)
+		if worktreePath != "" {
+			worktreePaths[p.Name] = worktreePath
+		}
+	}
+
+	return worktreePaths
+}
+
+// getProjectWorktreePath returns the worktree path for a project, updating processedRoots
+func getProjectWorktreePath(p PolyrepoProject, baseWorktreePath string, processedRoots map[string]bool) string {
+	if p.RepoRoot != "" {
+		if processedRoots[p.RepoRoot] {
+			return "" // Already processed
+		}
+		processedRoots[p.RepoRoot] = true
+		rootName := kebabCase(filepath.Base(filepath.Clean(p.RepoRoot)))
+		return filepath.Join(baseWorktreePath, rootName)
+	}
+	return filepath.Join(baseWorktreePath, p.Mount)
+}
+
+// createPolyrepoWorktrees creates all worktrees for polyrepo projects (Phase 1)
+func createPolyrepoWorktrees(ctx *StartContext, projects []PolyrepoProject, repoRoot, trunkBranch, mainWorktreePath, baseWorktreePath string) ([]string, error) {
+	var createdWorktrees []string
+
+	// Create main project worktree
+	if err := createMainWorktree(mainWorktreePath, trunkBranch, ctx.Flags.DryRun); err != nil {
+		return nil, err
+	}
+	createdWorktrees = append(createdWorktrees, mainWorktreePath)
+
+	// Create project worktrees
+	processedRoots := make(map[string]bool)
+	for _, p := range projects {
+		if p.Path == "" {
+			continue
+		}
+
+		worktreePath, repoPath := resolveProjectPaths(p, baseWorktreePath, repoRoot, processedRoots)
+		if worktreePath == "" {
+			continue // Already processed
+		}
+
+		if err := createProjectWorktree(ctx, p, worktreePath, repoPath, createdWorktrees); err != nil {
+			return nil, err
+		}
+		createdWorktrees = append(createdWorktrees, worktreePath)
+	}
+
+	return createdWorktrees, nil
+}
+
+// createMainWorktree creates the main project worktree
+func createMainWorktree(mainWorktreePath, trunkBranch string, dryRun bool) error {
+	fmt.Printf("Creating main project worktree at %s\n", mainWorktreePath)
+	if err := os.MkdirAll(filepath.Dir(mainWorktreePath), 0o750); err != nil && !dryRun {
+		return fmt.Errorf("failed to create worktree parent directory: %w", err)
+	}
+	return createWorktree(mainWorktreePath, trunkBranch, dryRun)
+}
+
+// resolveProjectPaths resolves worktree and repo paths for a project
+func resolveProjectPaths(p PolyrepoProject, baseWorktreePath, repoRoot string, processedRoots map[string]bool) (worktreePath, repoPath string) {
+	if p.RepoRoot != "" {
+		if processedRoots[p.RepoRoot] {
+			return "", "" // Already processed
+		}
+		processedRoots[p.RepoRoot] = true
+		rootName := kebabCase(filepath.Base(filepath.Clean(p.RepoRoot)))
+		worktreePath = filepath.Join(baseWorktreePath, rootName)
+
+		if filepath.IsAbs(p.RepoRoot) {
+			repoPath = p.RepoRoot
+		} else {
+			repoPath = filepath.Join(repoRoot, p.RepoRoot)
+		}
+	} else {
+		worktreePath = filepath.Join(baseWorktreePath, p.Mount)
+		repoPath = p.Path
+	}
+	return worktreePath, repoPath
+}
+
+// createProjectWorktree creates a worktree for a single project
+func createProjectWorktree(ctx *StartContext, p PolyrepoProject, worktreePath, repoPath string, createdWorktrees []string) error {
+	projectTrunk, err := resolveProjectTrunkBranch(p, repoPath, ctx.Flags.DryRun)
+	if err != nil {
+		_ = rollbackWorktrees(createdWorktrees, ctx.Flags.DryRun)
+		return fmt.Errorf("failed to detect trunk branch for project %s: %w", p.Name, err)
+	}
+
+	fmt.Printf("Creating worktree for %s at %s\n", p.Name, worktreePath)
+
+	createCtx, createCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	_, createErr := executeCommand(createCtx, "git", []string{"worktree", "add", "--detach", worktreePath, projectTrunk}, repoPath, ctx.Flags.DryRun)
+	createCancel()
+
+	if createErr != nil {
+		_ = rollbackWorktrees(createdWorktrees, ctx.Flags.DryRun)
+		return fmt.Errorf("failed to create worktree for project %s: %w", p.Name, createErr)
+	}
+
+	return nil
+}
+
+// resolveProjectTrunkBranch determines the trunk branch for a project
+func resolveProjectTrunkBranch(p PolyrepoProject, repoPath string, dryRun bool) (string, error) {
+	if p.TrunkBranch != "" {
+		return p.TrunkBranch, nil
+	}
+	if dryRun {
+		return defaultTrunkBranch, nil
+	}
+	return autoDetectTrunkBranch(repoPath, false)
+}
+
+// createPolyrepoBranches creates branches in all worktrees (Phase 2)
+func createPolyrepoBranches(ctx *StartContext, projects []PolyrepoProject, createdWorktrees []string, mainWorktreePath, baseWorktreePath string) error {
+	// Main project branch
+	if err := createBranchInWorktree(ctx.BranchName, mainWorktreePath, ctx.Flags.ReuseBranch, ctx.Flags.DryRun); err != nil {
+		_ = rollbackWorktrees(createdWorktrees, ctx.Flags.DryRun)
+		return fmt.Errorf("failed to create branch in main project worktree: %w", err)
+	}
+
+	// Project branches
+	processedRoots := make(map[string]bool)
+	for _, p := range projects {
+		if p.Path == "" {
+			continue
+		}
+
+		worktreePath := getProjectWorktreePath(p, baseWorktreePath, processedRoots)
+		if worktreePath == "" {
+			continue // Already processed
+		}
+
+		if err := createBranchInWorktree(ctx.BranchName, worktreePath, ctx.Flags.ReuseBranch, ctx.Flags.DryRun); err != nil {
+			_ = rollbackWorktrees(createdWorktrees, ctx.Flags.DryRun)
+			return fmt.Errorf("failed to create branch in project %s worktree: %w", p.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// pullAllProjects pulls latest changes for all projects in a polyrepo
+func pullAllProjects(ctx *StartContext, mainTrunkBranch, mainRemoteName string) error {
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return err
+	}
+
+	// Pull main repo first
+	remoteExists, err := checkRemoteExists(mainRemoteName, repoRoot, ctx.Flags.DryRun)
+	if err != nil {
+		return err
+	}
+
+	if !remoteExists {
+		fmt.Printf("Warning: No remote '%s' configured for main project. Skipping pull step.\n", mainRemoteName)
+	} else {
+		fmt.Printf("Pulling latest changes for main project from %s/%s\n", mainRemoteName, mainTrunkBranch)
+		if err := pullLatestChanges(mainRemoteName, mainTrunkBranch, repoRoot, ctx.Flags.DryRun); err != nil {
+			return err
+		}
+	}
+
+	// Pull for each project
+	projects, err := resolvePolyrepoProjects(ctx.Config, repoRoot)
+	if err != nil {
+		return err
+	}
+
+	for _, p := range projects {
+		if p.Path == "" {
+			continue
+		}
+
+		// Check remote exists
+		remoteExists, err := checkRemoteExists(p.Remote, p.Path, ctx.Flags.DryRun)
+		if err != nil {
+			return err
+		}
+
+		if !remoteExists {
+			fmt.Printf("Warning: No remote '%s' configured for project '%s'. Skipping pull step.\n", p.Remote, p.Name)
+			continue
+		}
+
+		// Determine trunk branch
+		projectTrunk := p.TrunkBranch
+		if projectTrunk == "" && !ctx.Flags.DryRun {
+			projectTrunk, err = autoDetectTrunkBranch(p.Path, false)
+			if err != nil {
+				return fmt.Errorf("failed to detect trunk branch for project %s: %w", p.Name, err)
+			}
+		}
+		if projectTrunk == "" {
+			projectTrunk = defaultTrunkBranch
+		}
+
+		fmt.Printf("Pulling latest changes for %s from %s/%s\n", p.Name, p.Remote, projectTrunk)
+		if err := pullLatestChanges(p.Remote, projectTrunk, p.Path, ctx.Flags.DryRun); err != nil {
+			return fmt.Errorf("failed to pull changes for project %s: %w", p.Name, err)
+		}
+	}
+
+	return nil
 }
