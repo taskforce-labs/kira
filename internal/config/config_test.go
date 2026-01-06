@@ -60,3 +60,252 @@ func TestSaveConfig(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestGitConfigDefaults(t *testing.T) {
+	t.Run("applies default git config when not specified", func(t *testing.T) {
+		_ = os.Remove("kira.yml")
+		_ = os.Remove(".work/kira.yml")
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Git)
+		assert.Equal(t, "origin", config.Git.Remote)
+		assert.Equal(t, "", config.Git.TrunkBranch) // Empty means auto-detect
+	})
+
+	t.Run("preserves custom git config", func(t *testing.T) {
+		testConfig := `version: "1.0"
+git:
+  trunk_branch: develop
+  remote: upstream
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Git)
+		assert.Equal(t, "develop", config.Git.TrunkBranch)
+		assert.Equal(t, "upstream", config.Git.Remote)
+	})
+}
+
+func TestStartConfigDefaults(t *testing.T) {
+	t.Run("applies default start config when not specified", func(t *testing.T) {
+		_ = os.Remove("kira.yml")
+		_ = os.Remove(".work/kira.yml")
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Start)
+		assert.Equal(t, "doing", config.Start.MoveTo)
+		assert.Equal(t, "commit_and_push", config.Start.StatusAction)
+		assert.Equal(t, "", config.Start.StatusCommitMessage)
+	})
+
+	t.Run("preserves custom start config", func(t *testing.T) {
+		testConfig := `version: "1.0"
+start:
+  move_to: review
+  status_action: commit_only
+  status_commit_message: "Start {type} {id}"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Start)
+		assert.Equal(t, "review", config.Start.MoveTo)
+		assert.Equal(t, "commit_only", config.Start.StatusAction)
+		assert.Equal(t, "Start {type} {id}", config.Start.StatusCommitMessage)
+	})
+}
+
+func TestStartConfigValidation(t *testing.T) {
+	t.Run("rejects invalid move_to status", func(t *testing.T) {
+		testConfig := `version: "1.0"
+start:
+  move_to: invalid_status
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid status 'invalid_status'")
+		assert.Contains(t, err.Error(), "status must be one of")
+	})
+
+	t.Run("rejects invalid status_action", func(t *testing.T) {
+		testConfig := `version: "1.0"
+start:
+  status_action: invalid_action
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid status_action value 'invalid_action'")
+	})
+
+	t.Run("accepts all valid status_actions", func(t *testing.T) {
+		for _, action := range ValidStatusActions {
+			testConfig := `version: "1.0"
+start:
+  status_action: ` + action + `
+`
+			require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+
+			config, err := LoadConfig()
+			require.NoError(t, err, "status_action %s should be valid", action)
+			assert.Equal(t, action, config.Start.StatusAction)
+
+			_ = os.Remove("kira.yml")
+		}
+	})
+}
+
+func TestWorkspaceConfigDefaults(t *testing.T) {
+	t.Run("no workspace config results in nil workspace", func(t *testing.T) {
+		_ = os.Remove("kira.yml")
+		_ = os.Remove(".work/kira.yml")
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		assert.Nil(t, config.Workspace)
+	})
+
+	t.Run("applies default workspace root when not specified", func(t *testing.T) {
+		testConfig := `version: "1.0"
+workspace:
+  description: "Test workspace"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Workspace)
+		assert.Equal(t, "../", config.Workspace.Root)
+	})
+
+	t.Run("preserves custom workspace config", func(t *testing.T) {
+		testConfig := `version: "1.0"
+workspace:
+  root: "../../repos"
+  worktree_root: "../worktrees"
+  description: "My workspace"
+  draft_pr: true
+  setup: "make setup"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Workspace)
+		assert.Equal(t, "../../repos", config.Workspace.Root)
+		assert.Equal(t, "../worktrees", config.Workspace.WorktreeRoot)
+		assert.Equal(t, "My workspace", config.Workspace.Description)
+		assert.True(t, config.Workspace.DraftPR)
+		assert.Equal(t, "make setup", config.Workspace.Setup)
+	})
+}
+
+func TestProjectConfigDefaults(t *testing.T) {
+	t.Run("project mount defaults to name", func(t *testing.T) {
+		testConfig := `version: "1.0"
+workspace:
+  projects:
+    - name: frontend
+      path: ../frontend
+    - name: backend
+      path: ../backend
+      mount: api
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Workspace)
+		require.Len(t, config.Workspace.Projects, 2)
+
+		// First project: mount should default to name
+		assert.Equal(t, "frontend", config.Workspace.Projects[0].Name)
+		assert.Equal(t, "frontend", config.Workspace.Projects[0].Mount)
+
+		// Second project: mount explicitly set
+		assert.Equal(t, "backend", config.Workspace.Projects[1].Name)
+		assert.Equal(t, "api", config.Workspace.Projects[1].Mount)
+	})
+
+	t.Run("preserves full project config", func(t *testing.T) {
+		draftPR := true
+		testConfig := `version: "1.0"
+workspace:
+  projects:
+    - name: frontend
+      path: ../frontend
+      mount: fe
+      repo_root: ../monorepo
+      kind: app
+      description: "Frontend app"
+      draft_pr: true
+      remote: upstream
+      trunk_branch: develop
+      setup: "npm install"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Workspace)
+		require.Len(t, config.Workspace.Projects, 1)
+
+		project := config.Workspace.Projects[0]
+		assert.Equal(t, "frontend", project.Name)
+		assert.Equal(t, "../frontend", project.Path)
+		assert.Equal(t, "fe", project.Mount)
+		assert.Equal(t, "../monorepo", project.RepoRoot)
+		assert.Equal(t, "app", project.Kind)
+		assert.Equal(t, "Frontend app", project.Description)
+		assert.NotNil(t, project.DraftPR)
+		assert.Equal(t, draftPR, *project.DraftPR)
+		assert.Equal(t, "upstream", project.Remote)
+		assert.Equal(t, "develop", project.TrunkBranch)
+		assert.Equal(t, "npm install", project.Setup)
+	})
+}
+
+func TestIDEConfig(t *testing.T) {
+	t.Run("no IDE config results in nil", func(t *testing.T) {
+		_ = os.Remove("kira.yml")
+		_ = os.Remove(".work/kira.yml")
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		assert.Nil(t, config.IDE)
+	})
+
+	t.Run("loads IDE config", func(t *testing.T) {
+		testConfig := `version: "1.0"
+ide:
+  command: cursor
+  args:
+    - "--new-window"
+    - "--wait"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.IDE)
+		assert.Equal(t, "cursor", config.IDE.Command)
+		assert.Equal(t, []string{"--new-window", "--wait"}, config.IDE.Args)
+	})
+}

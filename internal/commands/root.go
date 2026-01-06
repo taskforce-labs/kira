@@ -32,6 +32,7 @@ func init() {
 	rootCmd.AddCommand(abandonCmd)
 	rootCmd.AddCommand(saveCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(startCmd)
 }
 
 func checkWorkDir() error {

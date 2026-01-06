@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	yaml "gopkg.in/yaml.v3"
@@ -19,6 +20,54 @@ type Config struct {
 	Commit        CommitConfig      `yaml:"commit"`
 	Release       ReleaseConfig     `yaml:"release"`
 	DefaultStatus string            `yaml:"default_status"`
+	Git           *GitConfig        `yaml:"git"`
+	Start         *StartConfig      `yaml:"start"`
+	IDE           *IDEConfig        `yaml:"ide"`
+	Workspace     *WorkspaceConfig  `yaml:"workspace"`
+}
+
+// GitConfig contains git-related settings.
+type GitConfig struct {
+	TrunkBranch string `yaml:"trunk_branch"` // default: "" (auto-detect main/master)
+	Remote      string `yaml:"remote"`       // default: "origin"
+}
+
+// StartConfig contains settings for the start command.
+type StartConfig struct {
+	MoveTo              string `yaml:"move_to"`               // default: "doing"
+	StatusAction        string `yaml:"status_action"`         // default: "commit_and_push"
+	StatusCommitMessage string `yaml:"status_commit_message"` // optional template
+}
+
+// IDEConfig contains IDE-related settings.
+type IDEConfig struct {
+	Command string   `yaml:"command"` // IDE command name (e.g., "cursor", "code")
+	Args    []string `yaml:"args"`    // Arguments to pass to IDE command
+}
+
+// WorkspaceConfig contains workspace-related settings.
+type WorkspaceConfig struct {
+	Root            string          `yaml:"root"`             // default: "../"
+	WorktreeRoot    string          `yaml:"worktree_root"`    // derived if not set
+	ArchitectureDoc string          `yaml:"architecture_doc"` // optional path to architecture doc
+	Description     string          `yaml:"description"`      // optional workspace description
+	DraftPR         bool            `yaml:"draft_pr"`         // default: false
+	Setup           string          `yaml:"setup"`            // optional setup command/script
+	Projects        []ProjectConfig `yaml:"projects"`         // optional list of projects
+}
+
+// ProjectConfig contains project-specific settings for polyrepo workspaces.
+type ProjectConfig struct {
+	Name        string `yaml:"name"`         // project identifier
+	Path        string `yaml:"path"`         // path to project repository
+	Mount       string `yaml:"mount"`        // folder name in worktree (defaults to name)
+	RepoRoot    string `yaml:"repo_root"`    // optional: groups projects sharing same root
+	Kind        string `yaml:"kind"`         // app | service | library | infra
+	Description string `yaml:"description"`  // optional: for LLM context
+	DraftPR     *bool  `yaml:"draft_pr"`     // optional: override workspace default
+	Remote      string `yaml:"remote"`       // optional: override remote name
+	TrunkBranch string `yaml:"trunk_branch"` // optional: per-project trunk branch override
+	Setup       string `yaml:"setup"`        // optional: project-specific setup command
 }
 
 // ValidationConfig contains validation settings for work items.
@@ -87,7 +136,10 @@ func LoadConfig() (*Config, error) {
 	} else if _, err := os.Stat(legacyPath); err == nil {
 		configPath = legacyPath
 	} else {
-		return &DefaultConfig, nil
+		// No config file - return a copy of defaults with all defaults applied
+		config := DefaultConfig
+		mergeWithDefaults(&config)
+		return &config, nil
 	}
 
 	// Validate config path is safe (no path traversal)
@@ -109,7 +161,47 @@ func LoadConfig() (*Config, error) {
 	// Merge with defaults for missing fields
 	mergeWithDefaults(&config)
 
+	// Validate configuration
+	if err := validateConfig(&config); err != nil {
+		return nil, err
+	}
+
 	return &config, nil
+}
+
+// ValidStatusActions defines the valid values for start.status_action
+var ValidStatusActions = []string{"none", "commit_only", "commit_and_push", "commit_only_branch"}
+
+func validateConfig(config *Config) error {
+	// Validate start.move_to is a valid status key
+	if config.Start != nil && config.Start.MoveTo != "" {
+		if _, exists := config.StatusFolders[config.Start.MoveTo]; !exists {
+			validStatuses := make([]string, 0, len(config.StatusFolders))
+			for status := range config.StatusFolders {
+				validStatuses = append(validStatuses, status)
+			}
+			sort.Strings(validStatuses)
+			return fmt.Errorf("invalid status '%s': status must be one of: %s",
+				config.Start.MoveTo, strings.Join(validStatuses, ", "))
+		}
+	}
+
+	// Validate start.status_action is a valid value
+	if config.Start != nil && config.Start.StatusAction != "" {
+		valid := false
+		for _, action := range ValidStatusActions {
+			if config.Start.StatusAction == action {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid status_action value '%s': use one of: %s",
+				config.Start.StatusAction, strings.Join(ValidStatusActions, ", "))
+		}
+	}
+
+	return nil
 }
 
 func mergeCommitDefaults(commit *CommitConfig) {
@@ -164,6 +256,55 @@ func mergeWithDefaults(config *Config) {
 
 	if config.DefaultStatus == "" {
 		config.DefaultStatus = DefaultConfig.DefaultStatus
+	}
+
+	mergeGitDefaults(config)
+	mergeStartDefaults(config)
+	mergeWorkspaceDefaults(config)
+}
+
+func mergeGitDefaults(config *Config) {
+	if config.Git == nil {
+		config.Git = &GitConfig{}
+	}
+	// TrunkBranch defaults to "" which means auto-detect (main/master)
+	// Remote defaults to "origin"
+	if config.Git.Remote == "" {
+		config.Git.Remote = "origin"
+	}
+}
+
+func mergeStartDefaults(config *Config) {
+	if config.Start == nil {
+		config.Start = &StartConfig{}
+	}
+	if config.Start.MoveTo == "" {
+		config.Start.MoveTo = "doing"
+	}
+	if config.Start.StatusAction == "" {
+		config.Start.StatusAction = "commit_and_push"
+	}
+	// StatusCommitMessage defaults to empty, which will use default template at runtime
+}
+
+func mergeWorkspaceDefaults(config *Config) {
+	if config.Workspace == nil {
+		// No workspace config = standalone mode, nothing to merge
+		return
+	}
+	if config.Workspace.Root == "" {
+		config.Workspace.Root = "../"
+	}
+	// WorktreeRoot is derived at runtime if not set
+	// DraftPR defaults to false (zero value)
+
+	// Apply project defaults
+	for i := range config.Workspace.Projects {
+		project := &config.Workspace.Projects[i]
+		// Mount defaults to project name
+		if project.Mount == "" {
+			project.Mount = project.Name
+		}
 	}
 }
 

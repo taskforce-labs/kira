@@ -439,6 +439,131 @@ else
   exit 1
 fi
 
+# Test 16: start command - validation (Phase 1)
+echo ""
+echo "🧪 Test 16: start command - validation"
+"$KIRA_BIN" init --force > /dev/null
+git init > /dev/null 2>&1
+git config user.email test@example.com
+git config user.name "Test User"
+git add .
+git commit -m "init" > /dev/null 2>&1
+
+# Create a work item in todo
+cat > .work/1_todo/003-start-test.prd.md << 'EOF'
+---
+id: 003
+title: Start Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+---
+
+# Start Test Feature
+EOF
+git add .work/1_todo/003-start-test.prd.md
+git commit -m "Add work item" > /dev/null 2>&1
+
+# Test: Valid work item validation succeeds
+if "$KIRA_BIN" start 003 2>&1 | grep -q "Work item 003 validated successfully"; then
+  echo "✅ Start command validates work item correctly"
+else
+  echo "❌ Start command validation failed"
+  exit 1
+fi
+
+# Test: Dry-run mode shows preview
+DRY_RUN_OUTPUT=$("$KIRA_BIN" start 003 --dry-run 2>&1)
+if echo "$DRY_RUN_OUTPUT" | grep -q "\[DRY RUN\]" && \
+   echo "$DRY_RUN_OUTPUT" | grep -q "ID: 003" && \
+   echo "$DRY_RUN_OUTPUT" | grep -q "Title: Start Test Feature" && \
+   echo "$DRY_RUN_OUTPUT" | grep -q "Branch Name:"; then
+  echo "✅ Dry-run mode shows correct preview"
+else
+  echo "❌ Dry-run mode output incorrect"
+  echo "Output: $DRY_RUN_OUTPUT"
+  exit 1
+fi
+
+# Test 17: start command - error cases
+echo ""
+echo "🧪 Test 17: start command - error cases"
+
+# Test: Invalid work item ID format
+if "$KIRA_BIN" start "../invalid" 2>&1 | grep -qi "invalid work item ID"; then
+  echo "✅ Invalid ID format rejected correctly"
+else
+  echo "❌ Invalid ID format should be rejected"
+  exit 1
+fi
+
+# Test: Work item not found
+if "$KIRA_BIN" start 999 2>&1 | grep -qi "not found"; then
+  echo "✅ Non-existent work item rejected correctly"
+else
+  echo "❌ Non-existent work item should be rejected"
+  exit 1
+fi
+
+# Test: Invalid status-action flag
+if "$KIRA_BIN" start 003 --status-action invalid 2>&1 | grep -qi "invalid status_action"; then
+  echo "✅ Invalid status-action flag rejected correctly"
+else
+  echo "❌ Invalid status-action flag should be rejected"
+  exit 1
+fi
+
+# Test 18: start command - status check behavior
+echo ""
+echo "🧪 Test 18: start command - status check behavior"
+
+# Create a work item already in doing status
+cat > .work/2_doing/004-already-doing.prd.md << 'EOF'
+---
+id: 004
+title: Already Doing Feature
+status: doing
+kind: prd
+created: 2024-01-01
+---
+
+# Already Doing Feature
+EOF
+
+# Test: Work item already in target status (doing) without --skip-status-check
+if "$KIRA_BIN" start 004 2>&1 | grep -qi "already in 'doing' status"; then
+  echo "✅ Work item in target status blocked correctly"
+else
+  echo "❌ Work item in target status should be blocked"
+  exit 1
+fi
+
+# Test: Work item already in target status WITH --skip-status-check
+if "$KIRA_BIN" start 004 --skip-status-check 2>&1 | grep -q "Work item 004 validated successfully"; then
+  echo "✅ Work item in target status allowed with --skip-status-check"
+else
+  echo "❌ Work item in target status should be allowed with --skip-status-check"
+  exit 1
+fi
+
+# Test: status-action=none skips status check
+if "$KIRA_BIN" start 004 --status-action none 2>&1 | grep -q "Work item 004 validated successfully"; then
+  echo "✅ status-action=none skips status check correctly"
+else
+  echo "❌ status-action=none should skip status check"
+  exit 1
+fi
+
+# Test 19: start command - help
+echo ""
+echo "🧪 Test 19: start command - help"
+if "$KIRA_BIN" start --help 2>&1 | grep -q "Creates a git worktree"; then
+  echo "✅ Start command help works"
+else
+  echo "❌ Start command help failed"
+  exit 1
+fi
+
 # Cleanup
 echo ""
 if [ "$KEEP" -eq 1 ] || [ "${KEEP_TEST_DIR:-0}" -ne 0 ]; then
@@ -466,6 +591,9 @@ echo "  ✅ Doctor check"
 echo "  ✅ Work item movement"
 echo "  ✅ Help system"
 echo "  ✅ Move with commit flag"
+echo "  ✅ Start command validation"
+echo "  ✅ Start command error handling"
+echo "  ✅ Start command status check"
 echo ""
 echo "🚀 Kira is ready for use!"
 
