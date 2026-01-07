@@ -34,3 +34,16 @@ release:
     releases_file: RELEASES.md
     archive_date_format: "2006-01-02"
 default_status: backlog
+
+git:
+    trunk_branch: master
+    remote: origin
+
+start:
+    move_to: doing
+    status_action: commit_and_push
+    status_commit_message: "Start {type} {id}: {title}"
+
+ide:
+    command: "cursor"
+    args: ["--new-window"]
