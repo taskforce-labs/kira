@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -300,6 +301,15 @@ func createWorktreesAndFinalize(ctx *StartContext, trunkBranch string) error {
 	fmt.Printf("\nSuccessfully started work on %s\n", ctx.WorkItemID)
 	fmt.Printf("  Worktree: %s\n", displayPath)
 	fmt.Printf("  Branch: %s\n", ctx.BranchName)
+
+	// Step 9: Launch IDE (before setup commands)
+	// IDE opens first so user can start working while setup runs
+	launchIDE(ctx, displayPath)
+
+	// Step 10: Run setup commands (after IDE opening)
+	if err := executeSetupCommands(ctx, displayPath); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -820,6 +830,20 @@ func printDryRunSetup(ctx *StartContext) {
 		fmt.Printf("  Main Project: %s\n", ctx.Config.Workspace.Setup)
 	} else {
 		fmt.Println("  Main Project: None configured")
+	}
+
+	// Show project-specific setups for polyrepo
+	if ctx.Behavior == WorkspaceBehaviorPolyrepo && ctx.Config.Workspace != nil {
+		hasProjectSetup := false
+		for _, p := range ctx.Config.Workspace.Projects {
+			if p.Setup != "" {
+				if !hasProjectSetup {
+					fmt.Println("  Project Setups:")
+					hasProjectSetup = true
+				}
+				fmt.Printf("    %s: %s\n", p.Name, p.Setup)
+			}
+		}
 	}
 }
 
@@ -2027,6 +2051,235 @@ func pushStatusChange(dir, remoteName, branchName string) error {
 	_, err := executeCommand(pushCtx, "git", []string{"push", remoteName, branchName}, dir, false)
 	if err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// ============================================================================
+// Phase 4: IDE & Setup Integration
+// ============================================================================
+
+// launchIDE opens the IDE for the worktree.
+// Priority order: --no-ide flag (skip) > --ide flag > ide.command config > no IDE
+// IDE launch failures are logged as warnings; worktree creation still succeeds.
+func launchIDE(ctx *StartContext, worktreePath string) {
+	// Priority 1: --no-ide flag (highest priority - silent skip)
+	if ctx.Flags.NoIDE {
+		return
+	}
+
+	// Priority 2: --ide flag override
+	if ctx.Flags.IDECommand != "" {
+		launchIDECommand(ctx.Flags.IDECommand, nil, worktreePath, ctx.Flags.DryRun)
+		return
+	}
+
+	// Priority 3: ide.command from config
+	if ctx.Config.IDE != nil && ctx.Config.IDE.Command != "" {
+		launchIDECommand(ctx.Config.IDE.Command, ctx.Config.IDE.Args, worktreePath, ctx.Flags.DryRun)
+		return
+	}
+
+	// No IDE configured
+	fmt.Printf("Info: No IDE configured. Worktree created at %s. Configure `ide.command` in kira.yml or use `--ide <command>` flag to automatically open IDE.\n", worktreePath)
+}
+
+// launchIDECommand executes the IDE command with the worktree path.
+// The command is run in the background so we don't wait for the IDE to close.
+func launchIDECommand(command string, args []string, worktreePath string, dryRun bool) {
+	// Build full command arguments: args + worktreePath
+	fullArgs := make([]string, 0, len(args)+1)
+	fullArgs = append(fullArgs, args...)
+	fullArgs = append(fullArgs, worktreePath)
+
+	if dryRun {
+		preview := formatCommandPreview(command, fullArgs)
+		fmt.Println(preview)
+		return
+	}
+
+	fmt.Printf("Opening IDE: %s %s\n", command, worktreePath)
+
+	// Create command - use Start() instead of Run() for background execution
+	// #nosec G204 - IDE command is intentionally user-configured via kira.yml or --ide flag
+	cmd := exec.Command(command, fullArgs...)
+
+	// Detach from parent process so IDE keeps running after kira exits
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+
+	err := cmd.Start()
+	if err != nil {
+		// Check if command not found
+		if isCommandNotFound(err) {
+			fmt.Printf("Warning: IDE command '%s' not found. Verify `--ide` flag value or `ide.command` in kira.yml. You can manually open the IDE at %s.\n", command, worktreePath)
+		} else {
+			fmt.Printf("Warning: Failed to launch IDE. IDE command execution failed. Worktree created successfully. You can manually open the IDE at %s.\n", worktreePath)
+		}
+		return
+	}
+
+	// Don't wait for the process - let it run in background
+	// Release the process so it doesn't become a zombie
+	go func() {
+		_ = cmd.Wait()
+	}()
+}
+
+// isCommandNotFound checks if an error indicates the command was not found.
+func isCommandNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "executable file not found") ||
+		strings.Contains(errStr, "no such file or directory") ||
+		strings.Contains(errStr, "not found")
+}
+
+// executeSetupCommands runs workspace.setup and project.setup commands.
+// For standalone/monorepo: runs workspace.setup in worktreePath
+// For polyrepo: runs workspace.setup in {worktreePath}/main/, then project.setup for each project
+func executeSetupCommands(ctx *StartContext, worktreePath string) error {
+	if ctx.Config.Workspace == nil {
+		return nil // No workspace config, nothing to do
+	}
+
+	// Determine main project worktree path
+	mainWorktreePath := worktreePath
+	if ctx.Behavior == WorkspaceBehaviorPolyrepo {
+		mainWorktreePath = filepath.Join(worktreePath, "main")
+	}
+
+	// Run workspace.setup (main project setup)
+	if ctx.Config.Workspace.Setup != "" {
+		fmt.Printf("Running setup for main project: %s\n", ctx.Config.Workspace.Setup)
+		if err := executeSetup(ctx.Config.Workspace.Setup, mainWorktreePath, ctx.Flags.DryRun); err != nil {
+			return fmt.Errorf("setup command failed: %w", err)
+		}
+	}
+
+	// For polyrepo, run project-specific setups
+	if ctx.Behavior == WorkspaceBehaviorPolyrepo {
+		if err := executeProjectSetups(ctx, worktreePath); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// executeProjectSetups runs setup commands for each polyrepo project.
+func executeProjectSetups(ctx *StartContext, baseWorktreePath string) error {
+	if ctx.Config.Workspace == nil {
+		return nil
+	}
+
+	processedRoots := make(map[string]bool)
+
+	for _, p := range ctx.Config.Workspace.Projects {
+		if p.Setup == "" {
+			continue // No setup configured for this project
+		}
+
+		// Determine worktree path for this project
+		projectWorktreePath := getProjectSetupPath(p, baseWorktreePath, processedRoots)
+		if projectWorktreePath == "" {
+			continue // Already processed this repo_root group
+		}
+
+		fmt.Printf("Running setup for %s: %s\n", p.Name, p.Setup)
+		if err := executeSetup(p.Setup, projectWorktreePath, ctx.Flags.DryRun); err != nil {
+			return fmt.Errorf("setup command failed for project '%s': %w", p.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// getProjectSetupPath returns the worktree path for a project's setup command.
+func getProjectSetupPath(p config.ProjectConfig, baseWorktreePath string, processedRoots map[string]bool) string {
+	if p.Path == "" {
+		return "" // No path, no worktree
+	}
+
+	if p.RepoRoot != "" {
+		if processedRoots[p.RepoRoot] {
+			return "" // Already processed this repo_root group
+		}
+		processedRoots[p.RepoRoot] = true
+		rootName := kebabCase(filepath.Base(filepath.Clean(p.RepoRoot)))
+		return filepath.Join(baseWorktreePath, rootName)
+	}
+
+	mount := p.Mount
+	if mount == "" {
+		mount = p.Name
+	}
+	return filepath.Join(baseWorktreePath, mount)
+}
+
+// executeSetup runs a single setup command or script.
+// If the setup string looks like a script path (contains / or starts with ./),
+// it's executed via shell. Otherwise, it's executed directly.
+func executeSetup(setupCmd, workDir string, dryRun bool) error {
+	if dryRun {
+		fmt.Printf("[DRY RUN] Would execute setup: %s (in %s)\n", setupCmd, workDir)
+		return nil
+	}
+
+	// Check if workDir exists
+	if _, err := os.Stat(workDir); os.IsNotExist(err) {
+		return fmt.Errorf("setup directory does not exist: %s", workDir)
+	}
+
+	// Determine if this is a script path (starts with ./ or is just a relative path to a script file)
+	// Note: We only check for script existence if it starts with "./" as that's the common pattern
+	// Commands like "echo test > /tmp/file" should not be treated as scripts
+	isScriptPath := strings.HasPrefix(setupCmd, "./") || strings.HasPrefix(setupCmd, "/")
+
+	// Only validate script existence if it looks like a direct script invocation (not a shell command)
+	// A shell command typically has spaces (arguments) or special characters
+	isSimpleScriptPath := isScriptPath && !strings.ContainsAny(setupCmd, " \t|&;<>")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute) // 5 minute timeout for setup
+	defer cancel()
+
+	if isSimpleScriptPath {
+		// Check if script exists
+		scriptPath := setupCmd
+		if !filepath.IsAbs(scriptPath) {
+			scriptPath = filepath.Join(workDir, setupCmd)
+		}
+
+		if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+			return fmt.Errorf("setup script not found: %s. Script file does not exist. Verify `workspace.setup` or `project.setup` configuration in kira.yml", setupCmd)
+		}
+	}
+
+	// Execute via shell (handles pipes, redirects, etc.)
+	cmd := exec.CommandContext(ctx, "sh", "-c", setupCmd)
+
+	cmd.Dir = workDir
+
+	// Capture output for error reporting
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outputStr := strings.TrimSpace(string(output))
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("setup command timed out. Command did not complete within timeout period. Verify setup command completes successfully or increase timeout if needed")
+		}
+		if outputStr != "" {
+			return fmt.Errorf("setup command exited with error: %s. Check command output for details: %s", err, outputStr)
+		}
+		return fmt.Errorf("setup command exited with error: %w", err)
+	}
+
+	// Print output if any
+	if len(output) > 0 {
+		fmt.Printf("%s", string(output))
 	}
 
 	return nil

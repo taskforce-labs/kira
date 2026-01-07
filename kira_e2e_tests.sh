@@ -606,6 +606,217 @@ else
   exit 1
 fi
 
+# Test 20: start command - IDE flags
+echo ""
+echo "🧪 Test 20: start command - IDE flags"
+
+# Create a fresh work item for IDE tests
+cat > .work/0_backlog/005-ide-test.prd.md << 'EOF'
+---
+kind: prd
+id: 005
+title: IDE Test Feature
+status: backlog
+created: 2025-01-08
+---
+# IDE Test Feature
+Work item for testing IDE integration.
+EOF
+git add .work/0_backlog/005-ide-test.prd.md
+git commit -m "Add IDE test work item" > /dev/null 2>&1
+
+# Test: --no-ide flag skips IDE silently (should still create worktree)
+START_NO_IDE_OUTPUT=$("$KIRA_BIN" start 005 --no-ide 2>&1)
+if echo "$START_NO_IDE_OUTPUT" | grep -q "Successfully started work on 005"; then
+  # Verify no IDE-related messages appear (only "Info: No IDE configured" should appear without --no-ide)
+  if echo "$START_NO_IDE_OUTPUT" | grep -qi "Opening IDE"; then
+    echo "❌ --no-ide flag should not show 'Opening IDE' message"
+    exit 1
+  fi
+  echo "✅ --no-ide flag skips IDE silently"
+  # Cleanup
+  git worktree remove "$WORKTREE_ROOT/$WORKTREE_NAME/005-ide-test-feature" --force > /dev/null 2>&1
+  git branch -D 005-ide-test-feature > /dev/null 2>&1
+else
+  echo "❌ --no-ide flag should allow worktree creation"
+  echo "Output: $START_NO_IDE_OUTPUT"
+  exit 1
+fi
+
+# Test: --ide flag with nonexistent command shows warning but succeeds
+START_IDE_OUTPUT=$("$KIRA_BIN" start 005 --ide nonexistent-test-ide-cmd --skip-status-check 2>&1)
+if echo "$START_IDE_OUTPUT" | grep -q "Successfully started work on 005"; then
+  if echo "$START_IDE_OUTPUT" | grep -qi "Warning.*not found"; then
+    echo "✅ --ide flag with invalid command shows warning but succeeds"
+  else
+    echo "✅ --ide flag creates worktree (IDE warning may vary by system)"
+  fi
+  # Cleanup
+  git worktree remove "$WORKTREE_ROOT/$WORKTREE_NAME/005-ide-test-feature" --force > /dev/null 2>&1
+  git branch -D 005-ide-test-feature > /dev/null 2>&1
+else
+  echo "❌ --ide flag with invalid command should still create worktree"
+  echo "Output: $START_IDE_OUTPUT"
+  exit 1
+fi
+
+# Test: dry-run shows IDE info
+DRY_RUN_IDE_OUTPUT=$("$KIRA_BIN" start 005 --dry-run --ide "test-ide" 2>&1)
+if echo "$DRY_RUN_IDE_OUTPUT" | grep -qi "IDE"; then
+  echo "✅ Dry-run shows IDE information"
+else
+  echo "❌ Dry-run should show IDE information"
+  echo "Output: $DRY_RUN_IDE_OUTPUT"
+  exit 1
+fi
+
+# Test 21: start command - setup commands
+echo ""
+echo "🧪 Test 21: start command - setup commands"
+
+# Update kira.yml to include workspace.setup
+cat > kira.yml << 'EOF'
+version: "1.0"
+templates:
+  prd: templates/template.prd.md
+  issue: templates/template.issue.md
+  spike: templates/template.spike.md
+  task: templates/template.task.md
+status_folders:
+  backlog: 0_backlog
+  todo: 1_todo
+  doing: 2_doing
+  review: 3_review
+  done: 4_done
+  archived: z_archive
+default_status: backlog
+validation:
+  required_fields:
+    - id
+    - title
+    - status
+    - kind
+    - created
+  id_format: "^\\d{3}$"
+  status_values:
+    - backlog
+    - todo
+    - doing
+    - review
+    - done
+    - released
+    - abandoned
+    - archived
+commit:
+  default_message: Update work items
+  move_subject_template: "Move {type} {id} to {target_status}"
+  move_body_template: "{title} ({current_status} -> {target_status})"
+release:
+  releases_file: RELEASES.md
+  archive_date_format: "2006-01-02"
+start:
+  status_action: none
+workspace:
+  setup: "echo 'E2E_SETUP_RAN' > /tmp/kira-e2e-setup-test.txt"
+EOF
+
+# Create a fresh work item for setup tests
+cat > .work/0_backlog/006-setup-test.prd.md << 'EOF'
+---
+kind: prd
+id: 006
+title: Setup Test Feature
+status: backlog
+created: 2025-01-08
+---
+# Setup Test Feature
+Work item for testing setup commands.
+EOF
+git add kira.yml .work/0_backlog/006-setup-test.prd.md
+git commit -m "Add setup test work item and kira.yml with setup" > /dev/null 2>&1
+
+# Test: setup command runs and creates file
+rm -f /tmp/kira-e2e-setup-test.txt
+START_SETUP_OUTPUT=$("$KIRA_BIN" start 006 --no-ide 2>&1)
+if echo "$START_SETUP_OUTPUT" | grep -q "Successfully started work on 006"; then
+  if [ -f /tmp/kira-e2e-setup-test.txt ]; then
+    if grep -q "E2E_SETUP_RAN" /tmp/kira-e2e-setup-test.txt; then
+      echo "✅ Setup command executed successfully"
+    else
+      echo "❌ Setup command ran but output is incorrect"
+      exit 1
+    fi
+    rm -f /tmp/kira-e2e-setup-test.txt
+  else
+    echo "❌ Setup command did not run (marker file not created)"
+    exit 1
+  fi
+  # Cleanup
+  git worktree remove "$WORKTREE_ROOT/$WORKTREE_NAME/006-setup-test-feature" --force > /dev/null 2>&1
+  git branch -D 006-setup-test-feature > /dev/null 2>&1
+else
+  echo "❌ Start command with setup failed"
+  echo "Output: $START_SETUP_OUTPUT"
+  exit 1
+fi
+
+# Test: dry-run shows setup info
+DRY_RUN_SETUP_OUTPUT=$("$KIRA_BIN" start 006 --dry-run 2>&1)
+if echo "$DRY_RUN_SETUP_OUTPUT" | grep -q "Setup:"; then
+  if echo "$DRY_RUN_SETUP_OUTPUT" | grep -q "Main Project:"; then
+    echo "✅ Dry-run shows setup information"
+  else
+    echo "❌ Dry-run should show Main Project setup"
+    exit 1
+  fi
+else
+  echo "❌ Dry-run should show Setup section"
+  echo "Output: $DRY_RUN_SETUP_OUTPUT"
+  exit 1
+fi
+
+# Cleanup kira.yml (restore without setup)
+cat > kira.yml << 'EOF'
+version: "1.0"
+templates:
+  prd: templates/template.prd.md
+  issue: templates/template.issue.md
+  spike: templates/template.spike.md
+  task: templates/template.task.md
+status_folders:
+  backlog: 0_backlog
+  todo: 1_todo
+  doing: 2_doing
+  review: 3_review
+  done: 4_done
+  archived: z_archive
+default_status: backlog
+validation:
+  required_fields:
+    - id
+    - title
+    - status
+    - kind
+    - created
+  id_format: "^\\d{3}$"
+  status_values:
+    - backlog
+    - todo
+    - doing
+    - review
+    - done
+    - released
+    - abandoned
+    - archived
+commit:
+  default_message: Update work items
+  move_subject_template: "Move {type} {id} to {target_status}"
+  move_body_template: "{title} ({current_status} -> {target_status})"
+release:
+  releases_file: RELEASES.md
+  archive_date_format: "2006-01-02"
+EOF
+
 # Cleanup
 echo ""
 if [ "$KEEP" -eq 1 ] || [ "${KEEP_TEST_DIR:-0}" -ne 0 ]; then
@@ -636,6 +847,8 @@ echo "  ✅ Move with commit flag"
 echo "  ✅ Start command validation"
 echo "  ✅ Start command error handling"
 echo "  ✅ Start command status check"
+echo "  ✅ Start command IDE flags"
+echo "  ✅ Start command setup commands"
 echo ""
 echo "🚀 Kira is ready for use!"
 

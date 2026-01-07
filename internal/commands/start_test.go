@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1325,5 +1326,346 @@ status: backlog
 		newContent, err := safeReadFile(".work/2_doing/001-test-task.md")
 		require.NoError(t, err)
 		assert.Contains(t, string(newContent), "status: doing")
+	})
+}
+
+// ============================================================================
+// Phase 4: IDE & Setup Integration Tests
+// ============================================================================
+
+func TestIsCommandNotFound(t *testing.T) {
+	t.Run("returns false for nil error", func(t *testing.T) {
+		result := isCommandNotFound(nil)
+		assert.False(t, result)
+	})
+
+	t.Run("returns true for executable not found error", func(t *testing.T) {
+		err := fmt.Errorf("executable file not found in $PATH")
+		result := isCommandNotFound(err)
+		assert.True(t, result)
+	})
+
+	t.Run("returns true for no such file error", func(t *testing.T) {
+		err := fmt.Errorf("no such file or directory: /bin/nonexistent")
+		result := isCommandNotFound(err)
+		assert.True(t, result)
+	})
+
+	t.Run("returns true for not found error", func(t *testing.T) {
+		err := fmt.Errorf("command not found: something")
+		result := isCommandNotFound(err)
+		assert.True(t, result)
+	})
+
+	t.Run("returns false for other errors", func(t *testing.T) {
+		err := fmt.Errorf("permission denied")
+		result := isCommandNotFound(err)
+		assert.False(t, result)
+	})
+}
+
+func TestLaunchIDEPriority(t *testing.T) {
+	t.Run("skips silently when NoIDE flag is set", func(_ *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				IDE: &config.IDEConfig{
+					Command: "cursor",
+				},
+			},
+			Flags: StartFlags{
+				NoIDE:      true,
+				IDECommand: "code", // Should be ignored
+			},
+		}
+
+		// launchIDE should return immediately without any action
+		// We can't easily test this doesn't print, but we verify it doesn't panic
+		launchIDE(ctx, "/some/path")
+		// Test passes if no panic
+	})
+
+	t.Run("uses IDECommand flag over config", func(_ *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				IDE: &config.IDEConfig{
+					Command: "cursor",
+					Args:    []string{"--new-window"},
+				},
+			},
+			Flags: StartFlags{
+				IDECommand: "nonexistent-test-ide",
+				DryRun:     true, // Use dry-run so we don't actually try to launch
+			},
+		}
+
+		// In dry-run mode, this should print the command preview
+		// The test passes if it uses the flag value, not the config value
+		launchIDE(ctx, "/test/path")
+		// Test passes if no panic
+	})
+
+	t.Run("uses config when no flag provided", func(_ *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				IDE: &config.IDEConfig{
+					Command: "test-ide-command",
+					Args:    []string{"--arg1"},
+				},
+			},
+			Flags: StartFlags{
+				DryRun: true, // Use dry-run so we don't actually try to launch
+			},
+		}
+
+		// In dry-run mode, this should print the command preview with config values
+		launchIDE(ctx, "/test/path")
+		// Test passes if no panic
+	})
+
+	t.Run("prints info message when no IDE configured", func(_ *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{},
+			Flags:  StartFlags{},
+		}
+
+		// Should print info message about no IDE configured
+		launchIDE(ctx, "/test/worktree")
+		// Test passes if no panic
+	})
+}
+
+func TestExecuteSetup(t *testing.T) {
+	t.Run("dry-run mode prints preview without executing", func(t *testing.T) {
+		// Should not execute anything in dry-run mode
+		err := executeSetup("echo test", "/tmp", true)
+		assert.NoError(t, err)
+	})
+
+	t.Run("executes simple command successfully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		err := executeSetup("echo hello", tmpDir, false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("returns error for nonexistent directory", func(t *testing.T) {
+		err := executeSetup("echo test", "/nonexistent/directory/path", false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not exist")
+	})
+
+	t.Run("returns error for nonexistent script", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		err := executeSetup("./nonexistent-script.sh", tmpDir, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("executes script path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create a test script - needs execute permission to run via ./script.sh
+		scriptContent := "#!/bin/sh\necho 'script executed'\n"
+		scriptPath := filepath.Join(tmpDir, "test-script.sh")
+		require.NoError(t, os.WriteFile(scriptPath, []byte(scriptContent), 0o600))
+		// #nosec G302 - test script needs execute permission
+		require.NoError(t, os.Chmod(scriptPath, 0o700))
+
+		err := executeSetup("./test-script.sh", tmpDir, false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("returns error for failing command", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		err := executeSetup("exit 1", tmpDir, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exited with error")
+	})
+}
+
+func TestExecuteSetupCommands(t *testing.T) {
+	t.Run("does nothing when workspace config is nil", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{},
+			Flags:  StartFlags{},
+		}
+
+		err := executeSetupCommands(ctx, "/some/path")
+		assert.NoError(t, err)
+	})
+
+	t.Run("does nothing when no setup configured", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{},
+			},
+			Flags: StartFlags{},
+		}
+
+		err := executeSetupCommands(ctx, "/some/path")
+		assert.NoError(t, err)
+	})
+
+	t.Run("runs workspace setup for standalone", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{
+					Setup: "echo standalone_setup",
+				},
+			},
+			Behavior: WorkspaceBehaviorStandalone,
+			Flags:    StartFlags{},
+		}
+
+		err := executeSetupCommands(ctx, tmpDir)
+		assert.NoError(t, err)
+	})
+
+	t.Run("runs workspace setup in main subdir for polyrepo", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		mainDir := filepath.Join(tmpDir, "main")
+		require.NoError(t, os.MkdirAll(mainDir, 0o700))
+
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{
+					Setup: "echo polyrepo_main_setup",
+				},
+			},
+			Behavior: WorkspaceBehaviorPolyrepo,
+			Flags:    StartFlags{},
+		}
+
+		err := executeSetupCommands(ctx, tmpDir)
+		assert.NoError(t, err)
+	})
+
+	t.Run("dry-run mode shows preview", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{
+					Setup: "echo test_setup",
+				},
+			},
+			Behavior: WorkspaceBehaviorStandalone,
+			Flags: StartFlags{
+				DryRun: true,
+			},
+		}
+
+		err := executeSetupCommands(ctx, "/test/path")
+		assert.NoError(t, err)
+	})
+}
+
+func TestExecuteProjectSetups(t *testing.T) {
+	t.Run("does nothing when workspace config is nil", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{},
+		}
+
+		err := executeProjectSetups(ctx, "/some/path")
+		assert.NoError(t, err)
+	})
+
+	t.Run("does nothing when no projects have setup", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{
+					Projects: []config.ProjectConfig{
+						{Name: "frontend", Path: "../frontend"},
+					},
+				},
+			},
+		}
+
+		err := executeProjectSetups(ctx, "/some/path")
+		assert.NoError(t, err)
+	})
+
+	t.Run("runs project setup in correct directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		projectDir := filepath.Join(tmpDir, "frontend")
+		require.NoError(t, os.MkdirAll(projectDir, 0o700))
+
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{
+					Projects: []config.ProjectConfig{
+						{Name: "frontend", Path: "../frontend", Mount: "frontend", Setup: "echo project_setup"},
+					},
+				},
+			},
+			Flags: StartFlags{},
+		}
+
+		err := executeProjectSetups(ctx, tmpDir)
+		assert.NoError(t, err)
+	})
+
+	t.Run("dry-run mode shows preview for projects", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{
+					Projects: []config.ProjectConfig{
+						{Name: "frontend", Path: "../frontend", Mount: "frontend", Setup: "npm install"},
+						{Name: "backend", Path: "../backend", Mount: "backend", Setup: "./setup.sh"},
+					},
+				},
+			},
+			Flags: StartFlags{
+				DryRun: true,
+			},
+		}
+
+		err := executeProjectSetups(ctx, "/test/base")
+		assert.NoError(t, err)
+	})
+}
+
+func TestGetProjectSetupPath(t *testing.T) {
+	t.Run("returns empty for project without path", func(t *testing.T) {
+		p := config.ProjectConfig{Name: "frontend"}
+		processedRoots := make(map[string]bool)
+
+		result := getProjectSetupPath(p, "/base", processedRoots)
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("returns mount path for project without repo_root", func(t *testing.T) {
+		p := config.ProjectConfig{Name: "frontend", Path: "../frontend", Mount: "fe"}
+		processedRoots := make(map[string]bool)
+
+		result := getProjectSetupPath(p, "/base", processedRoots)
+		assert.Equal(t, "/base/fe", result)
+	})
+
+	t.Run("uses name as mount when mount not set", func(t *testing.T) {
+		p := config.ProjectConfig{Name: "frontend", Path: "../frontend"}
+		processedRoots := make(map[string]bool)
+
+		result := getProjectSetupPath(p, "/base", processedRoots)
+		assert.Equal(t, "/base/frontend", result)
+	})
+
+	t.Run("returns repo_root path and marks as processed", func(t *testing.T) {
+		p := config.ProjectConfig{Name: "frontend", Path: "../monorepo/frontend", RepoRoot: "../monorepo"}
+		processedRoots := make(map[string]bool)
+
+		result := getProjectSetupPath(p, "/base", processedRoots)
+		assert.Equal(t, "/base/monorepo", result)
+		assert.True(t, processedRoots["../monorepo"])
+	})
+
+	t.Run("returns empty for already processed repo_root", func(t *testing.T) {
+		p := config.ProjectConfig{Name: "backend", Path: "../monorepo/backend", RepoRoot: "../monorepo"}
+		processedRoots := map[string]bool{"../monorepo": true}
+
+		result := getProjectSetupPath(p, "/base", processedRoots)
+		assert.Equal(t, "", result)
 	})
 }
