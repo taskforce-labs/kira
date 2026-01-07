@@ -31,3 +31,4 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 22. [2025-12-14] kira review context: an ability to include context history into the reivew - helpful when working with agents
 23. [2026-01-05] id prefix: allow ids to have a prefix possibly via a template to add flexability to how it's formatted
 24. [2026-01-05] non-numeric ids: allow ids to be generated with a short unique hash
+25. [2026-01-07] init defaults: update init defaults with start config and options
