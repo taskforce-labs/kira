@@ -874,3 +874,456 @@ func TestPolyrepoProject(t *testing.T) {
 		assert.Equal(t, "upstream", project.Remote)
 	})
 }
+
+// ============================================================================
+// Phase 3: Status Management Tests
+// ============================================================================
+
+func TestGetEffectiveStatusAction(t *testing.T) {
+	t.Run("returns flag value when set", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_only",
+				},
+			},
+			Flags: StartFlags{
+				StatusAction: "commit_and_push",
+			},
+		}
+		result := getEffectiveStatusAction(ctx)
+		assert.Equal(t, "commit_and_push", result)
+	})
+
+	t.Run("returns config value when flag not set", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_only",
+				},
+			},
+			Flags: StartFlags{},
+		}
+		result := getEffectiveStatusAction(ctx)
+		assert.Equal(t, "commit_only", result)
+	})
+
+	t.Run("returns empty string when neither set", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Start: &config.StartConfig{},
+			},
+			Flags: StartFlags{},
+		}
+		result := getEffectiveStatusAction(ctx)
+		assert.Equal(t, "", result)
+	})
+}
+
+func TestPerformStatusCheck(t *testing.T) {
+	t.Run("skips check when status_action is none", func(t *testing.T) {
+		ctx := &StartContext{
+			WorkItemID: "001",
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "none",
+					MoveTo:       "doing",
+				},
+			},
+			Metadata: workItemMetadata{
+				currentStatus: "doing",
+			},
+			Flags: StartFlags{},
+		}
+
+		err := performStatusCheck(ctx)
+		assert.NoError(t, err)
+		assert.True(t, ctx.SkipStatusUpdate)
+	})
+
+	t.Run("returns error when status matches target without skip flag", func(t *testing.T) {
+		ctx := &StartContext{
+			WorkItemID: "001",
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_only",
+					MoveTo:       "doing",
+				},
+			},
+			Metadata: workItemMetadata{
+				currentStatus: "doing",
+			},
+			Flags: StartFlags{},
+		}
+
+		err := performStatusCheck(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "already in 'doing' status")
+		assert.Contains(t, err.Error(), "--skip-status-check")
+	})
+
+	t.Run("sets skip flag when status matches and skip-status-check is set", func(t *testing.T) {
+		ctx := &StartContext{
+			WorkItemID: "001",
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_only",
+					MoveTo:       "doing",
+				},
+			},
+			Metadata: workItemMetadata{
+				currentStatus: "doing",
+			},
+			Flags: StartFlags{
+				SkipStatusCheck: true,
+			},
+		}
+
+		err := performStatusCheck(ctx)
+		assert.NoError(t, err)
+		assert.True(t, ctx.SkipStatusUpdate)
+	})
+
+	t.Run("continues when status does not match target", func(t *testing.T) {
+		ctx := &StartContext{
+			WorkItemID: "001",
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_only",
+					MoveTo:       "doing",
+				},
+			},
+			Metadata: workItemMetadata{
+				currentStatus: "backlog",
+			},
+			Flags: StartFlags{},
+		}
+
+		err := performStatusCheck(ctx)
+		assert.NoError(t, err)
+		assert.False(t, ctx.SkipStatusUpdate)
+	})
+
+	t.Run("flag status_action overrides config", func(t *testing.T) {
+		ctx := &StartContext{
+			WorkItemID: "001",
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_only",
+					MoveTo:       "doing",
+				},
+			},
+			Metadata: workItemMetadata{
+				currentStatus: "doing",
+			},
+			Flags: StartFlags{
+				StatusAction: "none",
+			},
+		}
+
+		err := performStatusCheck(ctx)
+		assert.NoError(t, err)
+		assert.True(t, ctx.SkipStatusUpdate)
+	})
+}
+
+func TestBuildStatusCommitMessage(t *testing.T) {
+	t.Run("uses default template when not configured", func(t *testing.T) {
+		ctx := &StartContext{
+			WorkItemID: "001",
+			Config: &config.Config{
+				Start: &config.StartConfig{},
+			},
+			Metadata: workItemMetadata{
+				workItemType: "task",
+				title:        "Test Feature",
+			},
+		}
+
+		msg, err := buildStatusCommitMessage(ctx, "doing")
+		require.NoError(t, err)
+		assert.Equal(t, "Move task 001 to doing", msg)
+	})
+
+	t.Run("uses custom template when configured", func(t *testing.T) {
+		ctx := &StartContext{
+			WorkItemID: "001",
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusCommitMessage: "Start {type} {id} - {title}",
+				},
+			},
+			Metadata: workItemMetadata{
+				workItemType: "issue",
+				title:        "Fix Bug",
+			},
+		}
+
+		msg, err := buildStatusCommitMessage(ctx, "doing")
+		require.NoError(t, err)
+		assert.Equal(t, "Start issue 001 - Fix Bug", msg)
+	})
+
+	t.Run("replaces all template variables", func(t *testing.T) {
+		ctx := &StartContext{
+			WorkItemID: "042",
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusCommitMessage: "{type} {id} {title} -> {move_to}",
+				},
+			},
+			Metadata: workItemMetadata{
+				workItemType: "prd",
+				title:        "New Feature",
+			},
+		}
+
+		msg, err := buildStatusCommitMessage(ctx, "doing")
+		require.NoError(t, err)
+		assert.Equal(t, "prd 042 New Feature -> doing", msg)
+	})
+
+	t.Run("handles template with only some variables", func(t *testing.T) {
+		ctx := &StartContext{
+			WorkItemID: "001",
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusCommitMessage: "Start {id}",
+				},
+			},
+			Metadata: workItemMetadata{
+				workItemType: "task",
+				title:        "Test",
+			},
+		}
+
+		msg, err := buildStatusCommitMessage(ctx, "doing")
+		require.NoError(t, err)
+		assert.Equal(t, "Start 001", msg)
+	})
+
+	t.Run("handles empty title gracefully", func(t *testing.T) {
+		ctx := &StartContext{
+			WorkItemID: "001",
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusCommitMessage: "Move {id}: {title}",
+				},
+			},
+			Metadata: workItemMetadata{
+				workItemType: "task",
+				title:        "",
+			},
+		}
+
+		msg, err := buildStatusCommitMessage(ctx, "doing")
+		require.NoError(t, err)
+		assert.Equal(t, "Move 001:", msg)
+	})
+
+	t.Run("handles unknown type gracefully", func(t *testing.T) {
+		ctx := &StartContext{
+			WorkItemID: "001",
+			Config: &config.Config{
+				Start: &config.StartConfig{},
+			},
+			Metadata: workItemMetadata{
+				workItemType: unknownValue,
+				title:        "Test",
+			},
+		}
+
+		msg, err := buildStatusCommitMessage(ctx, "doing")
+		require.NoError(t, err)
+		assert.Equal(t, "Move unknown 001 to doing", msg)
+	})
+}
+
+func TestStartContextSkipStatusUpdate(t *testing.T) {
+	t.Run("SkipStatusUpdate field exists and defaults to false", func(t *testing.T) {
+		ctx := &StartContext{}
+		assert.False(t, ctx.SkipStatusUpdate)
+	})
+
+	t.Run("SkipStatusUpdate can be set", func(t *testing.T) {
+		ctx := &StartContext{
+			SkipStatusUpdate: true,
+		}
+		assert.True(t, ctx.SkipStatusUpdate)
+	})
+}
+
+func TestPerformStatusUpdateSkipsWhenFlagged(t *testing.T) {
+	t.Run("skips when status_action is none", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "none",
+					MoveTo:       "doing",
+				},
+			},
+		}
+
+		// Should return nil without doing anything
+		err := performStatusUpdate(ctx, "/repo", "main", "origin")
+		assert.NoError(t, err)
+	})
+
+	t.Run("skips when status_action is commit_only_branch", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_only_branch",
+					MoveTo:       "doing",
+				},
+			},
+		}
+
+		// Should return nil without doing anything
+		err := performStatusUpdate(ctx, "/repo", "main", "origin")
+		assert.NoError(t, err)
+	})
+
+	t.Run("skips when SkipStatusUpdate is set", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_only",
+					MoveTo:       "doing",
+				},
+			},
+			SkipStatusUpdate: true,
+		}
+
+		// Should return nil without doing anything
+		err := performStatusUpdate(ctx, "/repo", "main", "origin")
+		assert.NoError(t, err)
+	})
+}
+
+func TestPerformStatusUpdateOnBranchSkipsWhenFlagged(t *testing.T) {
+	t.Run("skips when status_action is not commit_only_branch", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_only",
+					MoveTo:       "doing",
+				},
+			},
+		}
+
+		// Should return nil without doing anything
+		err := performStatusUpdateOnBranch(ctx, "/worktree")
+		assert.NoError(t, err)
+	})
+
+	t.Run("skips when status_action is none", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "none",
+					MoveTo:       "doing",
+				},
+			},
+		}
+
+		err := performStatusUpdateOnBranch(ctx, "/worktree")
+		assert.NoError(t, err)
+	})
+
+	t.Run("skips when SkipStatusUpdate is set", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_only_branch",
+					MoveTo:       "doing",
+				},
+			},
+			SkipStatusUpdate: true,
+		}
+
+		err := performStatusUpdateOnBranch(ctx, "/worktree")
+		assert.NoError(t, err)
+	})
+}
+
+func TestMoveWorkItemWithoutCommit(t *testing.T) {
+	t.Run("returns error for invalid target status", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".work", "0_backlog"), 0o700))
+
+		// Create a work item file
+		workItemContent := `---
+kind: task
+id: 001
+title: Test Task
+status: backlog
+---
+# Test Task`
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmpDir, ".work", "0_backlog", "001-test-task.md"),
+			[]byte(workItemContent),
+			0o600,
+		))
+
+		cfg := &config.Config{
+			StatusFolders: map[string]string{
+				"backlog": "0_backlog",
+				"doing":   "2_doing",
+			},
+		}
+
+		err := moveWorkItemWithoutCommit(cfg, "001", "invalid_status")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid target status")
+	})
+
+	t.Run("moves work item to new status folder", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".work", "0_backlog"), 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".work", "2_doing"), 0o700))
+
+		// Create a work item file
+		workItemContent := `---
+kind: task
+id: 001
+title: Test Task
+status: backlog
+---
+# Test Task`
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmpDir, ".work", "0_backlog", "001-test-task.md"),
+			[]byte(workItemContent),
+			0o600,
+		))
+
+		cfg := &config.Config{
+			StatusFolders: map[string]string{
+				"backlog": "0_backlog",
+				"doing":   "2_doing",
+			},
+		}
+
+		err := moveWorkItemWithoutCommit(cfg, "001", "doing")
+		require.NoError(t, err)
+
+		// Verify file was moved (old location should not exist)
+		_, err = os.Stat(filepath.Join(tmpDir, ".work", "0_backlog", "001-test-task.md"))
+		assert.True(t, os.IsNotExist(err))
+
+		// Read the moved file using safeReadFile (path is relative since we changed to tmpDir)
+		newContent, err := safeReadFile(".work/2_doing/001-test-task.md")
+		require.NoError(t, err)
+		assert.Contains(t, string(newContent), "status: doing")
+	})
+}

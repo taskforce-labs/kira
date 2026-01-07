@@ -38,6 +38,15 @@ const defaultTrunkBranch = "main"
 // defaultMasterBranch is the fallback trunk branch name
 const defaultMasterBranch = "master"
 
+// statusActionNone is the status_action value that skips all status operations
+const statusActionNone = "none"
+
+// statusActionCommitAndPush commits and pushes status change on trunk
+const statusActionCommitAndPush = "commit_and_push"
+
+// statusActionCommitOnlyBranch commits status change on the new branch
+const statusActionCommitOnlyBranch = "commit_only_branch"
+
 // WorkspaceBehavior represents the inferred workspace type
 type WorkspaceBehavior int
 
@@ -92,16 +101,17 @@ type StartFlags struct {
 
 // StartContext holds all validated inputs for the start command
 type StartContext struct {
-	WorkItemID     string
-	WorkItemPath   string
-	Metadata       workItemMetadata
-	SanitizedTitle string
-	BranchName     string
-	WorktreeRoot   string
-	WorktreePaths  []string // For polyrepo
-	Behavior       WorkspaceBehavior
-	Config         *config.Config
-	Flags          StartFlags
+	WorkItemID       string
+	WorkItemPath     string
+	Metadata         workItemMetadata
+	SanitizedTitle   string
+	BranchName       string
+	WorktreeRoot     string
+	WorktreePaths    []string // For polyrepo
+	Behavior         WorkspaceBehavior
+	Config           *config.Config
+	Flags            StartFlags
+	SkipStatusUpdate bool // Set when --skip-status-check is used and status matches target
 }
 
 // Maximum length for sanitized title before truncation
@@ -211,7 +221,27 @@ func executeGitOperations(ctx *StartContext) error {
 	// Step 3: Resolve remote name
 	remoteName := resolveRemoteName(ctx.Config, nil)
 
-	// Step 4: Check for uncommitted changes
+	// Step 4: Check for uncommitted changes and pull latest
+	if err := validateAndPullLatest(ctx, repoRoot, trunkBranch, remoteName); err != nil {
+		return err
+	}
+
+	// Step 5: Check work item status (after pull to ensure up-to-date status)
+	if err := performStatusCheck(ctx); err != nil {
+		return err
+	}
+
+	// Step 6: Status update for commit_only/commit_and_push (before worktree creation)
+	if err := performStatusUpdate(ctx, repoRoot, trunkBranch, remoteName); err != nil {
+		return err
+	}
+
+	// Step 7: Create worktrees and handle post-worktree status update
+	return createWorktreesAndFinalize(ctx, trunkBranch)
+}
+
+// validateAndPullLatest checks for uncommitted changes and pulls latest from remote
+func validateAndPullLatest(ctx *StartContext, repoRoot, trunkBranch, remoteName string) error {
 	hasUncommitted, err := checkUncommittedChanges(repoRoot, ctx.Flags.DryRun)
 	if err != nil {
 		return err
@@ -220,49 +250,55 @@ func executeGitOperations(ctx *StartContext) error {
 		return fmt.Errorf("trunk branch has uncommitted changes: cannot proceed with pull operation. Commit or stash changes before starting work")
 	}
 
-	// Step 5: Pull latest changes
 	if ctx.Behavior == WorkspaceBehaviorPolyrepo {
-		// Pull for all projects in polyrepo
-		if err := pullAllProjects(ctx, trunkBranch, remoteName); err != nil {
-			return err
-		}
-	} else {
-		// Pull for standalone/monorepo
-		remoteExists, err := checkRemoteExists(remoteName, repoRoot, ctx.Flags.DryRun)
-		if err != nil {
-			return err
-		}
-
-		if !remoteExists {
-			fmt.Printf("Warning: No remote '%s' configured. Skipping pull step. Worktree will be created from local trunk branch.\n", remoteName)
-		} else {
-			fmt.Printf("Pulling latest changes from %s/%s\n", remoteName, trunkBranch)
-			if err := pullLatestChanges(remoteName, trunkBranch, repoRoot, ctx.Flags.DryRun); err != nil {
-				return err
-			}
-		}
+		return pullAllProjects(ctx, trunkBranch, remoteName)
 	}
 
-	// Step 6: Create worktree directory if needed
+	return pullStandaloneOrMonorepo(ctx, repoRoot, trunkBranch, remoteName)
+}
+
+// pullStandaloneOrMonorepo pulls latest changes for standalone/monorepo workspaces
+func pullStandaloneOrMonorepo(ctx *StartContext, repoRoot, trunkBranch, remoteName string) error {
+	remoteExists, err := checkRemoteExists(remoteName, repoRoot, ctx.Flags.DryRun)
+	if err != nil {
+		return err
+	}
+
+	if !remoteExists {
+		fmt.Printf("Warning: No remote '%s' configured. Skipping pull step. Worktree will be created from local trunk branch.\n", remoteName)
+		return nil
+	}
+
+	fmt.Printf("Pulling latest changes from %s/%s\n", remoteName, trunkBranch)
+	return pullLatestChanges(remoteName, trunkBranch, repoRoot, ctx.Flags.DryRun)
+}
+
+// createWorktreesAndFinalize creates worktrees and handles status update on branch
+func createWorktreesAndFinalize(ctx *StartContext, trunkBranch string) error {
 	if err := os.MkdirAll(ctx.WorktreeRoot, 0o750); err != nil {
 		return fmt.Errorf("failed to create worktree root directory: %w", err)
 	}
 
-	// Step 7: Create worktree(s) and branch(es)
+	worktreePath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
 	if ctx.Behavior == WorkspaceBehaviorPolyrepo {
 		if err := executePolyrepoStart(ctx, trunkBranch); err != nil {
 			return err
 		}
+		worktreePath = filepath.Join(worktreePath, "main")
 	} else {
 		if err := executeStandaloneStart(ctx, trunkBranch); err != nil {
 			return err
 		}
 	}
 
-	// Print success message
-	worktreePath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
+	// Status update for commit_only_branch (after worktree creation)
+	if err := performStatusUpdateOnBranch(ctx, worktreePath); err != nil {
+		return err
+	}
+
+	displayPath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
 	fmt.Printf("\nSuccessfully started work on %s\n", ctx.WorkItemID)
-	fmt.Printf("  Worktree: %s\n", worktreePath)
+	fmt.Printf("  Worktree: %s\n", displayPath)
 	fmt.Printf("  Branch: %s\n", ctx.BranchName)
 
 	return nil
@@ -320,18 +356,8 @@ func buildStartContext(cfg *config.Config, workItemID string, flags StartFlags) 
 	}
 	ctx.WorktreeRoot = worktreeRoot
 
-	// Step 8: Check work item status (if status_action is not "none")
-	statusAction := cfg.Start.StatusAction
-	if flags.StatusAction != "" {
-		statusAction = flags.StatusAction
-	}
-
-	if statusAction != "none" && !flags.SkipStatusCheck {
-		targetStatus := cfg.Start.MoveTo
-		if currentStatus == targetStatus {
-			return nil, fmt.Errorf("work item %s is already in '%s' status: use --skip-status-check to restart work or review elsewhere", workItemID, targetStatus)
-		}
-	}
+	// Note: Status check is performed in executeGitOperations after git pull (step 5)
+	// to ensure we're checking against the most up-to-date status
 
 	return ctx, nil
 }
@@ -761,7 +787,7 @@ func printDryRunStatus(ctx *StartContext) {
 	}
 
 	fmt.Printf("Status Management:\n")
-	if statusAction == "none" || ctx.Flags.SkipStatusCheck {
+	if statusAction == statusActionNone || ctx.Flags.SkipStatusCheck {
 		fmt.Println("  Status Change: No change")
 	} else {
 		fmt.Printf("  Status Change: %s -> %s\n", ctx.Metadata.currentStatus, ctx.Config.Start.MoveTo)
@@ -1748,6 +1774,259 @@ func pullAllProjects(ctx *StartContext, mainTrunkBranch, mainRemoteName string) 
 		if err := pullLatestChanges(p.Remote, projectTrunk, p.Path, ctx.Flags.DryRun); err != nil {
 			return fmt.Errorf("failed to pull changes for project %s: %w", p.Name, err)
 		}
+	}
+
+	return nil
+}
+
+// ============================================================================
+// Phase 3: Status Management
+// ============================================================================
+
+// getEffectiveStatusAction returns the status action to use (flag overrides config)
+func getEffectiveStatusAction(ctx *StartContext) string {
+	if ctx.Flags.StatusAction != "" {
+		return ctx.Flags.StatusAction
+	}
+	return ctx.Config.Start.StatusAction
+}
+
+// performStatusCheck checks if the work item status matches the target status.
+// Returns error if already in target status (unless --skip-status-check).
+// Sets ctx.SkipStatusUpdate if --skip-status-check is used with matching status.
+func performStatusCheck(ctx *StartContext) error {
+	statusAction := getEffectiveStatusAction(ctx)
+
+	// Skip check entirely if status_action is "none"
+	if statusAction == statusActionNone {
+		ctx.SkipStatusUpdate = true
+		return nil
+	}
+
+	targetStatus := ctx.Config.Start.MoveTo
+	currentStatus := ctx.Metadata.currentStatus
+
+	// If status matches target
+	if currentStatus == targetStatus {
+		if ctx.Flags.SkipStatusCheck {
+			// Allow proceeding but skip the status update
+			ctx.SkipStatusUpdate = true
+			fmt.Printf("Skipping status update (--skip-status-check): work item already in '%s' status\n", targetStatus)
+			return nil
+		}
+		return fmt.Errorf("work item %s is already in '%s' status: use --skip-status-check to restart work or review elsewhere", ctx.WorkItemID, targetStatus)
+	}
+
+	return nil
+}
+
+// performStatusUpdate performs status update for commit_only and commit_and_push actions.
+// This runs on the trunk branch BEFORE worktree creation.
+func performStatusUpdate(ctx *StartContext, repoRoot, trunkBranch, remoteName string) error {
+	statusAction := getEffectiveStatusAction(ctx)
+
+	// Skip if status_action is "none" or "commit_only_branch" or if skip flag is set
+	if statusAction == statusActionNone || statusAction == statusActionCommitOnlyBranch || ctx.SkipStatusUpdate {
+		return nil
+	}
+
+	targetStatus := ctx.Config.Start.MoveTo
+
+	fmt.Printf("Moving work item %s to '%s' status\n", ctx.WorkItemID, targetStatus)
+
+	// Get the old path before moving
+	oldPath := ctx.WorkItemPath
+
+	// Move the work item file and update status field
+	// Use moveWorkItem with commitFlag=false since we handle commit separately
+	if err := moveWorkItemWithoutCommit(ctx.Config, ctx.WorkItemID, targetStatus); err != nil {
+		return fmt.Errorf("failed to move work item to '%s' status: %w", targetStatus, err)
+	}
+
+	// Get the new path after moving
+	newPath := filepath.Join(".work", ctx.Config.StatusFolders[targetStatus], filepath.Base(oldPath))
+
+	// Update ctx.WorkItemPath to the new location
+	ctx.WorkItemPath = newPath
+
+	// Build commit message
+	commitMsg, err := buildStatusCommitMessage(ctx, targetStatus)
+	if err != nil {
+		return fmt.Errorf("failed to build commit message: %w", err)
+	}
+
+	// Commit the status change
+	if err := commitStatusChange(repoRoot, oldPath, newPath, commitMsg); err != nil {
+		return fmt.Errorf("failed to commit status change: %w", err)
+	}
+
+	fmt.Printf("Committed status change: %s\n", commitMsg)
+
+	// Push if status_action is commit_and_push
+	if statusAction == statusActionCommitAndPush {
+		// Check if remote exists before attempting to push
+		remoteExists, err := checkRemoteExists(remoteName, repoRoot, false)
+		if err != nil {
+			return fmt.Errorf("failed to check remote existence: %w", err)
+		}
+
+		if !remoteExists {
+			fmt.Printf("Warning: No remote '%s' configured. Skipping push step. Status change was committed locally.\n", remoteName)
+		} else {
+			if err := pushStatusChange(repoRoot, remoteName, trunkBranch); err != nil {
+				return fmt.Errorf("failed to push status change to %s/%s: %w", remoteName, trunkBranch, err)
+			}
+			fmt.Printf("Pushed status change to %s/%s\n", remoteName, trunkBranch)
+		}
+	}
+
+	return nil
+}
+
+// performStatusUpdateOnBranch performs status update for commit_only_branch action.
+// This runs on the new branch AFTER worktree creation.
+func performStatusUpdateOnBranch(ctx *StartContext, worktreePath string) error {
+	statusAction := getEffectiveStatusAction(ctx)
+
+	// Skip if status_action is not "commit_only_branch" or if skip flag is set
+	if statusAction != statusActionCommitOnlyBranch || ctx.SkipStatusUpdate {
+		return nil
+	}
+
+	targetStatus := ctx.Config.Start.MoveTo
+
+	fmt.Printf("Moving work item %s to '%s' status (on branch)\n", ctx.WorkItemID, targetStatus)
+
+	// Get the old path before moving
+	oldPath := ctx.WorkItemPath
+
+	// Move the work item file and update status field
+	if err := moveWorkItemWithoutCommit(ctx.Config, ctx.WorkItemID, targetStatus); err != nil {
+		return fmt.Errorf("failed to move work item to '%s' status: %w", targetStatus, err)
+	}
+
+	// Get the new path after moving
+	newPath := filepath.Join(".work", ctx.Config.StatusFolders[targetStatus], filepath.Base(oldPath))
+
+	// Update ctx.WorkItemPath to the new location
+	ctx.WorkItemPath = newPath
+
+	// Build commit message
+	commitMsg, err := buildStatusCommitMessage(ctx, targetStatus)
+	if err != nil {
+		return fmt.Errorf("failed to build commit message: %w", err)
+	}
+
+	// Commit the status change in the worktree (on the new branch)
+	// Note: The worktree sees the same .work/ directory as the main repo
+	if err := commitStatusChange(worktreePath, oldPath, newPath, commitMsg); err != nil {
+		return fmt.Errorf("failed to commit status change on branch: %w", err)
+	}
+
+	fmt.Printf("Committed status change on branch: %s\n", commitMsg)
+
+	return nil
+}
+
+// moveWorkItemWithoutCommit moves a work item to target status without committing.
+// This mirrors the logic in moveWorkItem but without the commit step.
+func moveWorkItemWithoutCommit(cfg *config.Config, workItemID, targetStatus string) error {
+	// Find the work item file
+	workItemPath, err := findWorkItemFile(workItemID)
+	if err != nil {
+		return err
+	}
+
+	// Validate target status
+	if _, exists := cfg.StatusFolders[targetStatus]; !exists {
+		return fmt.Errorf("invalid target status: %s", targetStatus)
+	}
+
+	// Get target folder path
+	targetFolder := filepath.Join(".work", cfg.StatusFolders[targetStatus])
+	filename := filepath.Base(workItemPath)
+	targetPath := filepath.Join(targetFolder, filename)
+
+	// Move the file
+	if err := os.Rename(workItemPath, targetPath); err != nil {
+		return fmt.Errorf("failed to move work item: %w", err)
+	}
+
+	// Update the status in the file
+	if err := updateWorkItemStatus(targetPath, targetStatus); err != nil {
+		return fmt.Errorf("failed to update work item status: %w", err)
+	}
+
+	return nil
+}
+
+// buildStatusCommitMessage builds a commit message from the template.
+// Template variables: {type}, {id}, {title}, {move_to}
+func buildStatusCommitMessage(ctx *StartContext, targetStatus string) (string, error) {
+	template := ctx.Config.Start.StatusCommitMessage
+	if template == "" {
+		template = "Move {type} {id} to {move_to}"
+	}
+
+	msg := template
+	msg = strings.ReplaceAll(msg, "{type}", ctx.Metadata.workItemType)
+	msg = strings.ReplaceAll(msg, "{id}", ctx.WorkItemID)
+	msg = strings.ReplaceAll(msg, "{title}", ctx.Metadata.title)
+	msg = strings.ReplaceAll(msg, "{move_to}", targetStatus)
+
+	// Sanitize the message
+	sanitized, err := sanitizeCommitMessage(msg)
+	if err != nil {
+		return "", fmt.Errorf("invalid commit message: %w", err)
+	}
+
+	return sanitized, nil
+}
+
+// commitStatusChange stages the moved files and commits with the given message.
+func commitStatusChange(dir, oldPath, newPath, message string) error {
+	cmdCtx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Stage the old file deletion using git rm --cached
+	_, err := executeCommand(cmdCtx, "git", []string{"rm", "--cached", oldPath}, dir, false)
+	if err != nil {
+		// If git rm fails (file wasn't tracked), try git add -u to stage deletions
+		oldDir := filepath.Dir(oldPath)
+		addCtx, addCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+		_, _ = executeCommand(addCtx, "git", []string{"add", "-u", oldDir}, dir, false)
+		addCancel()
+	}
+
+	// Stage the new file addition
+	addNewCtx, addNewCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer addNewCancel()
+
+	_, err = executeCommand(addNewCtx, "git", []string{"add", newPath}, dir, false)
+	if err != nil {
+		return fmt.Errorf("failed to stage new file: %w", err)
+	}
+
+	// Commit
+	commitCtx, commitCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer commitCancel()
+
+	_, err = executeCommandCombinedOutput(commitCtx, "git", []string{"commit", "-m", message}, dir, false)
+	if err != nil {
+		return fmt.Errorf("failed to commit: %w", err)
+	}
+
+	return nil
+}
+
+// pushStatusChange pushes the status change to the remote.
+func pushStatusChange(dir, remoteName, branchName string) error {
+	pushCtx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	_, err := executeCommand(pushCtx, "git", []string{"push", remoteName, branchName}, dir, false)
+	if err != nil {
+		return err
 	}
 
 	return nil
