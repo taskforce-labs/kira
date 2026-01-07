@@ -276,7 +276,7 @@ func pullStandaloneOrMonorepo(ctx *StartContext, repoRoot, trunkBranch, remoteNa
 
 // createWorktreesAndFinalize creates worktrees and handles status update on branch
 func createWorktreesAndFinalize(ctx *StartContext, trunkBranch string) error {
-	if err := os.MkdirAll(ctx.WorktreeRoot, 0o750); err != nil {
+	if err := os.MkdirAll(ctx.WorktreeRoot, 0o700); err != nil {
 		return fmt.Errorf("failed to create worktree root directory: %w", err)
 	}
 

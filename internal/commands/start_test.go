@@ -919,6 +919,34 @@ func TestGetEffectiveStatusAction(t *testing.T) {
 		result := getEffectiveStatusAction(ctx)
 		assert.Equal(t, "", result)
 	})
+
+	t.Run("returns commit_only from config", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_only",
+				},
+			},
+			Flags: StartFlags{},
+		}
+		result := getEffectiveStatusAction(ctx)
+		assert.Equal(t, "commit_only", result)
+	})
+
+	t.Run("flag commit_only overrides config", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Start: &config.StartConfig{
+					StatusAction: "commit_and_push",
+				},
+			},
+			Flags: StartFlags{
+				StatusAction: "commit_only",
+			},
+		}
+		result := getEffectiveStatusAction(ctx)
+		assert.Equal(t, "commit_only", result)
+	})
 }
 
 func TestPerformStatusCheck(t *testing.T) {

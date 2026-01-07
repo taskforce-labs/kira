@@ -816,6 +816,173 @@ release:
   releases_file: RELEASES.md
   archive_date_format: "2006-01-02"
 EOF
+git add kira.yml
+git commit -m "Restore kira.yml after setup test" > /dev/null
+
+###############################################
+# Test 22: Start command - override flag
+###############################################
+echo ""
+echo "📝 Test 22: Start command - override flag"
+
+# First, create a work item and start work on it
+cat > .work/0_backlog/007-override-test.prd.md << 'EOF'
+---
+id: 007
+title: Override Test Feature
+status: backlog
+kind: prd
+created: 2025-01-01
+---
+# Override Test Feature
+Testing the --override flag.
+EOF
+git add .work/
+git commit -m "Add work item 007 for override test" > /dev/null
+
+# Start work on it first time
+FIRST_START_OUTPUT=$("$KIRA_BIN" start 007 --no-ide --status-action none 2>&1)
+if ! echo "$FIRST_START_OUTPUT" | grep -q "Successfully started work on 007"; then
+  echo "❌ First start failed"
+  echo "Output: $FIRST_START_OUTPUT"
+  exit 1
+fi
+
+# Verify worktree exists
+WORKTREE_PATH="$WORKTREE_ROOT/$WORKTREE_NAME/007-override-test-feature"
+if [ ! -d "$WORKTREE_PATH" ]; then
+  echo "❌ Worktree not created"
+  exit 1
+fi
+
+# Now try to start again without override - should fail
+SECOND_START_OUTPUT=$("$KIRA_BIN" start 007 --no-ide --status-action none 2>&1) || true
+if echo "$SECOND_START_OUTPUT" | grep -q "worktree already exists"; then
+  echo "✅ Start without --override correctly fails when worktree exists"
+else
+  echo "❌ Start without --override should fail when worktree exists"
+  echo "Output: $SECOND_START_OUTPUT"
+  exit 1
+fi
+
+# Now try with override and reuse-branch - should succeed
+# (--override removes the worktree, --reuse-branch handles the existing branch)
+OVERRIDE_START_OUTPUT=$("$KIRA_BIN" start 007 --override --reuse-branch --no-ide --status-action none 2>&1)
+if echo "$OVERRIDE_START_OUTPUT" | grep -q "Successfully started work on 007"; then
+  echo "✅ Start with --override --reuse-branch succeeded"
+else
+  echo "❌ Start with --override --reuse-branch should succeed"
+  echo "Output: $OVERRIDE_START_OUTPUT"
+  exit 1
+fi
+
+# Cleanup
+git worktree remove "$WORKTREE_PATH" --force > /dev/null 2>&1
+git branch -D 007-override-test-feature > /dev/null 2>&1
+
+###############################################
+# Test 23: Start command - reuse-branch flag
+###############################################
+echo ""
+echo "📝 Test 23: Start command - reuse-branch flag"
+
+# Create a work item
+cat > .work/0_backlog/008-reuse-branch-test.prd.md << 'EOF'
+---
+id: 008
+title: Reuse Branch Test
+status: backlog
+kind: prd
+created: 2025-01-01
+---
+# Reuse Branch Test
+Testing the --reuse-branch flag.
+EOF
+git add .work/
+git commit -m "Add work item 008 for reuse-branch test" > /dev/null
+
+# Create a branch manually first
+git branch 008-reuse-branch-test > /dev/null 2>&1
+
+# Try to start without --reuse-branch - should fail because branch exists
+NO_REUSE_OUTPUT=$("$KIRA_BIN" start 008 --no-ide --status-action none 2>&1) || true
+if echo "$NO_REUSE_OUTPUT" | grep -q "branch .* already exists"; then
+  echo "✅ Start without --reuse-branch correctly fails when branch exists"
+else
+  echo "❌ Start without --reuse-branch should fail when branch exists"
+  echo "Output: $NO_REUSE_OUTPUT"
+  exit 1
+fi
+
+# Now try with --reuse-branch - should succeed
+REUSE_OUTPUT=$("$KIRA_BIN" start 008 --reuse-branch --no-ide --status-action none 2>&1)
+if echo "$REUSE_OUTPUT" | grep -q "Successfully started work on 008"; then
+  echo "✅ Start with --reuse-branch succeeded"
+else
+  echo "❌ Start with --reuse-branch should succeed"
+  echo "Output: $REUSE_OUTPUT"
+  exit 1
+fi
+
+# Cleanup
+REUSE_WORKTREE_PATH="$WORKTREE_ROOT/$WORKTREE_NAME/008-reuse-branch-test"
+git worktree remove "$REUSE_WORKTREE_PATH" --force > /dev/null 2>&1
+git branch -D 008-reuse-branch-test > /dev/null 2>&1
+
+###############################################
+# Test 24: Start command - commit_only status action
+###############################################
+echo ""
+echo "📝 Test 24: Start command - commit_only status action"
+
+# Create a work item in backlog
+cat > .work/0_backlog/009-commit-only-test.prd.md << 'EOF'
+---
+id: 009
+title: Commit Only Test
+status: backlog
+kind: prd
+created: 2025-01-01
+---
+# Commit Only Test
+Testing the commit_only status action.
+EOF
+git add .work/
+git commit -m "Add work item 009 for commit_only test" > /dev/null
+
+# Start with commit_only status action
+COMMIT_ONLY_OUTPUT=$("$KIRA_BIN" start 009 --status-action commit_only --no-ide 2>&1)
+if echo "$COMMIT_ONLY_OUTPUT" | grep -q "Successfully started work on 009"; then
+  echo "✅ Start with --status-action commit_only succeeded"
+else
+  echo "❌ Start with --status-action commit_only failed"
+  echo "Output: $COMMIT_ONLY_OUTPUT"
+  exit 1
+fi
+
+# Verify the work item was moved to doing
+if [ -f ".work/2_doing/009-commit-only-test.prd.md" ]; then
+  echo "✅ Work item moved to doing status"
+else
+  echo "❌ Work item should be in doing folder"
+  ls -la .work/*/
+  exit 1
+fi
+
+# Verify a commit was created (check git log)
+COMMIT_MSG=$(git log -1 --pretty=%B)
+if echo "$COMMIT_MSG" | grep -qi "009"; then
+  echo "✅ Status change was committed"
+else
+  echo "❌ Status change should be committed"
+  echo "Last commit: $COMMIT_MSG"
+  exit 1
+fi
+
+# Cleanup
+COMMIT_ONLY_WORKTREE_PATH="$WORKTREE_ROOT/$WORKTREE_NAME/009-commit-only-test"
+git worktree remove "$COMMIT_ONLY_WORKTREE_PATH" --force > /dev/null 2>&1
+git branch -D 009-commit-only-test > /dev/null 2>&1
 
 # Cleanup
 echo ""
@@ -849,6 +1016,9 @@ echo "  ✅ Start command error handling"
 echo "  ✅ Start command status check"
 echo "  ✅ Start command IDE flags"
 echo "  ✅ Start command setup commands"
+echo "  ✅ Start command override flag"
+echo "  ✅ Start command reuse-branch flag"
+echo "  ✅ Start command commit_only action"
 echo ""
 echo "🚀 Kira is ready for use!"
 
