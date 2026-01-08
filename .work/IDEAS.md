@@ -32,3 +32,7 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 23. [2026-01-05] id prefix: allow ids to have a prefix possibly via a template to add flexability to how it's formatted
 24. [2026-01-05] non-numeric ids: allow ids to be generated with a short unique hash
 25. [2026-01-07] init defaults: update init defaults with start config and options
+26. [2026-01-08] start draft pr: kira start command can create a draft pr with no content
+27. [2026-01-08] submit for review: changes the work item status to review along with the draft pr and potentially notifies reviewers via github, slack or email etc
+28. [2026-01-08] open for review: a user creates a worktree and checks out the branch, can run it locally for testing then approve it
+29. [2026-01-08] kira latest: rebases the feature branch onto the trunk brunch - handling fetch, and rebase potentially even tips on handling merge conflicts with LLMs for folks not used to version control
