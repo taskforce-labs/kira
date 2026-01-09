@@ -36,3 +36,4 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 27. [2026-01-08] submit for review: changes the work item status to review along with the draft pr and potentially notifies reviewers via github, slack or email etc
 28. [2026-01-08] open for review: a user creates a worktree and checks out the branch, can run it locally for testing then approve it
 29. [2026-01-08] kira latest: rebases the feature branch onto the trunk brunch - handling fetch, and rebase potentially even tips on handling merge conflicts with LLMs for folks not used to version control
+30. [2026-01-09] kira project plans: when a prd or other work item is created, the start command will only submit prs for the repos that were affected
