@@ -47,3 +47,9 @@ start:
 ide:
     command: "cursor"
     args: ["--new-window"]
+
+users:
+    use_git_history: true
+    commit_limit: 1000
+    ignored_emails:
+        - wayne@jellybeanjar.io
