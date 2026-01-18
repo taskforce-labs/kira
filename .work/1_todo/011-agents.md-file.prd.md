@@ -1,5 +1,5 @@
 ---
-id: 005
+id: 011
 title: Generate kira instructions in AGENTS.md file
 status: todo
 kind: task
