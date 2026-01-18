@@ -1,7 +1,7 @@
 ---
 id: 010
 title: start draft pr
-status: backlog
+status: todo
 kind: prd
 assigned:
 estimate: 0
