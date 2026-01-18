@@ -1,7 +1,7 @@
 ---
 id: 005
 title: Generate kira instructions in AGENTS.md file
-status: backlog
+status: todo
 kind: task
 assigned:
 estimate: 0
