@@ -20,3 +20,8 @@ See [Go Secure Coding Practices](docs/security/golang-secure-coding.md) for comp
 - When to use `#nosec` comments
 
 DON'T RELAX THESE RULES FOR TEST FILES DO NOT CHANGE .golangci.yml TO RELAX RULES UNDER ANY CIRCUMSTANCES UNLESS I TELL YOU TO DO SO EXPLICITLY.
+
+## Instruction to Cursor
+When editing markdown or specs, make direct edits to the file.
+Do not propose patch-style changes or require accept/reject confirmation.
+I will review changes using git diff after you finish.
