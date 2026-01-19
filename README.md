@@ -1,14 +1,78 @@
 # Kira
 Version: v0.1.0-alpha
 
-A git-based, plaintext productivity tool designed with both clankers (LLMs) and meatbags (people) in mind.
+A cli to manage your work-items and specs in git as markdown files so you can use them with LLMs in your IDE or Agent Workflows. No need for JIRA.
 
+Develop multiple features in parallel with kira workflows that create worktrees, branches and pull requests based on the specs and work-items you create.
+
+
+## Quick Start
+0. Setup the project
+```bash
+kira init
+# my-project
+# ├── kira.yml
+# ├── .work/
+# │   ├── 0_backlog/
+# │   ├── 1_todo/
+# │   ├── 2_doing/
+# │   ├── 3_review/
+# │   ├── 4_done/
+# │   ├── templates/
+# │   ├── z_archive/
+# │   └── IDEAS.md
+```
+
+1. Creates a new work-item
+```bash
+kira new prd todo "User Authentication" "Implement OIDC based user login system"
+# .work/1_todo/001-user-authentication.prd.md
+```
+
+2. Start the work-item in an isolated workspace
+```bash
+kira start 001
+# 1. Sets the work-item to doing status
+# 2. Creates a new worktree
+# my-project_worktree/
+# └── 001-user-authentication
+# 3. Creates a new branch in the worktree
+# 001-user-authentication
+# 4. Pushes branch and opens a draft pull request
+# 5. Opens the IDE in the worktree
+# 6. Runs setup commands
+```
+
+3. Submits the work-item for review and creates a pull request
+```bash
+kira review
+# 1. Rebases the branch onto the trunk branch
+# 2. Changes the work-item to review status
+# 3. Changes the status of the pull request to ready for review
+```
+
+4. Merges the pull request and marks the work-item as done
+```bash
+kira done
+# 1. Rebases the branch onto the trunk branch
+# 2. Merges the pull request
+# 3. Marks the work-item as done
+```
+
+5. Releases the work items in the done folder
+```bash
+kira release
+# 1. Generates release notes from the done folder
+# 2. Updates the releases file
+# 3. Archives the work items in the done folder
+# 4. Tags and pushes the release to trigger release workflow
+```
 
 ## Overview
 
 Kira uses a combination of plaintext markdown files, git, and a lightweight CLI to manage and coordinate work. This approach means clankers can directly read, write, and commit changes without complex APIs, while meatbags get full transparency into what the clankers are doing through git history.
 
-Unlike Jira and other tools that are overly complicated and expensive, Kira keeps it simple. It's free and open source - Kira could be the Jira killer you've been waiting for. Just write the name of your task in the Death Note... I mean, in the markdown file, and watch it get done.
+Unlike Jira and other tools that are overly complicated and expensive, Kira keeps it simple there in your codebase. It's free and open source - Kira could be the Jira killer you've been waiting for.
 
 ## Installation
 
@@ -58,29 +122,6 @@ If you want to build and test locally, see the contributor guide:
 # Development setup, building, testing, and install options:
 see CONTRIBUTING.md
 ```
-
-## Quick Start
-
-1. **Initialize a workspace:**
-   ```bash
-   kira init
-   ```
-
-2. **Create a new work item:**
-   ```bash
-   # Status is optional; explicit example with status before title
-   kira new prd todo "User Authentication" "Implement user login system"
-   ```
-
-3. **Move work items:**
-   ```bash
-   kira move 001 doing
-   ```
-
-4. **Save and commit changes:**
-   ```bash
-   kira save "Add authentication requirements"
-   ```
 
 ## Commands
 
