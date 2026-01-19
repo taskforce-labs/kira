@@ -88,6 +88,38 @@ func TestListUsersConfigOnly(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("maintains config order when git disabled", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		useGitHistory := false
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				UseGitHistory: &useGitHistory,
+				SavedUsers: []config.SavedUser{
+					{Email: "zebra@example.com", Name: "Zebra User"}, // Would be last alphabetically
+					{Email: "alice@example.com", Name: "Alice User"}, // Would be first alphabetically
+					{Email: "bob@example.com", Name: "Bob User"},     // Would be second alphabetically
+				},
+			},
+		}
+
+		userMap, err := collectUsers(useGitHistory, 0, cfg)
+		require.NoError(t, err)
+
+		users := processAndSortUsers(userMap, useGitHistory)
+
+		// Should maintain config order, not alphabetical order
+		require.Len(t, users, 3)
+		assert.Equal(t, "zebra@example.com", users[0].Email) // First in config
+		assert.Equal(t, 1, users[0].Number)
+		assert.Equal(t, "alice@example.com", users[1].Email) // Second in config
+		assert.Equal(t, 2, users[1].Number)
+		assert.Equal(t, "bob@example.com", users[2].Email) // Third in config
+		assert.Equal(t, 3, users[2].Number)
+	})
+
 	t.Run("shows message when no saved users", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))

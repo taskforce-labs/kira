@@ -48,7 +48,8 @@ type UserInfo struct {
 	Name        string
 	FirstCommit *time.Time // nil for saved users without git history
 	Source      string     // "git" or "config"
-	Number      int
+	Order       int        // Original order in config for saved users (0-based)
+	Number      int        // Assigned sequential number
 }
 
 func listUsers(cfg *config.Config, format string, limit int) error {
@@ -64,7 +65,7 @@ func listUsers(cfg *config.Config, format string, limit int) error {
 		return err
 	}
 
-	users := processAndSortUsers(userMap)
+	users := processAndSortUsers(userMap, useGitHistory)
 
 	return displayUsers(users, format)
 }
@@ -392,7 +393,7 @@ func collectUsers(useGitHistory bool, commitLimit int, cfg *config.Config) (map[
 	}
 
 	// Add saved users (with duplicate detection)
-	for _, savedUser := range cfg.Users.SavedUsers {
+	for i, savedUser := range cfg.Users.SavedUsers {
 		// Skip saved users with empty email (invalid config)
 		if savedUser.Email == "" {
 			continue
@@ -406,6 +407,7 @@ func collectUsers(useGitHistory bool, commitLimit int, cfg *config.Config) (map[
 				existing.Name = savedUser.Name
 			}
 			// Keep git history commit date and source
+			// For duplicates, we keep the existing order (from git history if present)
 		} else {
 			// New user from config
 			userMap[emailLower] = &UserInfo{
@@ -413,6 +415,7 @@ func collectUsers(useGitHistory bool, commitLimit int, cfg *config.Config) (map[
 				Name:        savedUser.Name,
 				FirstCommit: nil, // No git history
 				Source:      "config",
+				Order:       i, // Track original config order
 			}
 		}
 	}
@@ -420,15 +423,21 @@ func collectUsers(useGitHistory bool, commitLimit int, cfg *config.Config) (map[
 	return userMap, nil
 }
 
-func processAndSortUsers(userMap map[string]*UserInfo) []UserInfo {
+func processAndSortUsers(userMap map[string]*UserInfo, useGitHistory bool) []UserInfo {
 	// Convert map to slice
 	users := make([]UserInfo, 0, len(userMap))
 	for _, user := range userMap {
 		users = append(users, *user)
 	}
 
-	// Sort users by first commit date, then by email
+	// Sort users
 	sort.Slice(users, func(i, j int) bool {
+		// When git history is disabled, sort by config order for saved users
+		if !useGitHistory {
+			return users[i].Order < users[j].Order
+		}
+
+		// When git history is enabled, sort by commit date, then by email
 		if users[i].FirstCommit == nil && users[j].FirstCommit == nil {
 			return users[i].Email < users[j].Email
 		}
