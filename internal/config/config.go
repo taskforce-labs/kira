@@ -24,6 +24,7 @@ type Config struct {
 	Start         *StartConfig      `yaml:"start"`
 	IDE           *IDEConfig        `yaml:"ide"`
 	Workspace     *WorkspaceConfig  `yaml:"workspace"`
+	Users         UsersConfig       `yaml:"users"`
 }
 
 // GitConfig contains git-related settings.
@@ -88,6 +89,21 @@ type CommitConfig struct {
 type ReleaseConfig struct {
 	ReleasesFile      string `yaml:"releases_file"`
 	ArchiveDateFormat string `yaml:"archive_date_format"`
+}
+
+// SavedUser represents a user saved in configuration.
+type SavedUser struct {
+	Email string `yaml:"email"`
+	Name  string `yaml:"name,omitempty"`
+}
+
+// UsersConfig contains user-related settings.
+type UsersConfig struct {
+	UseGitHistory   *bool       `yaml:"use_git_history,omitempty"` // Defaults to true if nil
+	CommitLimit     int         `yaml:"commit_limit,omitempty"`    // 0 means no limit, only when UseGitHistory is true
+	IgnoredEmails   []string    `yaml:"ignored_emails"`            // Only when UseGitHistory is true
+	IgnoredPatterns []string    `yaml:"ignored_patterns"`          // Only when UseGitHistory is true
+	SavedUsers      []SavedUser `yaml:"saved_users"`               // Users added via configuration
 }
 
 // DefaultConfig provides default configuration values.
@@ -261,6 +277,7 @@ func mergeWithDefaults(config *Config) {
 	mergeGitDefaults(config)
 	mergeStartDefaults(config)
 	mergeWorkspaceDefaults(config)
+	mergeUsersDefaults(config)
 }
 
 func mergeGitDefaults(config *Config) {
@@ -306,6 +323,18 @@ func mergeWorkspaceDefaults(config *Config) {
 			project.Mount = project.Name
 		}
 	}
+}
+
+func mergeUsersDefaults(config *Config) {
+	// UseGitHistory defaults to true if nil (not set)
+	if config.Users.UseGitHistory == nil {
+		useGitHistory := true
+		config.Users.UseGitHistory = &useGitHistory
+	}
+	// CommitLimit defaults to 0 (no limit) - already zero value
+	// IgnoredEmails defaults to empty slice - already zero value
+	// IgnoredPatterns defaults to empty slice - already zero value
+	// SavedUsers defaults to empty slice - already zero value
 }
 
 // SaveConfig saves the configuration to kira.yml in the current directory.
