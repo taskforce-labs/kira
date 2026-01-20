@@ -27,10 +27,8 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 18. [2025-12-08] Learn cli from gui: whenever a user interacts with the gui show the cli commands along the bottom of the screen
 19. [2025-12-08] extract relevant context: a way to help LLMs get the relevant context about architecture for polyrepos codebases or large repos - some of the structure in kira.yml could be used to help LLMs get the relevant context - combined with cli access to ai clis
 20. [2025-12-08] kira env branching: when kira work creates worktrees and branches the env files a treated so that multiple instances of the project can run locally
-21. [2025-12-10] kira review: this would create a worktree, checkout the branch of a PR so the reviewer can run locally
-22. [2025-12-14] kira review context: an ability to include context history into the reivew - helpful when working with agents
-23. [2026-01-05] id prefix: allow ids to have a prefix possibly via a template to add flexability to how it's formatted
-24. [2026-01-05] non-numeric ids: allow ids to be generated with a short unique hash
-25. [2026-01-07] init defaults: update init defaults with start config and options
-26. [2026-01-08] open for review: a user creates a worktree and checks out the branch, can run it locally for testing then approve it
-27. [2026-01-09] kira project plans: when a prd or other work item is created, the start command will only submit prs for the repos that were affected
+21. [2025-12-14] kira review context: an ability to include context history into the reivew - helpful when working with agents
+22. [2026-01-05] id prefix: allow ids to have a prefix possibly via a template to add flexability to how it's formatted
+23. [2026-01-05] non-numeric ids: allow ids to be generated with a short unique hash
+24. [2026-01-07] init defaults: update init defaults with start config and options
+25. [2026-01-09] kira project plans: when a prd or other work item is created, the start command will only submit prs for the repos that were affected
