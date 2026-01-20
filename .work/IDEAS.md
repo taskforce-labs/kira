@@ -32,3 +32,4 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 23. [2026-01-05] non-numeric ids: allow ids to be generated with a short unique hash
 24. [2026-01-07] init defaults: update init defaults with start config and options
 25. [2026-01-09] kira project plans: when a prd or other work item is created, the start command will only submit prs for the repos that were affected
+26. [2026-01-20] kira skills: add some skills for using kira for planning and manging workflow in skills.sh
