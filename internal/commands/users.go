@@ -32,8 +32,9 @@ number than existing users.`,
 
 		format, _ := cmd.Flags().GetString("format")
 		limit, _ := cmd.Flags().GetInt("limit")
+		limitChanged := cmd.Flags().Changed("limit")
 
-		return listUsers(cfg, format, limit)
+		return listUsers(cfg, format, limit, limitChanged)
 	},
 }
 
@@ -52,13 +53,13 @@ type UserInfo struct {
 	Number      int        // Assigned sequential number
 }
 
-func listUsers(cfg *config.Config, format string, limit int) error {
+func listUsers(cfg *config.Config, format string, limit int, limitChanged bool) error {
 	if err := validateUsersArgs(format, limit); err != nil {
 		return err
 	}
 
 	useGitHistory := getUseGitHistorySetting(cfg)
-	commitLimit := getCommitLimit(limit, cfg)
+	commitLimit := getCommitLimit(limit, limitChanged, cfg)
 
 	userMap, err := collectUsers(useGitHistory, commitLimit, cfg)
 	if err != nil {
@@ -364,10 +365,16 @@ func getUseGitHistorySetting(cfg *config.Config) bool {
 	return useGitHistory
 }
 
-func getCommitLimit(limit int, cfg *config.Config) int {
-	if limit == 0 && cfg.Users.CommitLimit > 0 {
+func getCommitLimit(limit int, limitChanged bool, cfg *config.Config) int {
+	// If limit was explicitly set to 0, it means "no limit" - override config
+	if limitChanged && limit == 0 {
+		return 0
+	}
+	// If limit was not changed (default 0) and config has a limit, use config
+	if !limitChanged && cfg.Users.CommitLimit > 0 {
 		return cfg.Users.CommitLimit
 	}
+	// Otherwise use the provided limit value
 	return limit
 }
 
