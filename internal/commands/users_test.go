@@ -615,6 +615,41 @@ func TestDisplayUsers(t *testing.T) {
 	})
 }
 
+func TestParseGitLogLineWithPipeInName(t *testing.T) {
+	t.Run("handles name with pipe character", func(t *testing.T) {
+		// Simulate git log output with pipe in name
+		line := "user@example.com|John | Doe|2024-01-01 12:00:00 +0000"
+		user, err := parseGitLogLine(line)
+		require.NoError(t, err)
+		require.NotNil(t, user)
+		assert.Equal(t, "user@example.com", user.Email)
+		assert.Equal(t, "John | Doe", user.Name)
+		assert.NotNil(t, user.FirstCommit)
+	})
+
+	t.Run("handles name with multiple pipe characters", func(t *testing.T) {
+		// Simulate git log output with multiple pipes in name
+		line := "user@example.com|John | Middle | Doe|2024-01-01 12:00:00 +0000"
+		user, err := parseGitLogLine(line)
+		require.NoError(t, err)
+		require.NotNil(t, user)
+		assert.Equal(t, "user@example.com", user.Email)
+		assert.Equal(t, "John | Middle | Doe", user.Name)
+		assert.NotNil(t, user.FirstCommit)
+	})
+
+	t.Run("handles normal name without pipe", func(t *testing.T) {
+		// Normal case should still work
+		line := "user@example.com|John Doe|2024-01-01 12:00:00 +0000"
+		user, err := parseGitLogLine(line)
+		require.NoError(t, err)
+		require.NotNil(t, user)
+		assert.Equal(t, "user@example.com", user.Email)
+		assert.Equal(t, "John Doe", user.Name)
+		assert.NotNil(t, user.FirstCommit)
+	})
+}
+
 func timePtr(t time.Time) *time.Time {
 	return &t
 }

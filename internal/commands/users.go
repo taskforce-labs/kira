@@ -168,14 +168,28 @@ func parseGitLogLine(line string) (*UserInfo, error) {
 		return nil, nil
 	}
 
-	parts := strings.Split(line, "|")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("malformed line: %s", line)
+	// Parse to handle names with pipe characters
+	// Format: email|name (can contain |)|date
+	// We need to find the first | (separates email from name) and last | (separates name from date)
+
+	// Find the first pipe (separates email from name)
+	firstPipeIdx := strings.Index(line, "|")
+	if firstPipeIdx == -1 {
+		return nil, fmt.Errorf("malformed line: missing email separator: %s", line)
 	}
 
-	email := strings.TrimSpace(parts[0])
-	name := strings.TrimSpace(parts[1])
-	dateStr := strings.TrimSpace(parts[2])
+	// Find the last pipe (separates name from date)
+	lastPipeIdx := strings.LastIndex(line, "|")
+	if lastPipeIdx == -1 || lastPipeIdx == firstPipeIdx {
+		return nil, fmt.Errorf("malformed line: missing date separator: %s", line)
+	}
+
+	// Extract email (everything before the first pipe)
+	email := strings.TrimSpace(line[:firstPipeIdx])
+	// Extract name (everything between the first and last pipe)
+	name := strings.TrimSpace(line[firstPipeIdx+1 : lastPipeIdx])
+	// Extract date (everything after the last pipe)
+	dateStr := strings.TrimSpace(line[lastPipeIdx+1:])
 
 	// Skip entries without email (missing author info)
 	if email == "" {
