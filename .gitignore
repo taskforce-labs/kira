@@ -2,6 +2,7 @@
 /kira
 *.exe
 .tmp-install/
+/kira-test
 
 # Test coverage
 coverage.out
