@@ -11,6 +11,22 @@ import (
 	"time"
 )
 
+// gitCommandTimeout is the default timeout for git commands
+const gitCommandTimeout = 30 * time.Second
+
+// getCurrentBranch returns the current branch name
+func getCurrentBranch(dir string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	output, err := executeCommand(ctx, "git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, dir, false)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(output), nil
+}
+
 // validateWorkPath ensures a path is safe and within the .work directory
 func validateWorkPath(path string) error {
 	// Clean the path to remove .. and other traversal attempts

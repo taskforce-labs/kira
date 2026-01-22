@@ -30,9 +30,6 @@ const (
 	BranchHasCommits
 )
 
-// gitCommandTimeout is the default timeout for git commands
-const gitCommandTimeout = 30 * time.Second
-
 // defaultTrunkBranch is the default trunk branch name used in dry-run mode
 const defaultTrunkBranch = "main"
 
@@ -967,19 +964,6 @@ func validateOnTrunkBranch(trunkBranch, dir string, dryRun bool) error {
 	}
 
 	return nil
-}
-
-// getCurrentBranch returns the current branch name
-func getCurrentBranch(dir string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
-	defer cancel()
-
-	output, err := executeCommand(ctx, "git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, dir, false)
-	if err != nil {
-		return "", err
-	}
-
-	return strings.TrimSpace(output), nil
 }
 
 // resolveRemoteName determines the remote name using priority order:
