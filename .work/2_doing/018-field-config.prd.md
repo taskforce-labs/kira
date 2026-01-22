@@ -1,7 +1,7 @@
 ---
 id: 018
 title: field-config
-status: backlog
+status: doing
 kind: prd
 assigned:
 estimate: 0
