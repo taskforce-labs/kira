@@ -2,6 +2,7 @@ package commands
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -298,7 +299,9 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorStandalone, "001")
 		require.NoError(t, err)
 		require.Len(t, repos, 1)
-		assert.Equal(t, "main", repos[0].Name)
+		// Repository name should be the directory name, not "main"
+		expectedName := filepath.Base(tmpDir)
+		assert.Equal(t, expectedName, repos[0].Name)
 		// Use filepath.Clean to handle symlink differences on macOS
 		expectedPath, _ := filepath.EvalSymlinks(tmpDir)
 		actualPath, _ := filepath.EvalSymlinks(repos[0].Path)
@@ -325,7 +328,9 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorMonorepo, "001")
 		require.NoError(t, err)
 		require.Len(t, repos, 1)
-		assert.Equal(t, "main", repos[0].Name)
+		// Repository name should be the directory name, not "main"
+		expectedName := filepath.Base(tmpDir)
+		assert.Equal(t, expectedName, repos[0].Name)
 		assert.Equal(t, "master", repos[0].TrunkBranch)
 		assert.Equal(t, "upstream", repos[0].Remote)
 	})
@@ -507,7 +512,9 @@ func TestDiscoverRepositories(t *testing.T) {
 		repos, err := discoverRepositories(cfg)
 		require.NoError(t, err)
 		require.Len(t, repos, 1)
-		assert.Equal(t, "main", repos[0].Name)
+		// Repository name should be the directory name, not "main"
+		expectedName := filepath.Base(tmpDir)
+		assert.Equal(t, expectedName, repos[0].Name)
 		// Use filepath.EvalSymlinks to handle symlink differences on macOS
 		expectedPath, _ := filepath.EvalSymlinks(tmpDir)
 		actualPath, _ := filepath.EvalSymlinks(repos[0].Path)
@@ -586,5 +593,324 @@ func TestDiscoverRepositories(t *testing.T) {
 		assert.Equal(t, externalRepo1, repos[0].Path)
 		assert.Equal(t, "project2", repos[1].Name)
 		assert.Equal(t, externalRepo2, repos[1].Path)
+	})
+}
+
+func TestCheckRepositoryState(t *testing.T) {
+	t.Run("detects clean repository ready for update", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo with a commit
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: tmpDir,
+		}
+
+		stateInfo, err := checkRepositoryState(repo)
+		require.NoError(t, err)
+		assert.Equal(t, StateReadyForUpdate, stateInfo.State)
+		assert.Equal(t, "repository is clean and ready for update", stateInfo.Details)
+		assert.Nil(t, stateInfo.Error)
+	})
+
+	t.Run("detects uncommitted changes", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo with a commit
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Make uncommitted change
+		require.NoError(t, os.WriteFile("modified.txt", []byte("modified"), 0o600))
+
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: tmpDir,
+		}
+
+		stateInfo, err := checkRepositoryState(repo)
+		require.NoError(t, err)
+		assert.Equal(t, StateDirtyWorkingDir, stateInfo.State)
+		assert.Equal(t, "uncommitted changes detected", stateInfo.Details)
+	})
+
+	t.Run("detects merge conflicts", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create initial commit
+		require.NoError(t, os.WriteFile("test.txt", []byte("line1\nline2\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create a branch and modify file
+		require.NoError(t, exec.Command("git", "checkout", "-b", "feature").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("line1\nfeature change\nline2\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Feature change").Run())
+
+		// Switch back to main and modify same line
+		require.NoError(t, exec.Command("git", "checkout", "main").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("line1\nmain change\nline2\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Main change").Run())
+
+		// Attempt merge to create conflict
+		_ = exec.Command("git", "merge", "feature").Run() // This will fail with conflict
+
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: tmpDir,
+		}
+
+		stateInfo, err := checkRepositoryState(repo)
+		require.NoError(t, err)
+		// Should detect either conflicts or in-merge state
+		assert.True(t, stateInfo.State == StateConflictsExist || stateInfo.State == StateInMerge,
+			"Expected conflicts or in-merge state, got: %s", stateInfo.State)
+	})
+
+	t.Run("detects active rebase operation", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create rebase-merge directory to simulate active rebase
+		rebaseMergeDir := filepath.Join(tmpDir, ".git", "rebase-merge")
+		require.NoError(t, os.MkdirAll(rebaseMergeDir, 0o700))
+
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: tmpDir,
+		}
+
+		stateInfo, err := checkRepositoryState(repo)
+		require.NoError(t, err)
+		assert.Equal(t, StateInRebase, stateInfo.State)
+		assert.Contains(t, stateInfo.Details, "rebase")
+	})
+
+	t.Run("detects active merge operation", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create MERGE_HEAD file to simulate active merge
+		mergeHeadFile := filepath.Join(tmpDir, ".git", "MERGE_HEAD")
+		require.NoError(t, os.WriteFile(mergeHeadFile, []byte("abc123"), 0o600))
+
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: tmpDir,
+		}
+
+		stateInfo, err := checkRepositoryState(repo)
+		require.NoError(t, err)
+		assert.Equal(t, StateInMerge, stateInfo.State)
+		assert.Contains(t, stateInfo.Details, "merge")
+	})
+
+	t.Run("handles git command errors gracefully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Create directory that's not a git repo
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: tmpDir,
+		}
+
+		stateInfo, err := checkRepositoryState(repo)
+		// Should return error state (err may or may not be nil, but stateInfo.Error should be set)
+		assert.Equal(t, StateError, stateInfo.State)
+		assert.NotNil(t, stateInfo.Error)
+		if err != nil {
+			assert.Contains(t, err.Error(), "failed to check git status")
+		}
+		assert.Contains(t, stateInfo.Error.Error(), "failed to check git status")
+	})
+}
+
+func TestExtractConflictingFiles(t *testing.T) {
+	t.Run("extracts conflicting files from git status", func(t *testing.T) {
+		statusOutput := `UU file1.txt
+AA file2.txt
+DU file3.txt
+ M file4.txt`
+		files := extractConflictingFiles(statusOutput)
+		assert.Contains(t, files, "file1.txt")
+		assert.Contains(t, files, "file2.txt")
+		assert.Contains(t, files, "file3.txt")
+		assert.NotContains(t, files, "file4.txt") // Modified but not conflicted
+	})
+
+	t.Run("handles empty status output", func(t *testing.T) {
+		files := extractConflictingFiles("")
+		assert.Empty(t, files)
+	})
+
+	t.Run("handles status with no conflicts", func(t *testing.T) {
+		statusOutput := ` M file1.txt
+A  file2.txt
+D  file3.txt`
+		files := extractConflictingFiles(statusOutput)
+		assert.Empty(t, files)
+	})
+}
+
+func TestAggregateRepositoryStates(t *testing.T) {
+	t.Run("aggregates single clean repository", func(t *testing.T) {
+		states := []RepositoryStateInfo{
+			{
+				Repo:  RepositoryInfo{Name: "repo1"},
+				State: StateReadyForUpdate,
+			},
+		}
+
+		aggregated := aggregateRepositoryStates(states)
+		assert.Equal(t, StateReadyForUpdate, aggregated.OverallState)
+		assert.Len(t, aggregated.ReadyRepos, 1)
+		assert.Equal(t, "repo1", aggregated.ReadyRepos[0])
+	})
+
+	t.Run("prioritizes conflicts over other states", func(t *testing.T) {
+		states := []RepositoryStateInfo{
+			{
+				Repo:  RepositoryInfo{Name: "repo1"},
+				State: StateReadyForUpdate,
+			},
+			{
+				Repo:  RepositoryInfo{Name: "repo2"},
+				State: StateConflictsExist,
+			},
+			{
+				Repo:  RepositoryInfo{Name: "repo3"},
+				State: StateDirtyWorkingDir,
+			},
+		}
+
+		aggregated := aggregateRepositoryStates(states)
+		assert.Equal(t, StateConflictsExist, aggregated.OverallState)
+		assert.Len(t, aggregated.ConflictingRepos, 1)
+		assert.Len(t, aggregated.DirtyRepos, 1)
+		assert.Len(t, aggregated.ReadyRepos, 1)
+	})
+
+	t.Run("prioritizes in-operation over dirty", func(t *testing.T) {
+		states := []RepositoryStateInfo{
+			{
+				Repo:  RepositoryInfo{Name: "repo1"},
+				State: StateDirtyWorkingDir,
+			},
+			{
+				Repo:  RepositoryInfo{Name: "repo2"},
+				State: StateInRebase,
+			},
+		}
+
+		aggregated := aggregateRepositoryStates(states)
+		assert.Equal(t, StateInRebase, aggregated.OverallState)
+		assert.Len(t, aggregated.InOperationRepos, 1)
+		assert.Len(t, aggregated.DirtyRepos, 1)
+	})
+
+	t.Run("handles all repositories with conflicts", func(t *testing.T) {
+		states := []RepositoryStateInfo{
+			{
+				Repo:  RepositoryInfo{Name: "repo1"},
+				State: StateConflictsExist,
+			},
+			{
+				Repo:  RepositoryInfo{Name: "repo2"},
+				State: StateConflictsExist,
+			},
+		}
+
+		aggregated := aggregateRepositoryStates(states)
+		assert.Equal(t, StateConflictsExist, aggregated.OverallState)
+		assert.Len(t, aggregated.ConflictingRepos, 2)
+	})
+
+	t.Run("handles mixed states correctly", func(t *testing.T) {
+		states := []RepositoryStateInfo{
+			{
+				Repo:  RepositoryInfo{Name: "repo1"},
+				State: StateReadyForUpdate,
+			},
+			{
+				Repo:  RepositoryInfo{Name: "repo2"},
+				State: StateDirtyWorkingDir,
+			},
+			{
+				Repo:  RepositoryInfo{Name: "repo3"},
+				State: StateInMerge,
+			},
+			{
+				Repo:  RepositoryInfo{Name: "repo4"},
+				State: StateError,
+			},
+		}
+
+		aggregated := aggregateRepositoryStates(states)
+		assert.Equal(t, StateInMerge, aggregated.OverallState)
+		assert.Len(t, aggregated.ReadyRepos, 1)
+		assert.Len(t, aggregated.DirtyRepos, 1)
+		assert.Len(t, aggregated.InOperationRepos, 1)
+		assert.Len(t, aggregated.ErrorRepos, 1)
+	})
+
+	t.Run("handles empty states list", func(t *testing.T) {
+		states := []RepositoryStateInfo{}
+		aggregated := aggregateRepositoryStates(states)
+		assert.Equal(t, StateReadyForUpdate, aggregated.OverallState)
+		assert.Empty(t, aggregated.ConflictingRepos)
+		assert.Empty(t, aggregated.DirtyRepos)
+		assert.Empty(t, aggregated.InOperationRepos)
+		assert.Empty(t, aggregated.ErrorRepos)
+		assert.Empty(t, aggregated.ReadyRepos)
+	})
+}
+
+func TestGetStateSymbol(t *testing.T) {
+	t.Run("returns correct symbols for each state", func(t *testing.T) {
+		assert.Equal(t, "✓", getStateSymbol(StateReadyForUpdate))
+		assert.Equal(t, "✗", getStateSymbol(StateConflictsExist))
+		assert.Equal(t, "!", getStateSymbol(StateDirtyWorkingDir))
+		assert.Equal(t, "⟳", getStateSymbol(StateInRebase))
+		assert.Equal(t, "⟳", getStateSymbol(StateInMerge))
+		assert.Equal(t, "⚠", getStateSymbol(StateError))
+		assert.Equal(t, "?", getStateSymbol(RepositoryState("unknown")))
 	})
 }
