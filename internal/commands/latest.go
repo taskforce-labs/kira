@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	yaml "gopkg.in/yaml.v3"
 
@@ -27,9 +28,16 @@ and only performs fetch/rebase when conflicts are resolved. Since kira supports 
 (managing work across multiple repositories), the command handles rebasing across multiple repos
 simultaneously, ensuring consistency and coordination between related repositories.
 
-The command can be called repeatedly to work through conflicts progressively.`,
+The command can be called repeatedly to work through conflicts progressively.
+
+If uncommitted changes are detected, they will be automatically stashed before rebase
+and popped after successful rebase (unless --no-pop-stash is specified).`,
 	Args: cobra.NoArgs,
 	RunE: runLatest,
+}
+
+func init() {
+	latestCmd.Flags().Bool("no-pop-stash", false, "Stash uncommitted changes before rebase but do not automatically pop them after")
 }
 
 // RepositoryInfo contains information about a repository that needs to be updated
@@ -113,7 +121,7 @@ type RepositoryConflicts struct {
 	Files []FileConflict
 }
 
-func runLatest(_ *cobra.Command, _ []string) error {
+func runLatest(cmd *cobra.Command, _ []string) error {
 	if err := checkWorkDir(); err != nil {
 		return err
 	}
@@ -143,8 +151,70 @@ func runLatest(_ *cobra.Command, _ []string) error {
 	// Phase 4: Display conflicts if any exist
 	if aggregated.OverallState == StateConflictsExist {
 		displayAllConflicts(stateInfos)
+		return nil
 	}
 
+	// Get flag value for stash handling
+	noPopStash, _ := cmd.Flags().GetBool("no-pop-stash")
+
+	// Phase 5: Perform fetch and rebase if repositories are ready
+	// Also handle repositories with uncommitted changes (stash them)
+	if aggregated.OverallState == StateReadyForUpdate || len(aggregated.DirtyRepos) > 0 {
+		displayUpdateMessage(aggregated.DirtyRepos, noPopStash)
+
+		reposToProcess := getReposToProcess(stateInfos)
+		if len(reposToProcess) == 0 {
+			return fmt.Errorf("no repositories ready for update")
+		}
+
+		results := performFetchAndRebaseForAllRepos(reposToProcess, noPopStash)
+		return handleUpdateResults(results)
+	}
+
+	// For other states (dirty, in_rebase, in_merge, error), just return
+	// The state summary already displayed the issue
+	return nil
+}
+
+// displayUpdateMessage displays the appropriate message before starting updates
+func displayUpdateMessage(dirtyRepos []string, noPopStash bool) {
+	if len(dirtyRepos) > 0 {
+		fmt.Println("\nSome repositories have uncommitted changes. They will be stashed before rebase.")
+		if !noPopStash {
+			fmt.Println("Changes will be automatically popped after successful rebase.")
+		} else {
+			fmt.Println("Changes will remain stashed (--no-pop-stash was specified).")
+		}
+		fmt.Println()
+	} else {
+		fmt.Println("\nAll repositories are ready for update. Proceeding with fetch and rebase...")
+		fmt.Println()
+	}
+}
+
+// getReposToProcess collects repositories that are ready for update or have uncommitted changes
+func getReposToProcess(stateInfos []RepositoryStateInfo) []RepositoryInfo {
+	var reposToProcess []RepositoryInfo
+	for _, stateInfo := range stateInfos {
+		if stateInfo.State == StateReadyForUpdate || stateInfo.State == StateDirtyWorkingDir {
+			reposToProcess = append(reposToProcess, stateInfo.Repo)
+		}
+	}
+	return reposToProcess
+}
+
+// handleUpdateResults processes the results and returns appropriate error
+func handleUpdateResults(results []RepositoryOperationResult) error {
+	displayOperationResults(results)
+
+	// Check if any operations failed
+	for _, result := range results {
+		if result.Error != nil {
+			return fmt.Errorf("some repositories failed to update")
+		}
+	}
+
+	fmt.Println("\n✓ All repositories updated successfully!")
 	return nil
 }
 
@@ -1043,4 +1113,374 @@ func displayAllConflicts(stateInfos []RepositoryStateInfo) {
 		fmt.Println()
 		fmt.Print(formatAllConflicts(allConflicts))
 	}
+}
+
+// RepositoryOperationResult contains the result of a fetch/rebase operation for a repository
+type RepositoryOperationResult struct {
+	Repo        RepositoryInfo
+	Error       error
+	Steps       []string // e.g., ["fetch", "rebase"] for progress tracking
+	HadStash    bool     // Whether changes were stashed before rebase
+	StashPopped bool     // Whether stash was successfully popped after rebase
+}
+
+// fetchFromRemote fetches latest changes from the remote trunk branch
+func fetchFromRemote(repo RepositoryInfo) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Check if remote exists first
+	remoteExists, err := checkRemoteExistsForLatest(repo.Remote, repo.Path)
+	if err != nil {
+		return fmt.Errorf("failed to check remote: %w", err)
+	}
+	if !remoteExists {
+		return fmt.Errorf("remote '%s' does not exist for repository %s", repo.Remote, repo.Name)
+	}
+
+	// Fetch from remote
+	_, err = executeCommand(ctx, "git", []string{"fetch", repo.Remote, repo.TrunkBranch}, repo.Path, false)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "Could not resolve host") ||
+			strings.Contains(errStr, "unable to access") ||
+			strings.Contains(errStr, "Connection refused") ||
+			strings.Contains(errStr, "network") {
+			return fmt.Errorf("failed to fetch from %s/%s: network error occurred. Check network connection and try again: %w", repo.Remote, repo.TrunkBranch, err)
+		}
+		if strings.Contains(errStr, "fatal:") && strings.Contains(errStr, "doesn't exist") {
+			return fmt.Errorf("failed to fetch from %s/%s: branch '%s' does not exist on remote '%s'", repo.Remote, repo.TrunkBranch, repo.TrunkBranch, repo.Remote)
+		}
+		return fmt.Errorf("failed to fetch from %s/%s: %w", repo.Remote, repo.TrunkBranch, err)
+	}
+
+	return nil
+}
+
+// checkRemoteExistsForLatest checks if a remote exists in the repository
+func checkRemoteExistsForLatest(remoteName, dir string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	_, err := executeCommand(ctx, "git", []string{"remote", "get-url", remoteName}, dir, false)
+	if err != nil {
+		// Remote doesn't exist
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// checkUncommittedChangesForLatest checks if there are uncommitted changes in the repository
+func checkUncommittedChangesForLatest(dir string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	output, err := executeCommand(ctx, "git", []string{"status", "--porcelain"}, dir, false)
+	if err != nil {
+		return false, fmt.Errorf("failed to check git status: %w", err)
+	}
+
+	return strings.TrimSpace(output) != "", nil
+}
+
+// stashChanges stashes uncommitted changes in the repository
+func stashChanges(repo RepositoryInfo) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Use git stash push to stash all changes (including untracked files if needed)
+	// We use --include-untracked to catch all changes
+	_, err := executeCommand(ctx, "git", []string{"stash", "push", "-m", fmt.Sprintf("kira latest: auto-stash before rebase on %s", repo.Name), "--include-untracked"}, repo.Path, false)
+	if err != nil {
+		errStr := err.Error()
+		// If there's nothing to stash, git stash returns an error but that's okay
+		if strings.Contains(errStr, "No local changes to save") {
+			return nil // Nothing to stash, which is fine
+		}
+		return fmt.Errorf("failed to stash changes: %w", err)
+	}
+
+	return nil
+}
+
+// popStash pops the most recent stash in the repository
+func popStash(repo RepositoryInfo) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	_, err := executeCommand(ctx, "git", []string{"stash", "pop"}, repo.Path, false)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "No stash entries found") {
+			return nil // Nothing to pop, which is fine
+		}
+		// If pop fails due to conflicts, that's a real error
+		if strings.Contains(errStr, "CONFLICT") || strings.Contains(errStr, "conflict") {
+			return fmt.Errorf("stash pop failed due to conflicts. Resolve conflicts manually: %w", err)
+		}
+		return fmt.Errorf("failed to pop stash: %w", err)
+	}
+
+	return nil
+}
+
+// rebaseOntoTrunk rebases the current branch onto the remote trunk branch
+func rebaseOntoTrunk(repo RepositoryInfo) error {
+	// Get current branch name
+	currentBranch, err := getCurrentBranch(repo.Path)
+	if err != nil {
+		return fmt.Errorf("failed to determine current branch: %w", err)
+	}
+
+	// Don't rebase if already on trunk branch
+	if currentBranch == repo.TrunkBranch {
+		return fmt.Errorf("already on trunk branch '%s', cannot rebase onto itself", repo.TrunkBranch)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Rebase onto remote/trunkBranch
+	remoteRef := fmt.Sprintf("%s/%s", repo.Remote, repo.TrunkBranch)
+	_, err = executeCommandCombinedOutput(ctx, "git", []string{"rebase", remoteRef}, repo.Path, false)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "CONFLICT") || strings.Contains(errStr, "conflict") {
+			return fmt.Errorf("rebase failed due to conflicts. Resolve conflicts and run 'kira latest' again: %w", err)
+		}
+		if strings.Contains(errStr, "fatal:") && strings.Contains(errStr, "doesn't exist") {
+			return fmt.Errorf("rebase failed: remote reference '%s' does not exist. Ensure fetch completed successfully", remoteRef)
+		}
+		return fmt.Errorf("rebase failed: %w", err)
+	}
+
+	return nil
+}
+
+// performFetchAndRebase performs both fetch and rebase operations for a repository
+// It handles stashing uncommitted changes if present
+func performFetchAndRebase(repo RepositoryInfo, noPopStash bool) (bool, error) {
+	// Check for uncommitted changes and stash if needed
+	hasUncommitted, err := checkUncommittedChangesForLatest(repo.Path)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for uncommitted changes: %w", err)
+	}
+
+	hadStash := false
+	if hasUncommitted {
+		// Stash changes before proceeding
+		if err := stashChanges(repo); err != nil {
+			return false, fmt.Errorf("failed to stash changes: %w", err)
+		}
+		hadStash = true
+	}
+
+	// Fetch first
+	if err := fetchFromRemote(repo); err != nil {
+		// If fetch fails and we stashed, try to restore stash
+		if hadStash && !noPopStash {
+			_ = popStash(repo) // Best effort to restore
+		}
+		return hadStash, fmt.Errorf("fetch failed: %w", err)
+	}
+
+	// Then rebase
+	if err := rebaseOntoTrunk(repo); err != nil {
+		// If rebase fails and we stashed, try to restore stash
+		if hadStash && !noPopStash {
+			_ = popStash(repo) // Best effort to restore
+		}
+		return hadStash, fmt.Errorf("rebase failed: %w", err)
+	}
+
+	// If we stashed and rebase succeeded, pop the stash (unless flag is set)
+	if hadStash && !noPopStash {
+		if err := popStash(repo); err != nil {
+			// Stash pop failed - this is a problem but rebase succeeded
+			return hadStash, fmt.Errorf("rebase succeeded but failed to pop stash: %w. Use 'git stash pop' to restore your changes", err)
+		}
+	}
+
+	return hadStash, nil
+}
+
+// performFetchAndRebaseForAllRepos performs fetch and rebase operations for all repositories in parallel
+func performFetchAndRebaseForAllRepos(repos []RepositoryInfo, noPopStash bool) []RepositoryOperationResult {
+	var wg sync.WaitGroup
+	results := make([]RepositoryOperationResult, len(repos))
+	var mu sync.Mutex
+
+	for i, repo := range repos {
+		wg.Add(1)
+		go func(index int, repository RepositoryInfo) {
+			defer wg.Done()
+			result := processRepositoryUpdate(repository, noPopStash, &mu)
+			mu.Lock()
+			results[index] = result
+			mu.Unlock()
+		}(i, repo)
+	}
+
+	wg.Wait()
+	return results
+}
+
+// processRepositoryUpdate handles the update process for a single repository
+func processRepositoryUpdate(repo RepositoryInfo, noPopStash bool, mu *sync.Mutex) RepositoryOperationResult {
+	result := RepositoryOperationResult{
+		Repo:  repo,
+		Steps: []string{},
+	}
+
+	// Handle stashing if needed
+	if hadStash := handleStashing(&result, repo, mu); !hadStash && result.Error != nil {
+		return result
+	}
+
+	// Perform fetch
+	if err := performFetchStep(&result, repo, mu); err != nil {
+		restoreStashIfNeeded(&result, repo, noPopStash)
+		return result
+	}
+
+	// Perform rebase
+	if err := performRebaseStep(&result, repo, mu); err != nil {
+		restoreStashIfNeeded(&result, repo, noPopStash)
+		return result
+	}
+
+	// Pop stash if needed
+	handleStashPop(&result, repo, noPopStash, mu)
+
+	mu.Lock()
+	displayOperationProgress(repo.Name, "complete")
+	mu.Unlock()
+
+	return result
+}
+
+// handleStashing checks for uncommitted changes and stashes them if needed
+func handleStashing(result *RepositoryOperationResult, repo RepositoryInfo, mu *sync.Mutex) bool {
+	hasUncommitted, err := checkUncommittedChangesForLatest(repo.Path)
+	if err != nil || !hasUncommitted {
+		return false
+	}
+
+	mu.Lock()
+	displayOperationProgress(repo.Name, "stashing changes")
+	mu.Unlock()
+
+	if err := stashChanges(repo); err != nil {
+		result.Error = fmt.Errorf("failed to stash changes: %w", err)
+		result.Steps = append(result.Steps, "stash (failed)")
+		return false
+	}
+
+	result.HadStash = true
+	result.Steps = append(result.Steps, "stash")
+	return true
+}
+
+// performFetchStep performs the fetch operation
+func performFetchStep(result *RepositoryOperationResult, repo RepositoryInfo, mu *sync.Mutex) error {
+	mu.Lock()
+	displayOperationProgress(repo.Name, "fetching")
+	mu.Unlock()
+
+	if err := fetchFromRemote(repo); err != nil {
+		result.Error = fmt.Errorf("fetch failed: %w", err)
+		result.Steps = append(result.Steps, "fetch (failed)")
+		return err
+	}
+
+	result.Steps = append(result.Steps, "fetch")
+	return nil
+}
+
+// performRebaseStep performs the rebase operation
+func performRebaseStep(result *RepositoryOperationResult, repo RepositoryInfo, mu *sync.Mutex) error {
+	mu.Lock()
+	displayOperationProgress(repo.Name, "rebasing")
+	mu.Unlock()
+
+	if err := rebaseOntoTrunk(repo); err != nil {
+		result.Error = fmt.Errorf("rebase failed: %w", err)
+		result.Steps = append(result.Steps, "rebase (failed)")
+		return err
+	}
+
+	result.Steps = append(result.Steps, "rebase")
+	return nil
+}
+
+// restoreStashIfNeeded attempts to restore stash if operation failed
+func restoreStashIfNeeded(result *RepositoryOperationResult, repo RepositoryInfo, noPopStash bool) {
+	if result.HadStash && !noPopStash {
+		_ = popStash(repo) // Best effort to restore
+	}
+}
+
+// handleStashPop handles popping the stash after successful rebase
+func handleStashPop(result *RepositoryOperationResult, repo RepositoryInfo, noPopStash bool, mu *sync.Mutex) {
+	if !result.HadStash {
+		return
+	}
+
+	if !noPopStash {
+		mu.Lock()
+		displayOperationProgress(repo.Name, "popping stash")
+		mu.Unlock()
+
+		if err := popStash(repo); err != nil {
+			result.Error = fmt.Errorf("rebase succeeded but failed to pop stash: %w. Use 'git stash pop' to restore your changes", err)
+			result.Steps = append(result.Steps, "stash-pop (failed)")
+			return
+		}
+
+		result.StashPopped = true
+		result.Steps = append(result.Steps, "stash-pop")
+	} else {
+		result.Steps = append(result.Steps, "stash (kept)")
+	}
+}
+
+// displayOperationProgress displays progress for a repository operation
+func displayOperationProgress(repoName, operation string) {
+	fmt.Printf("  Updating %s: %s...\n", repoName, operation)
+}
+
+// displayOperationResults displays the results of all repository operations
+func displayOperationResults(results []RepositoryOperationResult) {
+	fmt.Println("\nOperation Results:")
+	fmt.Println("───────────────────────────────────────────────────────────────")
+
+	successCount := 0
+	failureCount := 0
+
+	for _, result := range results {
+		if result.Error != nil {
+			failureCount++
+			fmt.Printf("  ✗ %s: FAILED\n", result.Repo.Name)
+			fmt.Printf("    Error: %v\n", result.Error)
+			if len(result.Steps) > 0 {
+				fmt.Printf("    Completed steps: %s\n", strings.Join(result.Steps, ", "))
+			}
+			if result.HadStash && !result.StashPopped {
+				fmt.Printf("    Note: Changes were stashed and not restored due to error\n")
+			}
+		} else {
+			successCount++
+			fmt.Printf("  ✓ %s: SUCCESS\n", result.Repo.Name)
+			if len(result.Steps) > 0 {
+				fmt.Printf("    Completed: %s\n", strings.Join(result.Steps, ", "))
+			}
+			if result.HadStash && !result.StashPopped {
+				fmt.Printf("    Note: Changes were stashed and remain in stash (use 'git stash pop' to restore)\n")
+			}
+		}
+	}
+
+	fmt.Println("───────────────────────────────────────────────────────────────")
+	fmt.Printf("Summary: %d succeeded, %d failed\n", successCount, failureCount)
 }

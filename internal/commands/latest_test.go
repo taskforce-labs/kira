@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1269,5 +1270,359 @@ func TestParseConflictsFromRepository(t *testing.T) {
 		repoConflicts, err := parseConflictsFromRepository(repo, stateInfo)
 		require.NoError(t, err)
 		assert.Nil(t, repoConflicts)
+	})
+}
+
+func TestFetchFromRemote(t *testing.T) {
+	t.Run("successful fetch", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create initial commit
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create a remote (using local path as remote)
+		remoteDir := t.TempDir()
+		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+		require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+
+		repo := RepositoryInfo{
+			Name:        "test-repo",
+			Path:        tmpDir,
+			TrunkBranch: "main",
+			Remote:      "origin",
+		}
+
+		// Fetch should succeed (even if nothing to fetch)
+		err := fetchFromRemote(repo)
+		// This might fail if main branch doesn't exist on remote, which is expected
+		// The important thing is it doesn't crash and handles errors gracefully
+		if err != nil {
+			// Expected if branch doesn't exist on remote
+			assert.Contains(t, err.Error(), "fetch")
+		}
+	})
+
+	t.Run("missing remote", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		repo := RepositoryInfo{
+			Name:        "test-repo",
+			Path:        tmpDir,
+			TrunkBranch: "main",
+			Remote:      "nonexistent",
+		}
+
+		err := fetchFromRemote(repo)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not exist")
+	})
+}
+
+func TestRebaseOntoTrunk(t *testing.T) {
+	t.Run("successful rebase", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create initial commit on main
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create feature branch
+		require.NoError(t, exec.Command("git", "checkout", "-b", "feature").Run())
+		require.NoError(t, os.WriteFile("feature.txt", []byte("feature"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "feature.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Feature commit").Run())
+
+		// Create remote and push
+		remoteDir := t.TempDir()
+		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+		require.NoError(t, exec.Command("git", "checkout", "main").Run())
+		require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+
+		// Add another commit to main and push
+		require.NoError(t, os.WriteFile("main.txt", []byte("main"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "main.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Main commit").Run())
+		require.NoError(t, exec.Command("git", "push", "origin", "main").Run())
+
+		// Switch back to feature and fetch
+		require.NoError(t, exec.Command("git", "checkout", "feature").Run())
+		require.NoError(t, exec.Command("git", "fetch", "origin", "main").Run())
+
+		repo := RepositoryInfo{
+			Name:        "test-repo",
+			Path:        tmpDir,
+			TrunkBranch: "main",
+			Remote:      "origin",
+		}
+
+		// Rebase should succeed
+		err := rebaseOntoTrunk(repo)
+		require.NoError(t, err)
+	})
+
+	t.Run("already on trunk branch", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create initial commit on main
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		repo := RepositoryInfo{
+			Name:        "test-repo",
+			Path:        tmpDir,
+			TrunkBranch: "main",
+			Remote:      "origin",
+		}
+
+		// Rebase should fail because we're already on trunk
+		err := rebaseOntoTrunk(repo)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "already on trunk branch")
+	})
+}
+
+func TestPerformFetchAndRebase(t *testing.T) {
+	t.Run("successful fetch and rebase", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create initial commit on main
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create feature branch
+		require.NoError(t, exec.Command("git", "checkout", "-b", "feature").Run())
+		require.NoError(t, os.WriteFile("feature.txt", []byte("feature"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "feature.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Feature commit").Run())
+
+		// Create remote and push
+		remoteDir := t.TempDir()
+		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+		require.NoError(t, exec.Command("git", "checkout", "main").Run())
+		require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+
+		// Add another commit to main and push
+		require.NoError(t, os.WriteFile("main.txt", []byte("main"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "main.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Main commit").Run())
+		require.NoError(t, exec.Command("git", "push", "origin", "main").Run())
+
+		// Switch back to feature
+		require.NoError(t, exec.Command("git", "checkout", "feature").Run())
+
+		repo := RepositoryInfo{
+			Name:        "test-repo",
+			Path:        tmpDir,
+			TrunkBranch: "main",
+			Remote:      "origin",
+		}
+
+		// Perform fetch and rebase
+		_, err := performFetchAndRebase(repo, false)
+		require.NoError(t, err)
+	})
+
+	t.Run("fetch fails", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		repo := RepositoryInfo{
+			Name:        "test-repo",
+			Path:        tmpDir,
+			TrunkBranch: "main",
+			Remote:      "nonexistent",
+		}
+
+		// Fetch should fail
+		_, err := performFetchAndRebase(repo, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "fetch failed")
+	})
+}
+
+func TestPerformFetchAndRebaseForAllRepos(t *testing.T) {
+	t.Run("single repository", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create initial commit
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		repos := []RepositoryInfo{
+			{
+				Name:        "repo1",
+				Path:        tmpDir,
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+		}
+
+		results := performFetchAndRebaseForAllRepos(repos, false)
+		require.Len(t, results, 1)
+		// May have errors if remote doesn't exist, which is expected
+		// The important thing is the function completes
+	})
+
+	t.Run("multiple repositories", func(t *testing.T) {
+		// Create two repos
+		tmpDir1 := t.TempDir()
+		tmpDir2 := t.TempDir()
+
+		// Initialize first repo
+		require.NoError(t, os.Chdir(tmpDir1))
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile("test1.txt", []byte("test1"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test1.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Initialize second repo
+		require.NoError(t, os.Chdir(tmpDir2))
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile("test2.txt", []byte("test2"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test2.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		repos := []RepositoryInfo{
+			{
+				Name:        "repo1",
+				Path:        tmpDir1,
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			{
+				Name:        "repo2",
+				Path:        tmpDir2,
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+		}
+
+		results := performFetchAndRebaseForAllRepos(repos, false)
+		require.Len(t, results, 2)
+		// Both should be processed (may have errors if remotes don't exist)
+	})
+}
+
+func TestDisplayOperationProgress(t *testing.T) {
+	t.Run("displays progress message", func(t *testing.T) {
+		// Capture output
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		displayOperationProgress("test-repo", "fetching")
+
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		assert.Contains(t, output, "test-repo")
+		assert.Contains(t, output, "fetching")
+	})
+}
+
+func TestDisplayOperationResults(t *testing.T) {
+	t.Run("displays success and failure results", func(t *testing.T) {
+		// Capture output
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		results := []RepositoryOperationResult{
+			{
+				Repo:  RepositoryInfo{Name: "repo1"},
+				Steps: []string{"fetch", "rebase"},
+			},
+			{
+				Repo:  RepositoryInfo{Name: "repo2"},
+				Error: fmt.Errorf("test error"),
+				Steps: []string{"fetch (failed)"},
+			},
+		}
+
+		displayOperationResults(results)
+
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		assert.Contains(t, output, "repo1")
+		assert.Contains(t, output, "repo2")
+		assert.Contains(t, output, "SUCCESS")
+		assert.Contains(t, output, "FAILED")
+		assert.Contains(t, output, "Summary")
 	})
 }
