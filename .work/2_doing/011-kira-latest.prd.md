@@ -1,7 +1,7 @@
 ---
 id: 011
 title: kira latest
-status: backlog
+status: doing
 kind: prd
 assigned:
 estimate: 0
