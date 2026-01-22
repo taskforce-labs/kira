@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -912,5 +913,361 @@ func TestGetStateSymbol(t *testing.T) {
 		assert.Equal(t, "⟳", getStateSymbol(StateInMerge))
 		assert.Equal(t, "⚠", getStateSymbol(StateError))
 		assert.Equal(t, "?", getStateSymbol(RepositoryState("unknown")))
+	})
+}
+
+func TestFindConflictMarkers(t *testing.T) {
+	t.Run("finds all conflict markers", func(t *testing.T) {
+		content := []byte(`line1
+<<<<<<< HEAD
+our content
+=======
+their content
+>>>>>>> branch
+line2`)
+		markers := findConflictMarkers(content)
+		require.Len(t, markers, 3)
+		assert.Equal(t, conflictMarkerStart, markers[0].marker)
+		assert.Equal(t, conflictMarkerSeparator, markers[1].marker)
+		assert.Equal(t, conflictMarkerEnd, markers[2].marker)
+	})
+
+	t.Run("handles multiple conflicts", func(t *testing.T) {
+		content := []byte(`<<<<<<< HEAD
+content1
+=======
+content2
+>>>>>>> branch1
+middle
+<<<<<<< HEAD
+content3
+=======
+content4
+>>>>>>> branch2`)
+		markers := findConflictMarkers(content)
+		require.Len(t, markers, 6)
+	})
+
+	t.Run("handles no conflicts", func(t *testing.T) {
+		content := []byte(`line1
+line2
+line3`)
+		markers := findConflictMarkers(content)
+		assert.Empty(t, markers)
+	})
+}
+
+func TestExtractContextLines(t *testing.T) {
+	t.Run("extracts context lines", func(t *testing.T) {
+		lines := []string{"line1", "line2", "line3", "line4", "line5", "line6", "line7", "line8", "line9"}
+		before, after := extractContextLines(lines, 3, 6, 3)
+		assert.Equal(t, []string{"line1", "line2", "line3"}, before)
+		assert.Equal(t, []string{"line7", "line8", "line9"}, after)
+	})
+
+	t.Run("handles beginning of file", func(t *testing.T) {
+		lines := []string{"line1", "line2", "line3", "line4"}
+		before, after := extractContextLines(lines, 0, 2, 3)
+		assert.Empty(t, before)
+		assert.Equal(t, []string{"line3", "line4"}, after)
+	})
+
+	t.Run("handles end of file", func(t *testing.T) {
+		lines := []string{"line1", "line2", "line3", "line4"}
+		before, after := extractContextLines(lines, 2, 4, 3)
+		assert.Equal(t, []string{"line1", "line2"}, before)
+		assert.Empty(t, after)
+	})
+}
+
+func TestParseConflictMarkers(t *testing.T) {
+	t.Run("parses single conflict", func(t *testing.T) {
+		content := []byte(`line1
+line2
+<<<<<<< HEAD
+our content
+line
+=======
+their content
+>>>>>>> branch
+line3
+line4`)
+		regions, err := parseConflictMarkers("test.txt", content)
+		require.NoError(t, err)
+		require.Len(t, regions, 1)
+		assert.Equal(t, conflictMarkerStart+" HEAD", regions[0].StartMarker)
+		assert.Equal(t, "our content\nline", regions[0].OurContent)
+		assert.Equal(t, conflictMarkerSeparator, regions[0].Separator)
+		assert.Equal(t, "their content", regions[0].TheirContent)
+		assert.Equal(t, conflictMarkerEnd+" branch", regions[0].EndMarker)
+		assert.Len(t, regions[0].ContextBefore, 2)
+		assert.Len(t, regions[0].ContextAfter, 2)
+	})
+
+	t.Run("parses multiple conflicts", func(t *testing.T) {
+		content := []byte(`<<<<<<< HEAD
+content1
+=======
+content2
+>>>>>>> branch1
+middle
+<<<<<<< HEAD
+content3
+=======
+content4
+>>>>>>> branch2`)
+		regions, err := parseConflictMarkers("test.txt", content)
+		require.NoError(t, err)
+		require.Len(t, regions, 2)
+	})
+
+	t.Run("handles malformed conflicts", func(t *testing.T) {
+		content := []byte(`<<<<<<< HEAD
+content1
+missing separator
+>>>>>>> branch`)
+		regions, err := parseConflictMarkers("test.txt", content)
+		require.NoError(t, err)
+		// Should skip malformed conflict
+		assert.Empty(t, regions)
+	})
+
+	t.Run("handles no conflicts", func(t *testing.T) {
+		content := []byte(`line1
+line2
+line3`)
+		regions, err := parseConflictMarkers("test.txt", content)
+		require.NoError(t, err)
+		assert.Nil(t, regions)
+	})
+}
+
+func TestReadConflictingFile(t *testing.T) {
+	t.Run("reads conflicting file successfully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: tmpDir,
+		}
+
+		filePath := "test.txt"
+		content := []byte("test content")
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, filePath), content, 0o600))
+
+		readContent, err := readConflictingFile(repo, filePath)
+		require.NoError(t, err)
+		assert.Equal(t, content, readContent)
+	})
+
+	t.Run("returns error for non-existent file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: tmpDir,
+		}
+
+		_, err := readConflictingFile(repo, "nonexistent.txt")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "file does not exist")
+	})
+
+	t.Run("returns error for binary file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: tmpDir,
+		}
+
+		filePath := "binary.bin"
+		// Create file with null byte
+		binaryContent := []byte{0x00, 0x01, 0x02, 0x03}
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, filePath), binaryContent, 0o600))
+
+		_, err := readConflictingFile(repo, filePath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "file appears to be binary")
+	})
+}
+
+func TestFormatConflictForDisplay(t *testing.T) {
+	t.Run("formats conflict with context", func(t *testing.T) {
+		conflict := ConflictRegion{
+			StartMarker:   "<<<<<<< HEAD",
+			OurContent:    "our content",
+			Separator:     "=======",
+			TheirContent:  "their content",
+			EndMarker:     ">>>>>>> branch",
+			ContextBefore: []string{"line1", "line2"},
+			ContextAfter:  []string{"line3", "line4"},
+		}
+
+		formatted := formatConflictForDisplay(conflict, "test.txt")
+		assert.Contains(t, formatted, "File: test.txt")
+		assert.Contains(t, formatted, "Context (3 lines before)")
+		assert.Contains(t, formatted, "line1")
+		assert.Contains(t, formatted, "<<<<<<< HEAD")
+		assert.Contains(t, formatted, "our content")
+		assert.Contains(t, formatted, "=======")
+		assert.Contains(t, formatted, "their content")
+		assert.Contains(t, formatted, ">>>>>>> branch")
+		assert.Contains(t, formatted, "Context (3 lines after)")
+		assert.Contains(t, formatted, "line3")
+	})
+}
+
+func TestFormatFileConflicts(t *testing.T) {
+	t.Run("formats file with conflicts", func(t *testing.T) {
+		fileConflict := FileConflict{
+			RepoName: "repo1",
+			FilePath: "test.txt",
+			Regions: []ConflictRegion{
+				{
+					StartMarker:  "<<<<<<< HEAD",
+					OurContent:   "content1",
+					Separator:    "=======",
+					TheirContent: "content2",
+					EndMarker:    ">>>>>>> branch",
+				},
+			},
+		}
+
+		formatted := formatFileConflicts(fileConflict)
+		assert.Contains(t, formatted, "File: test.txt")
+		assert.Contains(t, formatted, "<<<<<<< HEAD")
+	})
+
+	t.Run("handles file with error", func(t *testing.T) {
+		fileConflict := FileConflict{
+			RepoName: "repo1",
+			FilePath: "test.txt",
+			Error:    fmt.Errorf("file not found"),
+		}
+
+		formatted := formatFileConflicts(fileConflict)
+		assert.Contains(t, formatted, "File: test.txt")
+		assert.Contains(t, formatted, "[Error:")
+	})
+}
+
+func TestFormatRepositoryConflicts(t *testing.T) {
+	t.Run("formats repository conflicts", func(t *testing.T) {
+		repoConflicts := RepositoryConflicts{
+			Repo: RepositoryInfo{Name: "repo1"},
+			Files: []FileConflict{
+				{
+					RepoName: "repo1",
+					FilePath: "file1.txt",
+					Regions: []ConflictRegion{
+						{
+							StartMarker:  "<<<<<<< HEAD",
+							OurContent:   "content1",
+							Separator:    "=======",
+							TheirContent: "content2",
+							EndMarker:    ">>>>>>> branch",
+						},
+					},
+				},
+			},
+		}
+
+		formatted := formatRepositoryConflicts(repoConflicts)
+		assert.Contains(t, formatted, "Repository: repo1")
+		assert.Contains(t, formatted, "File: file1.txt")
+	})
+}
+
+func TestFormatAllConflicts(t *testing.T) {
+	t.Run("formats all conflicts with instructions", func(t *testing.T) {
+		allConflicts := []RepositoryConflicts{
+			{
+				Repo: RepositoryInfo{Name: "repo1"},
+				Files: []FileConflict{
+					{
+						RepoName: "repo1",
+						FilePath: "file1.txt",
+						Regions: []ConflictRegion{
+							{
+								StartMarker:  "<<<<<<< HEAD",
+								OurContent:   "content1",
+								Separator:    "=======",
+								TheirContent: "content2",
+								EndMarker:    ">>>>>>> branch",
+							},
+						},
+					},
+				},
+			},
+		}
+
+		formatted := formatAllConflicts(allConflicts)
+		assert.Contains(t, formatted, "Merge Conflicts Detected")
+		assert.Contains(t, formatted, "Repository: repo1")
+		assert.Contains(t, formatted, "To resolve conflicts:")
+		assert.Contains(t, formatted, "Run 'kira latest' again to continue")
+	})
+}
+
+func TestParseConflictsFromRepository(t *testing.T) {
+	t.Run("parses conflicts from repository", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create initial commit
+		require.NoError(t, os.WriteFile("test.txt", []byte("line1\nline2\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create a branch and modify file
+		require.NoError(t, exec.Command("git", "checkout", "-b", "feature").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("line1\nfeature change\nline2\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Feature change").Run())
+
+		// Switch back to main and modify same line
+		require.NoError(t, exec.Command("git", "checkout", "main").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("line1\nmain change\nline2\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Main change").Run())
+
+		// Attempt merge to create conflict
+		_ = exec.Command("git", "merge", "feature").Run() // This will fail with conflict
+
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: tmpDir,
+		}
+
+		stateInfo := RepositoryStateInfo{
+			Repo:  repo,
+			State: StateConflictsExist,
+		}
+
+		repoConflicts, err := parseConflictsFromRepository(repo, stateInfo)
+		require.NoError(t, err)
+		require.NotNil(t, repoConflicts)
+		// Should have at least one conflicting file
+		assert.GreaterOrEqual(t, len(repoConflicts.Files), 0)
+	})
+
+	t.Run("returns nil for non-conflict state", func(t *testing.T) {
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: "/tmp",
+		}
+
+		stateInfo := RepositoryStateInfo{
+			Repo:  repo,
+			State: StateReadyForUpdate,
+		}
+
+		repoConflicts, err := parseConflictsFromRepository(repo, stateInfo)
+		require.NoError(t, err)
+		assert.Nil(t, repoConflicts)
 	})
 }

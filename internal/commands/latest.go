@@ -2,6 +2,8 @@
 package commands
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -86,6 +88,31 @@ type AggregatedState struct {
 	ReadyRepos       []string
 }
 
+// ConflictRegion represents a single conflict region with markers and content
+type ConflictRegion struct {
+	StartMarker   string   // <<<<<<< HEAD or <<<<<<< branch-name
+	OurContent    string   // Content between <<<<<<< and =======
+	Separator     string   // =======
+	TheirContent  string   // Content between ======= and >>>>>>>
+	EndMarker     string   // >>>>>>> branch-name
+	ContextBefore []string // 3 lines before conflict
+	ContextAfter  []string // 3 lines after conflict
+}
+
+// FileConflict represents all conflicts in a single file with path and conflict regions
+type FileConflict struct {
+	RepoName string
+	FilePath string
+	Regions  []ConflictRegion
+	Error    error // Error if file couldn't be read or parsed
+}
+
+// RepositoryConflicts represents all conflicts in a repository grouped by file
+type RepositoryConflicts struct {
+	Repo  RepositoryInfo
+	Files []FileConflict
+}
+
 func runLatest(_ *cobra.Command, _ []string) error {
 	if err := checkWorkDir(); err != nil {
 		return err
@@ -112,6 +139,11 @@ func runLatest(_ *cobra.Command, _ []string) error {
 	aggregated := aggregateRepositoryStates(stateInfos)
 
 	displayStateSummary(stateInfos, aggregated)
+
+	// Phase 4: Display conflicts if any exist
+	if aggregated.OverallState == StateConflictsExist {
+		displayAllConflicts(stateInfos)
+	}
 
 	return nil
 }
@@ -607,4 +639,408 @@ func aggregateRepositoryStates(states []RepositoryStateInfo) AggregatedState {
 	}
 
 	return aggregated
+}
+
+// readConflictingFile safely reads a conflicting file from repository path
+func readConflictingFile(repo RepositoryInfo, filePath string) ([]byte, error) {
+	// Resolve absolute path
+	absPath := filePath
+	if !filepath.IsAbs(filePath) {
+		absPath = filepath.Join(repo.Path, filePath)
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(absPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("file does not exist: %s", absPath)
+	}
+
+	// Read file content
+	// #nosec G304 - file path is from git status output, validated by git
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file %s: %w", absPath, err)
+	}
+
+	// Check if file appears to be binary (simple heuristic: contains null bytes)
+	if bytes.Contains(content, []byte{0}) {
+		return nil, fmt.Errorf("file appears to be binary: %s", absPath)
+	}
+
+	// Check for very large files (warn if > 1MB)
+	const maxFileSize = 1024 * 1024 // 1MB
+	if len(content) > maxFileSize {
+		return nil, fmt.Errorf("file is too large (%d bytes, max %d): %s", len(content), maxFileSize, absPath)
+	}
+
+	return content, nil
+}
+
+// extractContextLines extracts N lines before and after conflict region
+func extractContextLines(lines []string, conflictStart, conflictEnd, contextSize int) (before, after []string) {
+	// Extract context before
+	beforeStart := conflictStart - contextSize
+	if beforeStart < 0 {
+		beforeStart = 0
+	}
+	if beforeStart < conflictStart {
+		before = lines[beforeStart:conflictStart]
+	}
+
+	// Extract context after
+	afterEnd := conflictEnd + contextSize
+	if afterEnd > len(lines) {
+		afterEnd = len(lines)
+	}
+	if afterEnd > conflictEnd {
+		after = lines[conflictEnd:afterEnd]
+	}
+
+	return before, after
+}
+
+// Conflict marker constants
+const (
+	conflictMarkerStart     = "<<<<<<<"
+	conflictMarkerSeparator = "======="
+	conflictMarkerEnd       = ">>>>>>>"
+)
+
+// conflictMarkerPosition represents the position of a conflict marker in a file
+type conflictMarkerPosition struct {
+	lineIndex int
+	marker    string // "<<<<<<<", "=======", ">>>>>>>"
+	content   string // The full line including any branch name
+}
+
+// findConflictMarkers finds all conflict marker positions in file content
+func findConflictMarkers(content []byte) []conflictMarkerPosition {
+	var markers []conflictMarkerPosition
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+	lineIndex := 0
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, conflictMarkerStart) {
+			markers = append(markers, conflictMarkerPosition{
+				lineIndex: lineIndex,
+				marker:    conflictMarkerStart,
+				content:   line,
+			})
+		} else if strings.HasPrefix(trimmed, conflictMarkerSeparator) && len(trimmed) == 7 {
+			// Only match exact "=======" separator, not lines that contain it
+			markers = append(markers, conflictMarkerPosition{
+				lineIndex: lineIndex,
+				marker:    conflictMarkerSeparator,
+				content:   line,
+			})
+		} else if strings.HasPrefix(trimmed, conflictMarkerEnd) {
+			markers = append(markers, conflictMarkerPosition{
+				lineIndex: lineIndex,
+				marker:    conflictMarkerEnd,
+				content:   line,
+			})
+		}
+
+		lineIndex++
+	}
+
+	return markers
+}
+
+// parseConflictMarkers parses conflict markers from file content and extracts conflict regions
+func parseConflictMarkers(_ string, content []byte) ([]ConflictRegion, error) {
+	lines := strings.Split(string(content), "\n")
+	markers := findConflictMarkers(content)
+
+	if len(markers) == 0 {
+		return nil, nil
+	}
+
+	var regions []ConflictRegion
+	const contextSize = 3
+
+	// Group markers into conflict regions (<<<<<<< ... ======= ... >>>>>>>)
+	i := 0
+	for i < len(markers) {
+		// Find start marker (<<<<<<<)
+		if markers[i].marker != conflictMarkerStart {
+			i++
+			continue
+		}
+
+		startIdx := markers[i].lineIndex
+		startMarker := markers[i].content
+		i++
+
+		// Find separator (=======)
+		if i >= len(markers) || markers[i].marker != conflictMarkerSeparator {
+			// Malformed: missing separator, skip this conflict
+			// Try to find next start marker
+			for i < len(markers) && markers[i].marker != conflictMarkerStart {
+				i++
+			}
+			continue
+		}
+		separatorIdx := markers[i].lineIndex
+		separator := markers[i].content
+		i++
+
+		// Find end marker (>>>>>>>)
+		if i >= len(markers) || markers[i].marker != conflictMarkerEnd {
+			// Malformed: missing end marker, skip this conflict
+			// Try to find next start marker
+			for i < len(markers) && markers[i].marker != conflictMarkerStart {
+				i++
+			}
+			continue
+		}
+		endIdx := markers[i].lineIndex
+		endMarker := markers[i].content
+		i++
+
+		// Extract content sections
+		// Our content: between start marker (inclusive) and separator (exclusive)
+		ourLines := lines[startIdx+1 : separatorIdx]
+		ourContent := strings.Join(ourLines, "\n")
+
+		// Their content: between separator (exclusive) and end marker (exclusive)
+		theirLines := lines[separatorIdx+1 : endIdx]
+		theirContent := strings.Join(theirLines, "\n")
+
+		// Extract context
+		contextBefore, contextAfter := extractContextLines(lines, startIdx, endIdx+1, contextSize)
+
+		regions = append(regions, ConflictRegion{
+			StartMarker:   startMarker,
+			OurContent:    ourContent,
+			Separator:     separator,
+			TheirContent:  theirContent,
+			EndMarker:     endMarker,
+			ContextBefore: contextBefore,
+			ContextAfter:  contextAfter,
+		})
+	}
+
+	return regions, nil
+}
+
+// parseConflictsFromRepository parses all conflicts from a repository
+func parseConflictsFromRepository(repo RepositoryInfo, stateInfo RepositoryStateInfo) (*RepositoryConflicts, error) {
+	if stateInfo.State != StateConflictsExist {
+		return nil, nil
+	}
+
+	// Get list of conflicting files
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	statusOutput, err := executeCommand(ctx, "git", []string{"status", "--porcelain"}, repo.Path, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get git status: %w", err)
+	}
+
+	conflictingFiles := extractConflictingFiles(statusOutput)
+	if len(conflictingFiles) == 0 {
+		// No conflicting files found, return empty structure
+		return &RepositoryConflicts{
+			Repo:  repo,
+			Files: []FileConflict{},
+		}, nil
+	}
+
+	var fileConflicts []FileConflict
+
+	// Parse conflicts from each file
+	for _, filePath := range conflictingFiles {
+		content, err := readConflictingFile(repo, filePath)
+		if err != nil {
+			// Add a conflict entry with error to indicate the file couldn't be read
+			fileConflicts = append(fileConflicts, FileConflict{
+				RepoName: repo.Name,
+				FilePath: filePath,
+				Regions:  []ConflictRegion{},
+				Error:    err,
+			})
+			continue
+		}
+
+		regions, err := parseConflictMarkers(filePath, content)
+		if err != nil {
+			// Add conflict entry with parsing error
+			fileConflicts = append(fileConflicts, FileConflict{
+				RepoName: repo.Name,
+				FilePath: filePath,
+				Regions:  []ConflictRegion{},
+				Error:    fmt.Errorf("failed to parse conflict markers: %w", err),
+			})
+			continue
+		}
+
+		// Add file conflict even if no regions found (might have been resolved)
+		fileConflicts = append(fileConflicts, FileConflict{
+			RepoName: repo.Name,
+			FilePath: filePath,
+			Regions:  regions,
+		})
+	}
+
+	return &RepositoryConflicts{
+		Repo:  repo,
+		Files: fileConflicts,
+	}, nil
+}
+
+// formatConflictForDisplay formats a single conflict region for terminal display
+func formatConflictForDisplay(conflict ConflictRegion, filePath string) string {
+	var buf strings.Builder
+
+	buf.WriteString(fmt.Sprintf("File: %s\n\n", filePath))
+
+	// Context before
+	if len(conflict.ContextBefore) > 0 {
+		buf.WriteString("Context (3 lines before):\n")
+		for _, line := range conflict.ContextBefore {
+			buf.WriteString(fmt.Sprintf("  %s\n", line))
+		}
+		buf.WriteString("\n")
+	}
+
+	// Conflict markers and content (display as-is for easy copy-paste)
+	buf.WriteString(conflict.StartMarker)
+	buf.WriteString("\n")
+	if conflict.OurContent != "" {
+		// Display our content as-is (no indentation for copy-paste)
+		buf.WriteString(conflict.OurContent)
+		if !strings.HasSuffix(conflict.OurContent, "\n") {
+			buf.WriteString("\n")
+		}
+	}
+	buf.WriteString(conflict.Separator)
+	buf.WriteString("\n")
+	if conflict.TheirContent != "" {
+		// Display their content as-is (no indentation for copy-paste)
+		buf.WriteString(conflict.TheirContent)
+		if !strings.HasSuffix(conflict.TheirContent, "\n") {
+			buf.WriteString("\n")
+		}
+	}
+	buf.WriteString(conflict.EndMarker)
+	buf.WriteString("\n")
+
+	// Context after
+	if len(conflict.ContextAfter) > 0 {
+		buf.WriteString("\nContext (3 lines after):\n")
+		for _, line := range conflict.ContextAfter {
+			buf.WriteString(fmt.Sprintf("  %s\n", line))
+		}
+	}
+
+	return buf.String()
+}
+
+// formatFileConflicts formats all conflicts in a file
+func formatFileConflicts(fileConflict FileConflict) string {
+	// Handle error cases
+	if fileConflict.Error != nil {
+		return fmt.Sprintf("File: %s\n  [Error: %v]\n\n", fileConflict.FilePath, fileConflict.Error)
+	}
+
+	if len(fileConflict.Regions) == 0 {
+		// File has no conflict regions (might have been resolved or is empty)
+		return fmt.Sprintf("File: %s\n  [No conflict regions found - file may have been resolved]\n\n", fileConflict.FilePath)
+	}
+
+	var buf strings.Builder
+	buf.WriteString(fmt.Sprintf("File: %s\n\n", fileConflict.FilePath))
+
+	for i, region := range fileConflict.Regions {
+		if i > 0 {
+			buf.WriteString("\n───────────────────────────────────────────────────────────────\n\n")
+		}
+		buf.WriteString(formatConflictForDisplay(region, fileConflict.FilePath))
+	}
+
+	return buf.String()
+}
+
+// formatRepositoryConflicts formats all conflicts for a repository
+func formatRepositoryConflicts(repoConflicts RepositoryConflicts) string {
+	if len(repoConflicts.Files) == 0 {
+		return ""
+	}
+
+	var buf strings.Builder
+	buf.WriteString(fmt.Sprintf("Repository: %s\n", repoConflicts.Repo.Name))
+	buf.WriteString("───────────────────────────────────────────────────────────────\n\n")
+
+	for i, fileConflict := range repoConflicts.Files {
+		if i > 0 {
+			buf.WriteString("\n")
+		}
+		buf.WriteString(formatFileConflicts(fileConflict))
+		if i < len(repoConflicts.Files)-1 {
+			buf.WriteString("\n")
+		}
+	}
+
+	return buf.String()
+}
+
+// formatAllConflicts formats conflicts across all repositories
+func formatAllConflicts(allConflicts []RepositoryConflicts) string {
+	if len(allConflicts) == 0 {
+		return ""
+	}
+
+	var buf strings.Builder
+	buf.WriteString("═══════════════════════════════════════════════════════════════\n")
+	buf.WriteString("Merge Conflicts Detected\n")
+	buf.WriteString("═══════════════════════════════════════════════════════════════\n\n")
+
+	for i, repoConflicts := range allConflicts {
+		if i > 0 {
+			buf.WriteString("\n\n")
+		}
+		buf.WriteString(formatRepositoryConflicts(repoConflicts))
+	}
+
+	buf.WriteString("\n\n")
+	buf.WriteString("───────────────────────────────────────────────────────────────\n")
+	buf.WriteString("[Instructions: Copy the conflict sections above and paste into Cursor or ChatGPT for resolution assistance]\n\n")
+	buf.WriteString("To resolve conflicts:\n")
+	buf.WriteString("1. Copy the conflict sections above\n")
+	buf.WriteString("2. Paste into your LLM tool (Cursor, ChatGPT, etc.)\n")
+	buf.WriteString("3. Ask for help resolving the conflicts\n")
+	buf.WriteString("4. Apply the resolved code\n")
+	buf.WriteString("5. Run 'kira latest' again to continue\n")
+
+	return buf.String()
+}
+
+// displayAllConflicts parses and displays all conflicts from repositories with conflicts
+func displayAllConflicts(stateInfos []RepositoryStateInfo) {
+	var allConflicts []RepositoryConflicts
+
+	// Parse conflicts from all repositories that have conflicts
+	for _, stateInfo := range stateInfos {
+		if stateInfo.State == StateConflictsExist {
+			repoConflicts, err := parseConflictsFromRepository(stateInfo.Repo, stateInfo)
+			if err != nil {
+				// Log error but continue
+				fmt.Printf("Warning: Failed to parse conflicts from repository %s: %v\n", stateInfo.Repo.Name, err)
+				continue
+			}
+			if repoConflicts != nil && len(repoConflicts.Files) > 0 {
+				allConflicts = append(allConflicts, *repoConflicts)
+			}
+		}
+	}
+
+	// Display formatted conflicts
+	if len(allConflicts) > 0 {
+		fmt.Println()
+		fmt.Print(formatAllConflicts(allConflicts))
+	}
 }
