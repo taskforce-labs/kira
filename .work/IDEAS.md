@@ -33,3 +33,5 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 24. [2026-01-07] init defaults: update init defaults with start config and options
 25. [2026-01-09] kira project plans: when a prd or other work item is created, the start command will only submit prs for the repos that were affected
 26. [2026-01-20] kira skills: add some skills for using kira for planning and manging workflow in skills.sh
+27. [2026-01-20] feature flag: work items can articulate feature flags they trigger (boolean, gradual, conditional) - this can be used by the release command to trigger them
+28. [2026-01-20] release strategy: configuration that helps kira trigger the right steps for releasing software across a number of commands
