@@ -3,9 +3,9 @@ id: 001
 title: Kira MVP
 status: done
 kind: prd
+created: 2024-06-11
 assigned: wkallan1984@gmail.com
 estimate: 1 day
-created: 2024-06-11T15:00:00Z
 ---
 # Kira MVP
 
