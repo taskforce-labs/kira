@@ -1,7 +1,7 @@
 ---
 id: 019
 title: make run
-status: backlog
+status: doing
 kind: task
 assigned:
 estimate: 0
