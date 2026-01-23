@@ -160,6 +160,11 @@ func runLatest(cmd *cobra.Command, _ []string) error {
 	// Phase 5: Perform fetch and rebase if repositories are ready
 	// Also handle repositories with uncommitted changes (stash them)
 	if aggregated.OverallState == StateReadyForUpdate || len(aggregated.DirtyRepos) > 0 {
+		// Phase 6: Pre-flight validation - ensure no blocking states
+		if err := validateAllReposCleanOrDirtyForUpdate(aggregated); err != nil {
+			return err
+		}
+
 		displayUpdateMessage(aggregated.DirtyRepos, noPopStash)
 
 		reposToProcess := getReposToProcess(stateInfos)
@@ -655,6 +660,53 @@ func extractConflictingFiles(statusOutput string) []string {
 	return conflictingFiles
 }
 
+// validateAllReposCleanOrDirtyForUpdate validates that all repositories are in a state
+// that allows update operations (ready or dirty). Blocks if any repo has conflicts,
+// in-progress operations, or errors.
+func validateAllReposCleanOrDirtyForUpdate(aggregated AggregatedState) error {
+	var blockingRepos []string
+	var blockingReasons []string
+
+	// Check for blocking states
+	if len(aggregated.ConflictingRepos) > 0 {
+		blockingRepos = append(blockingRepos, aggregated.ConflictingRepos...)
+		blockingReasons = append(blockingReasons, "merge conflicts detected")
+	}
+	if len(aggregated.InOperationRepos) > 0 {
+		blockingRepos = append(blockingRepos, aggregated.InOperationRepos...)
+		blockingReasons = append(blockingReasons, "in-progress rebase or merge operation")
+	}
+	if len(aggregated.ErrorRepos) > 0 {
+		blockingRepos = append(blockingRepos, aggregated.ErrorRepos...)
+		blockingReasons = append(blockingReasons, "error state detected")
+	}
+
+	if len(blockingRepos) > 0 {
+		// Build detailed error message
+		var msg strings.Builder
+		msg.WriteString("cannot proceed with update: repositories have blocking states:\n")
+		for i, repo := range blockingRepos {
+			if i < len(blockingReasons) {
+				msg.WriteString(fmt.Sprintf("  - %s: %s\n", repo, blockingReasons[i%len(blockingReasons)]))
+			}
+		}
+		msg.WriteString("\nTo resolve:\n")
+		if len(aggregated.ConflictingRepos) > 0 {
+			msg.WriteString("  - Resolve merge conflicts in affected repositories\n")
+		}
+		if len(aggregated.InOperationRepos) > 0 {
+			msg.WriteString("  - Complete or abort in-progress rebase/merge operations:\n")
+			msg.WriteString("    Run 'git rebase --abort' or 'git merge --abort' in affected repositories\n")
+		}
+		if len(aggregated.ErrorRepos) > 0 {
+			msg.WriteString("  - Fix errors in affected repositories\n")
+		}
+		return fmt.Errorf("%s", msg.String())
+	}
+
+	return nil
+}
+
 // aggregateRepositoryStates combines states across multiple repositories
 // Priority: conflicts > in_rebase/in_merge > dirty > ready
 func aggregateRepositoryStates(states []RepositoryStateInfo) AggregatedState {
@@ -1084,7 +1136,8 @@ func formatAllConflicts(allConflicts []RepositoryConflicts) string {
 	buf.WriteString("2. Paste into your LLM tool (Cursor, ChatGPT, etc.)\n")
 	buf.WriteString("3. Ask for help resolving the conflicts\n")
 	buf.WriteString("4. Apply the resolved code\n")
-	buf.WriteString("5. Run 'kira latest' again to continue\n")
+	buf.WriteString("5. Run 'kira latest' again to continue\n\n")
+	buf.WriteString("To abort an in-progress rebase in a repository, run 'git rebase --abort' in that repository.\n")
 
 	return buf.String()
 }
@@ -1117,11 +1170,84 @@ func displayAllConflicts(stateInfos []RepositoryStateInfo) {
 
 // RepositoryOperationResult contains the result of a fetch/rebase operation for a repository
 type RepositoryOperationResult struct {
-	Repo        RepositoryInfo
-	Error       error
-	Steps       []string // e.g., ["fetch", "rebase"] for progress tracking
-	HadStash    bool     // Whether changes were stashed before rebase
-	StashPopped bool     // Whether stash was successfully popped after rebase
+	Repo            RepositoryInfo
+	Error           error
+	Steps           []string // e.g., ["fetch", "rebase"] for progress tracking
+	HadStash        bool     // Whether changes were stashed before rebase
+	StashPopped     bool     // Whether stash was successfully popped after rebase
+	RebaseAttempted bool     // Whether rebase operation was attempted (for rollback purposes)
+	RebaseAborted   bool     // Whether rebase was aborted during rollback
+}
+
+// isNetworkError checks if an error string indicates a network error
+func isNetworkError(errStr string) bool {
+	networkPatterns := []string{
+		"could not resolve host",
+		"unable to access",
+		"connection refused",
+		"network",
+		"timeout",
+		"connection timed out",
+	}
+	for _, pattern := range networkPatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// isPermissionError checks if an error string indicates a permission/authentication error
+func isPermissionError(errStr string) bool {
+	permissionPatterns := []string{
+		"permission denied",
+		"authentication failed",
+		"403",
+		"401",
+		"could not read from remote",
+		"access denied",
+		"auth failed",
+		"unauthorized",
+		"forbidden",
+	}
+	for _, pattern := range permissionPatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// isBranchError checks if an error string indicates a branch/ref error
+func isBranchError(errStr string) bool {
+	return strings.Contains(errStr, "fatal:") && strings.Contains(errStr, "doesn't exist")
+}
+
+// classifyFetchError classifies fetch errors into user-friendly categories
+func classifyFetchError(err error, repo RepositoryInfo) error {
+	if err == nil {
+		return nil
+	}
+
+	errStr := strings.ToLower(err.Error())
+
+	// Network errors
+	if isNetworkError(errStr) {
+		return fmt.Errorf("failed to fetch from %s/%s: network error occurred. Check network connection and try again: %w", repo.Remote, repo.TrunkBranch, err)
+	}
+
+	// Permission/authentication errors
+	if isPermissionError(errStr) {
+		return fmt.Errorf("failed to fetch from %s/%s: permission or authentication error. Check remote access and credentials: %w", repo.Remote, repo.TrunkBranch, err)
+	}
+
+	// Branch/ref errors
+	if isBranchError(errStr) {
+		return fmt.Errorf("failed to fetch from %s/%s: branch '%s' does not exist on remote '%s'", repo.Remote, repo.TrunkBranch, repo.TrunkBranch, repo.Remote)
+	}
+
+	// Generic fetch error
+	return fmt.Errorf("failed to fetch from %s/%s: %w", repo.Remote, repo.TrunkBranch, err)
 }
 
 // fetchFromRemote fetches latest changes from the remote trunk branch
@@ -1141,17 +1267,7 @@ func fetchFromRemote(repo RepositoryInfo) error {
 	// Fetch from remote
 	_, err = executeCommand(ctx, "git", []string{"fetch", repo.Remote, repo.TrunkBranch}, repo.Path, false)
 	if err != nil {
-		errStr := err.Error()
-		if strings.Contains(errStr, "Could not resolve host") ||
-			strings.Contains(errStr, "unable to access") ||
-			strings.Contains(errStr, "Connection refused") ||
-			strings.Contains(errStr, "network") {
-			return fmt.Errorf("failed to fetch from %s/%s: network error occurred. Check network connection and try again: %w", repo.Remote, repo.TrunkBranch, err)
-		}
-		if strings.Contains(errStr, "fatal:") && strings.Contains(errStr, "doesn't exist") {
-			return fmt.Errorf("failed to fetch from %s/%s: branch '%s' does not exist on remote '%s'", repo.Remote, repo.TrunkBranch, repo.TrunkBranch, repo.Remote)
-		}
-		return fmt.Errorf("failed to fetch from %s/%s: %w", repo.Remote, repo.TrunkBranch, err)
+		return classifyFetchError(err, repo)
 	}
 
 	return nil
@@ -1225,6 +1341,27 @@ func popStash(repo RepositoryInfo) error {
 	return nil
 }
 
+// abortRebase aborts an in-progress rebase operation in the repository
+// Returns nil if no rebase is in progress (not an error condition)
+func abortRebase(repo RepositoryInfo) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	_, err := executeCommand(ctx, "git", []string{"rebase", "--abort"}, repo.Path, false)
+	if err != nil {
+		errStr := err.Error()
+		// If no rebase is in progress, git rebase --abort returns an error, but that's okay
+		if strings.Contains(errStr, "No rebase in progress") ||
+			strings.Contains(errStr, "no rebase") ||
+			strings.Contains(errStr, "fatal:") && strings.Contains(errStr, "rebase") {
+			return nil // No rebase to abort, which is fine
+		}
+		return fmt.Errorf("failed to abort rebase: %w", err)
+	}
+
+	return nil
+}
+
 // rebaseOntoTrunk rebases the current branch onto the remote trunk branch
 func rebaseOntoTrunk(repo RepositoryInfo) error {
 	// Get current branch name
@@ -1287,9 +1424,10 @@ func performFetchAndRebase(repo RepositoryInfo, noPopStash bool) (bool, error) {
 
 	// Then rebase
 	if err := rebaseOntoTrunk(repo); err != nil {
-		// If rebase fails and we stashed, try to restore stash
+		// If rebase fails, abort rebase first, then restore stash
+		_ = abortRebase(repo) // Best effort to abort rebase
 		if hadStash && !noPopStash {
-			_ = popStash(repo) // Best effort to restore
+			_ = popStash(repo) // Best effort to restore stash
 		}
 		return hadStash, fmt.Errorf("rebase failed: %w", err)
 	}
@@ -1404,6 +1542,9 @@ func performRebaseStep(result *RepositoryOperationResult, repo RepositoryInfo, m
 	displayOperationProgress(repo.Name, "rebasing")
 	mu.Unlock()
 
+	// Mark that we're attempting rebase (for rollback purposes)
+	result.RebaseAttempted = true
+
 	if err := rebaseOntoTrunk(repo); err != nil {
 		result.Error = fmt.Errorf("rebase failed: %w", err)
 		result.Steps = append(result.Steps, "rebase (failed)")
@@ -1414,8 +1555,21 @@ func performRebaseStep(result *RepositoryOperationResult, repo RepositoryInfo, m
 	return nil
 }
 
-// restoreStashIfNeeded attempts to restore stash if operation failed
+// restoreStashIfNeeded attempts to restore repository state if operation failed
+// It aborts rebase first (if rebase was attempted), then restores stash
 func restoreStashIfNeeded(result *RepositoryOperationResult, repo RepositoryInfo, noPopStash bool) {
+	// If rebase was attempted and failed, abort it first to restore pre-rebase state
+	if result.RebaseAttempted {
+		if err := abortRebase(repo); err == nil {
+			result.RebaseAborted = true
+			result.Steps = append(result.Steps, "rebase-abort")
+		} else {
+			// Log but don't fail - best effort
+			result.Steps = append(result.Steps, "rebase-abort (failed)")
+		}
+	}
+
+	// Then restore stash if we had one
 	if result.HadStash && !noPopStash {
 		_ = popStash(repo) // Best effort to restore
 	}
@@ -1450,6 +1604,70 @@ func displayOperationProgress(repoName, operation string) {
 	fmt.Printf("  Updating %s: %s...\n", repoName, operation)
 }
 
+// getRecoverySteps generates recovery steps for a failed repository operation
+func getRecoverySteps(result RepositoryOperationResult) []string {
+	var recoverySteps []string
+	if result.RebaseAttempted && !result.RebaseAborted {
+		recoverySteps = append(recoverySteps, fmt.Sprintf("Run 'git rebase --abort' in %s to return to pre-rebase state", result.Repo.Path))
+	}
+	if result.HadStash && !result.StashPopped {
+		if result.RebaseAborted {
+			recoverySteps = append(recoverySteps, fmt.Sprintf("Run 'git stash pop' in %s to restore stashed changes", result.Repo.Path))
+		} else {
+			recoverySteps = append(recoverySteps, fmt.Sprintf("Changes were stashed and not restored. Run 'git stash pop' in %s to restore", result.Repo.Path))
+		}
+	}
+	return recoverySteps
+}
+
+// displayFailedResult displays information about a failed repository operation
+func displayFailedResult(result RepositoryOperationResult) {
+	fmt.Printf("  ✗ %s: FAILED\n", result.Repo.Name)
+	fmt.Printf("    Error: %v\n", result.Error)
+	if len(result.Steps) > 0 {
+		fmt.Printf("    Completed steps: %s\n", strings.Join(result.Steps, ", "))
+	}
+
+	recoverySteps := getRecoverySteps(result)
+	if len(recoverySteps) > 0 {
+		fmt.Printf("    Recovery steps:\n")
+		for _, step := range recoverySteps {
+			fmt.Printf("      - %s\n", step)
+		}
+	}
+}
+
+// displaySuccessfulResult displays information about a successful repository operation
+func displaySuccessfulResult(result RepositoryOperationResult) {
+	fmt.Printf("  ✓ %s: SUCCESS\n", result.Repo.Name)
+	if len(result.Steps) > 0 {
+		fmt.Printf("    Completed: %s\n", strings.Join(result.Steps, ", "))
+	}
+	if result.HadStash && !result.StashPopped {
+		fmt.Printf("    Note: Changes were stashed and remain in stash (use 'git stash pop' to restore)\n")
+	}
+}
+
+// displayFailedReposGuidance displays overall guidance for failed repositories
+func displayFailedReposGuidance(failedRepos []RepositoryOperationResult) {
+	if len(failedRepos) == 0 {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("Next steps for failed repositories:")
+	for _, result := range failedRepos {
+		fmt.Printf("  %s:\n", result.Repo.Name)
+		if result.RebaseAttempted {
+			fmt.Printf("    1. If rebase is still in progress, run 'git rebase --abort' in %s\n", result.Repo.Path)
+		}
+		if result.HadStash && !result.StashPopped {
+			fmt.Printf("    2. Restore stashed changes: 'git stash pop' in %s\n", result.Repo.Path)
+		}
+		fmt.Printf("    3. Fix the issue and run 'kira latest' again\n")
+	}
+}
+
 // displayOperationResults displays the results of all repository operations
 func displayOperationResults(results []RepositoryOperationResult) {
 	fmt.Println("\nOperation Results:")
@@ -1457,30 +1675,21 @@ func displayOperationResults(results []RepositoryOperationResult) {
 
 	successCount := 0
 	failureCount := 0
+	var failedRepos []RepositoryOperationResult
 
 	for _, result := range results {
 		if result.Error != nil {
 			failureCount++
-			fmt.Printf("  ✗ %s: FAILED\n", result.Repo.Name)
-			fmt.Printf("    Error: %v\n", result.Error)
-			if len(result.Steps) > 0 {
-				fmt.Printf("    Completed steps: %s\n", strings.Join(result.Steps, ", "))
-			}
-			if result.HadStash && !result.StashPopped {
-				fmt.Printf("    Note: Changes were stashed and not restored due to error\n")
-			}
+			failedRepos = append(failedRepos, result)
+			displayFailedResult(result)
 		} else {
 			successCount++
-			fmt.Printf("  ✓ %s: SUCCESS\n", result.Repo.Name)
-			if len(result.Steps) > 0 {
-				fmt.Printf("    Completed: %s\n", strings.Join(result.Steps, ", "))
-			}
-			if result.HadStash && !result.StashPopped {
-				fmt.Printf("    Note: Changes were stashed and remain in stash (use 'git stash pop' to restore)\n")
-			}
+			displaySuccessfulResult(result)
 		}
 	}
 
 	fmt.Println("───────────────────────────────────────────────────────────────")
 	fmt.Printf("Summary: %d succeeded, %d failed\n", successCount, failureCount)
+
+	displayFailedReposGuidance(failedRepos)
 }
