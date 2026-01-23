@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -363,6 +364,7 @@ fields:
 			_, err := LoadConfig()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "cannot be configured and must use hardcoded validation")
+			assert.Contains(t, err.Error(), fmt.Sprintf("field '%s'", field))
 
 			_ = os.Remove("kira.yml")
 		}

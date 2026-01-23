@@ -279,7 +279,7 @@ func validateNoHardcodedFields(fields map[string]FieldConfig) error {
 	for fieldName := range fields {
 		for _, hardcoded := range HardcodedFields {
 			if fieldName == hardcoded {
-				return fmt.Errorf("fields 'id', 'title', 'status', 'kind', and 'created' cannot be configured and must use hardcoded validation")
+				return fmt.Errorf("field '%s' cannot be configured and must use hardcoded validation", fieldName)
 			}
 		}
 	}
