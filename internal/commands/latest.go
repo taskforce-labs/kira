@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -371,8 +372,10 @@ func findCurrentWorkItem(cfg *config.Config) (string, error) {
 		return "", fmt.Errorf("no work item found in doing folder (%s): start a work item first", doingPath)
 	}
 
+	// If multiple work items exist, use the first one (work item ID is not used for repository discovery)
 	if len(workItemFiles) > 1 {
-		return "", fmt.Errorf("multiple work items found in doing folder (%s): %v. Only one work item allowed at a time", doingPath, workItemFiles)
+		// Sort for deterministic selection
+		sort.Strings(workItemFiles)
 	}
 
 	return filepath.Join(doingPath, workItemFiles[0]), nil
