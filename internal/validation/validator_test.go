@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	yaml "gopkg.in/yaml.v3"
 
 	"kira/internal/config"
 )
@@ -1165,5 +1166,238 @@ func TestIsNumeric(t *testing.T) {
 		assert.False(t, IsNumeric([]int{1, 2, 3}))
 		assert.False(t, IsNumeric(map[string]int{"a": 1}))
 		assert.False(t, IsNumeric(struct{}{}))
+	})
+}
+
+func TestYAMLQuoting(t *testing.T) {
+	t.Run("quotes strings with colons", func(t *testing.T) {
+		var sb strings.Builder
+		err := writeYAMLField(&sb, "priority", "high:urgent")
+		require.NoError(t, err)
+		output := sb.String()
+		assert.Contains(t, output, `priority: "high:urgent"`)
+	})
+
+	t.Run("quotes strings with hash symbols", func(t *testing.T) {
+		var sb strings.Builder
+		err := writeYAMLField(&sb, "note", "# comment")
+		require.NoError(t, err)
+		output := sb.String()
+		assert.Contains(t, output, `note: "# comment"`)
+	})
+
+	t.Run("quotes strings with brackets", func(t *testing.T) {
+		var sb strings.Builder
+		err := writeYAMLField(&sb, "tags", "[urgent, critical]")
+		require.NoError(t, err)
+		output := sb.String()
+		assert.Contains(t, output, `tags: "[urgent, critical]"`)
+	})
+
+	t.Run("quotes strings with curly braces", func(t *testing.T) {
+		var sb strings.Builder
+		err := writeYAMLField(&sb, "config", "{key: value}")
+		require.NoError(t, err)
+		output := sb.String()
+		assert.Contains(t, output, `config: "{key: value}"`)
+	})
+
+	t.Run("quotes strings with quotes", func(t *testing.T) {
+		var sb strings.Builder
+		err := writeYAMLField(&sb, "message", `say "hello"`)
+		require.NoError(t, err)
+		output := sb.String()
+		assert.Contains(t, output, `message: "say \"hello\""`)
+	})
+
+	t.Run("quotes strings with backslashes", func(t *testing.T) {
+		var sb strings.Builder
+		err := writeYAMLField(&sb, "path", `C:\Users\name`)
+		require.NoError(t, err)
+		output := sb.String()
+		assert.Contains(t, output, `path: "C:\\Users\\name"`)
+	})
+
+	t.Run("quotes strings with newlines", func(t *testing.T) {
+		var sb strings.Builder
+		err := writeYAMLField(&sb, "description", "line1\nline2")
+		require.NoError(t, err)
+		output := sb.String()
+		assert.Contains(t, output, `description: "line1\nline2"`)
+	})
+
+	t.Run("quotes strings with leading/trailing spaces", func(t *testing.T) {
+		var sb strings.Builder
+		err := writeYAMLField(&sb, "value", "  spaced  ")
+		require.NoError(t, err)
+		output := sb.String()
+		assert.Contains(t, output, `value: "  spaced  "`)
+	})
+
+	t.Run("quotes empty strings", func(t *testing.T) {
+		var sb strings.Builder
+		err := writeYAMLField(&sb, "empty", "")
+		require.NoError(t, err)
+		output := sb.String()
+		assert.Contains(t, output, `empty: ""`)
+	})
+
+	t.Run("does not quote simple strings", func(t *testing.T) {
+		var sb strings.Builder
+		err := writeYAMLField(&sb, "status", "todo")
+		require.NoError(t, err)
+		output := sb.String()
+		assert.Contains(t, output, "status: todo")
+		assert.NotContains(t, output, `status: "todo"`)
+	})
+
+	t.Run("quotes array items with special characters", func(t *testing.T) {
+		var sb strings.Builder
+		err := writeYAMLField(&sb, "tags", []interface{}{"urgent", "high:priority", "normal"})
+		require.NoError(t, err)
+		output := sb.String()
+		// Simple strings don't need quotes, only ones with special characters
+		assert.Contains(t, output, "urgent")
+		assert.Contains(t, output, `"high:priority"`)
+		assert.Contains(t, output, "normal")
+		assert.NotContains(t, output, `"urgent"`)
+		assert.NotContains(t, output, `"normal"`)
+	})
+
+	t.Run("round-trip preserves special characters", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		// Create a work item with special characters
+		workItemContent := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-15
+priority: high:urgent
+note: # important comment
+tags: [urgent, critical]
+---
+# Test Feature
+`
+
+		filePath := testWorkItemPath
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		// Parse the work item
+		workItem, err := parseWorkItemFile(filePath)
+		require.NoError(t, err)
+
+		// Modify fields to include special characters
+		workItem.Fields["priority"] = "high:urgent"
+		workItem.Fields["note"] = "# important comment"
+		workItem.Fields["tags"] = []interface{}{"urgent", "critical", "high:priority"}
+
+		// Write it back
+		err = writeWorkItemFile(filePath, workItem)
+		require.NoError(t, err)
+
+		// Read and parse again to verify it's valid YAML
+		content, err := os.ReadFile(filePath)
+		require.NoError(t, err)
+
+		// Verify the YAML is valid by parsing it
+		var parsed map[string]interface{}
+		lines := strings.Split(string(content), "\n")
+		var yamlLines []string
+		inYAML := false
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "---" {
+				if !inYAML {
+					inYAML = true
+					continue
+				}
+				break
+			}
+			if inYAML {
+				yamlLines = append(yamlLines, line)
+			}
+		}
+		yamlContent := strings.Join(yamlLines, "\n")
+
+		err = yaml.Unmarshal([]byte(yamlContent), &parsed)
+		require.NoError(t, err, "Generated YAML should be valid and parseable")
+
+		// Verify values are preserved
+		assert.Equal(t, "high:urgent", parsed["priority"])
+		assert.Equal(t, "# important comment", parsed["note"])
+		assert.Contains(t, string(content), `priority: "high:urgent"`)
+		assert.Contains(t, string(content), `note: "# important comment"`)
+	})
+
+	t.Run("round-trip with complex special characters", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		workItemContent := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-15
+---
+# Test Feature
+`
+
+		filePath := testWorkItemPath
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		// Parse the work item
+		workItem, err := parseWorkItemFile(filePath)
+		require.NoError(t, err)
+
+		// Add fields with various special characters
+		workItem.Fields["path"] = `C:\Users\name\file.txt`
+		workItem.Fields["message"] = `say "hello" and 'goodbye'`
+		workItem.Fields["config"] = "{key: value, nested: {a: b}}"
+		workItem.Fields["multiline"] = "line1\nline2\nline3"
+
+		// Write it back
+		err = writeWorkItemFile(filePath, workItem)
+		require.NoError(t, err)
+
+		// Read and verify it parses correctly
+		content, err := os.ReadFile(filePath)
+		require.NoError(t, err)
+
+		// Parse the YAML front matter
+		lines := strings.Split(string(content), "\n")
+		var yamlLines []string
+		inYAML := false
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "---" {
+				if !inYAML {
+					inYAML = true
+					continue
+				}
+				break
+			}
+			if inYAML {
+				yamlLines = append(yamlLines, line)
+			}
+		}
+		yamlContent := strings.Join(yamlLines, "\n")
+
+		var parsed map[string]interface{}
+		err = yaml.Unmarshal([]byte(yamlContent), &parsed)
+		require.NoError(t, err, "Generated YAML should be valid and parseable")
+
+		// Verify all values are preserved correctly
+		assert.Equal(t, `C:\Users\name\file.txt`, parsed["path"])
+		assert.Equal(t, `say "hello" and 'goodbye'`, parsed["message"])
+		assert.Equal(t, "{key: value, nested: {a: b}}", parsed["config"])
+		assert.Equal(t, "line1\nline2\nline3", parsed["multiline"])
 	})
 }
