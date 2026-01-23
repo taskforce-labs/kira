@@ -752,6 +752,167 @@ func TestApplyFieldDefaults(t *testing.T) {
 	})
 }
 
+func TestFixFieldIssues(t *testing.T) {
+	t.Run("marks file as modified when required field with default is applied", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		workItemContent := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+---
+# Test Feature
+`
+
+		filePath := testWorkItemPath
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		// Get original file modification time
+		originalInfo, err := os.Stat(filePath)
+		require.NoError(t, err)
+		originalModTime := originalInfo.ModTime()
+
+		cfg := &config.Config{
+			Fields: map[string]config.FieldConfig{
+				"priority": {
+					Type:          "enum",
+					Required:      true,
+					Default:       "medium",
+					AllowedValues: []string{"low", "medium", "high"},
+				},
+			},
+		}
+
+		// Wait a bit to ensure mod time would change if file is written
+		time.Sleep(10 * time.Millisecond)
+
+		_, err = FixFieldIssues(cfg)
+		require.NoError(t, err)
+
+		// File should have been modified (default was applied)
+		newInfo, err := os.Stat(filePath)
+		require.NoError(t, err)
+		assert.True(t, newInfo.ModTime().After(originalModTime), "File should have been modified when default was applied")
+
+		// Verify the default was applied
+		content, err := os.ReadFile(filePath)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "priority: medium")
+	})
+
+	t.Run("does not mark file as modified when required field is missing but has no default", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		workItemContent := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+---
+# Test Feature
+`
+
+		filePath := testWorkItemPath
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		// Get original file modification time
+		originalInfo, err := os.Stat(filePath)
+		require.NoError(t, err)
+		originalModTime := originalInfo.ModTime()
+
+		cfg := &config.Config{
+			Fields: map[string]config.FieldConfig{
+				"assigned": {
+					Type:     "email",
+					Required: true,
+					// No default configured
+				},
+			},
+		}
+
+		// Wait a bit to ensure mod time would change if file is written
+		time.Sleep(10 * time.Millisecond)
+
+		_, err = FixFieldIssues(cfg)
+		require.NoError(t, err)
+
+		// File should NOT have been modified (no default was applied)
+		newInfo, err := os.Stat(filePath)
+		require.NoError(t, err)
+		assert.Equal(t, originalModTime, newInfo.ModTime(), "File should NOT have been modified when required field has no default")
+
+		// Verify the field was not added
+		content, err := os.ReadFile(filePath)
+		require.NoError(t, err)
+		assert.NotContains(t, string(content), "assigned:")
+	})
+
+	t.Run("marks file as modified when field value is fixed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		workItemContent := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+priority: MEDIUM
+---
+# Test Feature
+`
+
+		filePath := testWorkItemPath
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		// Get original file modification time
+		originalInfo, err := os.Stat(filePath)
+		require.NoError(t, err)
+		originalModTime := originalInfo.ModTime()
+
+		cfg := &config.Config{
+			Fields: map[string]config.FieldConfig{
+				"priority": {
+					Type:          "enum",
+					AllowedValues: []string{"low", "medium", "high"},
+					CaseSensitive: false, // Case-insensitive, so MEDIUM should be fixed to medium
+				},
+			},
+		}
+
+		// Wait a bit to ensure mod time would change if file is written
+		time.Sleep(10 * time.Millisecond)
+
+		_, err = FixFieldIssues(cfg)
+		require.NoError(t, err)
+
+		// File should have been modified (value was fixed)
+		newInfo, err := os.Stat(filePath)
+		require.NoError(t, err)
+		assert.True(t, newInfo.ModTime().After(originalModTime), "File should have been modified when field value was fixed")
+
+		// Verify the value was fixed
+		content, err := os.ReadFile(filePath)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "priority: medium")
+		assert.NotContains(t, string(content), "priority: MEDIUM")
+	})
+}
+
 func TestFixHardcodedDateFormats(t *testing.T) {
 	t.Run("fixes ISO 8601 timestamp format", func(t *testing.T) {
 		tmpDir := t.TempDir()
