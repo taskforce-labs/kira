@@ -1,7 +1,7 @@
 ---
 id: 018
 title: field-config
-status: doing
+status: review
 kind: prd
 assigned:
 estimate: 0
