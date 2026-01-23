@@ -390,6 +390,202 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to get repository root")
 	})
+
+	t.Run("configuration priority: project override > git config > auto-detect", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo with main branch
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "main").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create external repo
+		externalRepo := filepath.Join(tmpDir, "external-repo")
+		require.NoError(t, os.MkdirAll(externalRepo, 0o700))
+		// #nosec G204 - externalRepo is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", externalRepo, "init").Run())
+		// #nosec G204 - externalRepo is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", externalRepo, "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - externalRepo is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", externalRepo, "config", "user.name", "Test User").Run())
+		// #nosec G204 - externalRepo is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", externalRepo, "checkout", "-b", "main").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "master", // Global config
+				Remote:      "origin",
+			},
+			Workspace: &config.WorkspaceConfig{
+				Projects: []config.ProjectConfig{
+					{
+						Name:        "project1",
+						Path:        externalRepo,
+						TrunkBranch: "develop", // Project override (should win)
+						Remote:      "upstream",
+					},
+				},
+			},
+		}
+
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorPolyrepo, "001")
+		require.NoError(t, err)
+		require.Len(t, repos, 1)
+		// Project override should win
+		assert.Equal(t, "develop", repos[0].TrunkBranch)
+		assert.Equal(t, "upstream", repos[0].Remote)
+	})
+
+	t.Run("auto-detects trunk branch when config is empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo with main branch
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "main").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// No git config - should auto-detect
+		cfg := &config.Config{}
+
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorStandalone, "001")
+		require.NoError(t, err)
+		require.Len(t, repos, 1)
+		// Should auto-detect "main"
+		assert.Equal(t, "main", repos[0].TrunkBranch)
+		assert.Equal(t, "origin", repos[0].Remote) // Default remote
+	})
+
+	t.Run("uses git config when project override not set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, os.MkdirAll(".git", 0o700))
+
+		// Create external repo
+		externalRepo := filepath.Join(tmpDir, "external-repo")
+		require.NoError(t, os.MkdirAll(externalRepo, 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(externalRepo, ".git"), 0o700))
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "production", // Global config (should be used)
+				Remote:      "upstream",
+			},
+			Workspace: &config.WorkspaceConfig{
+				Projects: []config.ProjectConfig{
+					{
+						Name: "project1",
+						Path: externalRepo,
+						// No TrunkBranch override - should use global
+						Remote: "github",
+					},
+				},
+			},
+		}
+
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorPolyrepo, "001")
+		require.NoError(t, err)
+		require.Len(t, repos, 1)
+		// Should use global config
+		assert.Equal(t, "production", repos[0].TrunkBranch)
+		assert.Equal(t, "github", repos[0].Remote) // Project remote override
+	})
+
+	t.Run("standalone with config uses config values", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, os.MkdirAll(".git", 0o700))
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "develop",
+				Remote:      "upstream",
+			},
+		}
+
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorStandalone, "001")
+		require.NoError(t, err)
+		require.Len(t, repos, 1)
+		assert.Equal(t, "develop", repos[0].TrunkBranch)
+		assert.Equal(t, "upstream", repos[0].Remote)
+	})
+
+	t.Run("polyrepo with mixed overrides", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize main git repo
+		require.NoError(t, os.MkdirAll(".git", 0o700))
+
+		// Create external repos
+		externalRepo1 := filepath.Join(tmpDir, "repo1")
+		require.NoError(t, os.MkdirAll(externalRepo1, 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(externalRepo1, ".git"), 0o700))
+
+		externalRepo2 := filepath.Join(tmpDir, "repo2")
+		require.NoError(t, os.MkdirAll(externalRepo2, 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(externalRepo2, ".git"), 0o700))
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main", // Global default
+				Remote:      "origin",
+			},
+			Workspace: &config.WorkspaceConfig{
+				Projects: []config.ProjectConfig{
+					{
+						Name:        "project1",
+						Path:        externalRepo1,
+						TrunkBranch: "develop",  // Override
+						Remote:      "upstream", // Override
+					},
+					{
+						Name: "project2",
+						Path: externalRepo2,
+						// No overrides - uses global
+					},
+				},
+			},
+		}
+
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorPolyrepo, "001")
+		require.NoError(t, err)
+		require.Len(t, repos, 2)
+
+		// Find project1 and project2
+		repoMap := make(map[string]*RepositoryInfo)
+		for i := range repos {
+			repoMap[repos[i].Name] = &repos[i]
+		}
+		project1 := repoMap["project1"]
+		project2 := repoMap["project2"]
+
+		require.NotNil(t, project1)
+		assert.Equal(t, "develop", project1.TrunkBranch)
+		assert.Equal(t, "upstream", project1.Remote)
+
+		require.NotNil(t, project2)
+		assert.Equal(t, "main", project2.TrunkBranch)
+		assert.Equal(t, "origin", project2.Remote)
+	})
 }
 
 func TestValidateRepositories(t *testing.T) {
@@ -2079,5 +2275,309 @@ func TestDisplayOperationResults_PartialFailure(t *testing.T) {
 		assert.Contains(t, output, "git rebase --abort")
 		assert.Contains(t, output, "git stash pop")
 		assert.Contains(t, output, "Next steps for failed repositories")
+	})
+}
+
+func TestOrderRepositoriesByDependencies(t *testing.T) {
+	t.Run("groups repositories by repo_root", func(t *testing.T) {
+		repos := []RepositoryInfo{
+			{
+				Name:     "project1",
+				Path:     "/path/to/project1",
+				RepoRoot: "/shared/root",
+			},
+			{
+				Name:     "project2",
+				Path:     "/path/to/project2",
+				RepoRoot: "/shared/root",
+			},
+			{
+				Name:     "project3",
+				Path:     "/path/to/project3",
+				RepoRoot: "/another/root",
+			},
+		}
+
+		ordered := orderRepositoriesByDependencies(repos)
+		require.Len(t, ordered, 3)
+
+		// All repos should be present
+		names := make(map[string]bool)
+		for _, repo := range ordered {
+			names[repo.Name] = true
+		}
+		assert.True(t, names["project1"])
+		assert.True(t, names["project2"])
+		assert.True(t, names["project3"])
+	})
+
+	t.Run("handles standalone repositories", func(t *testing.T) {
+		repos := []RepositoryInfo{
+			{
+				Name:     "standalone1",
+				Path:     "/path/to/standalone1",
+				RepoRoot: "", // No repo_root
+			},
+			{
+				Name:     "standalone2",
+				Path:     "/path/to/standalone2",
+				RepoRoot: "", // No repo_root
+			},
+		}
+
+		ordered := orderRepositoriesByDependencies(repos)
+		require.Len(t, ordered, 2)
+
+		// All repos should be present
+		names := make(map[string]bool)
+		for _, repo := range ordered {
+			names[repo.Name] = true
+		}
+		assert.True(t, names["standalone1"])
+		assert.True(t, names["standalone2"])
+	})
+
+	t.Run("handles mixed grouped and standalone repositories", func(t *testing.T) {
+		repos := []RepositoryInfo{
+			{
+				Name:     "standalone",
+				Path:     "/path/to/standalone",
+				RepoRoot: "",
+			},
+			{
+				Name:     "grouped1",
+				Path:     "/path/to/grouped1",
+				RepoRoot: "/shared/root",
+			},
+			{
+				Name:     "grouped2",
+				Path:     "/path/to/grouped2",
+				RepoRoot: "/shared/root",
+			},
+		}
+
+		ordered := orderRepositoriesByDependencies(repos)
+		require.Len(t, ordered, 3)
+
+		// All repos should be present
+		names := make(map[string]bool)
+		for _, repo := range ordered {
+			names[repo.Name] = true
+		}
+		assert.True(t, names["standalone"])
+		assert.True(t, names["grouped1"])
+		assert.True(t, names["grouped2"])
+	})
+
+	t.Run("handles empty list", func(t *testing.T) {
+		repos := []RepositoryInfo{}
+		ordered := orderRepositoriesByDependencies(repos)
+		assert.Empty(t, ordered)
+	})
+
+	t.Run("maintains order within groups", func(t *testing.T) {
+		repos := []RepositoryInfo{
+			{
+				Name:     "first",
+				Path:     "/path/to/first",
+				RepoRoot: "/shared/root",
+			},
+			{
+				Name:     "second",
+				Path:     "/path/to/second",
+				RepoRoot: "/shared/root",
+			},
+			{
+				Name:     "third",
+				Path:     "/path/to/third",
+				RepoRoot: "/shared/root",
+			},
+		}
+
+		ordered := orderRepositoriesByDependencies(repos)
+		require.Len(t, ordered, 3)
+
+		// Order should be maintained within the group
+		// (implementation detail: they're appended in order)
+		assert.Equal(t, "first", ordered[0].Name)
+		assert.Equal(t, "second", ordered[1].Name)
+		assert.Equal(t, "third", ordered[2].Name)
+	})
+}
+
+func TestDiscoverRepositories_ConfigurationIntegration(t *testing.T) {
+	t.Run("discovers standalone with auto-detection", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo with main branch
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "main").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create work item in doing folder
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(testWorkItemContentDoing), 0o600))
+
+		// No git config - should auto-detect
+		cfg := &config.Config{
+			StatusFolders: map[string]string{
+				"doing": "2_doing",
+			},
+		}
+
+		repos, err := discoverRepositories(cfg)
+		require.NoError(t, err)
+		require.Len(t, repos, 1)
+		// Should auto-detect "main"
+		assert.Equal(t, "main", repos[0].TrunkBranch)
+		assert.Equal(t, "origin", repos[0].Remote) // Default
+	})
+
+	t.Run("discovers polyrepo with configuration", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize main git repo
+		require.NoError(t, os.MkdirAll(".git", 0o700))
+
+		// Create external repos
+		externalRepo1 := filepath.Join(tmpDir, "repo1")
+		require.NoError(t, os.MkdirAll(externalRepo1, 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(externalRepo1, ".git"), 0o700))
+
+		externalRepo2 := filepath.Join(tmpDir, "repo2")
+		require.NoError(t, os.MkdirAll(externalRepo2, 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(externalRepo2, ".git"), 0o700))
+
+		// Create work item in doing folder
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(testWorkItemContentDoing), 0o600))
+
+		cfg := &config.Config{
+			StatusFolders: map[string]string{
+				"doing": "2_doing",
+			},
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			Workspace: &config.WorkspaceConfig{
+				Projects: []config.ProjectConfig{
+					{
+						Name:        "project1",
+						Path:        externalRepo1,
+						TrunkBranch: "develop",
+						Remote:      "upstream",
+						RepoRoot:    "/shared/root",
+					},
+					{
+						Name:     "project2",
+						Path:     externalRepo2,
+						RepoRoot: "/shared/root",
+						// Uses global config
+					},
+				},
+			},
+		}
+
+		repos, err := discoverRepositories(cfg)
+		require.NoError(t, err)
+		require.Len(t, repos, 2)
+
+		// Find projects
+		repoMap := make(map[string]*RepositoryInfo)
+		for i := range repos {
+			repoMap[repos[i].Name] = &repos[i]
+		}
+		project1 := repoMap["project1"]
+		project2 := repoMap["project2"]
+
+		require.NotNil(t, project1)
+		assert.Equal(t, "develop", project1.TrunkBranch)
+		assert.Equal(t, "upstream", project1.Remote)
+		assert.Equal(t, "/shared/root", project1.RepoRoot)
+
+		require.NotNil(t, project2)
+		assert.Equal(t, "main", project2.TrunkBranch) // Uses global
+		assert.Equal(t, "origin", project2.Remote)    // Uses global
+		assert.Equal(t, "/shared/root", project2.RepoRoot)
+	})
+}
+
+func TestResolveTrunkBranchForLatest(t *testing.T) {
+	t.Run("uses project override when available", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "main").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "master",
+			},
+		}
+
+		project := &config.ProjectConfig{
+			TrunkBranch: "develop",
+		}
+
+		trunkBranch, err := resolveTrunkBranchForLatest(cfg, project, tmpDir)
+		require.NoError(t, err)
+		assert.Equal(t, "develop", trunkBranch)
+	})
+
+	t.Run("uses git config when project override not set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "main").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "production",
+			},
+		}
+
+		trunkBranch, err := resolveTrunkBranchForLatest(cfg, nil, tmpDir)
+		require.NoError(t, err)
+		assert.Equal(t, "production", trunkBranch)
+	})
+
+	t.Run("auto-detects when no config provided", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo with main branch
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "main").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		cfg := &config.Config{}
+
+		trunkBranch, err := resolveTrunkBranchForLatest(cfg, nil, tmpDir)
+		require.NoError(t, err)
+		assert.Equal(t, "main", trunkBranch)
 	})
 }

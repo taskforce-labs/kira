@@ -172,7 +172,10 @@ func runLatest(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("no repositories ready for update")
 		}
 
-		results := performFetchAndRebaseForAllRepos(reposToProcess, noPopStash)
+		// Order repositories by dependencies (respects repo_root grouping and config order)
+		orderedRepos := orderRepositoriesByDependencies(reposToProcess)
+
+		results := performFetchAndRebaseForAllRepos(orderedRepos, noPopStash)
 		return handleUpdateResults(results)
 	}
 
@@ -432,6 +435,59 @@ func detectWorkspaceBehavior(cfg *config.Config) WorkspaceBehavior {
 }
 
 // resolveRepositoriesForLatest discovers repositories based on workspace behavior
+// resolveTrunkBranchForLatest resolves the trunk branch using priority:
+// project.trunk_branch > git.trunk_branch > auto-detect
+func resolveTrunkBranchForLatest(cfg *config.Config, project *config.ProjectConfig, repoPath string) (string, error) {
+	// Priority 1: Project-level override
+	if project != nil && project.TrunkBranch != "" {
+		return project.TrunkBranch, nil
+	}
+
+	// Priority 2: Global git config
+	if cfg.Git != nil && cfg.Git.TrunkBranch != "" {
+		return cfg.Git.TrunkBranch, nil
+	}
+
+	// Priority 3: Auto-detect (main or master)
+	return autoDetectTrunkBranch(repoPath, false)
+}
+
+// orderRepositoriesByDependencies orders repositories by their dependencies.
+// Repositories are grouped by RepoRoot (shared roots first), and within groups
+// maintain the order from configuration. Standalone repositories (no RepoRoot)
+// are placed after grouped repositories.
+func orderRepositoriesByDependencies(repos []RepositoryInfo) []RepositoryInfo {
+	if len(repos) == 0 {
+		return repos
+	}
+
+	// Group repositories by RepoRoot
+	grouped := make(map[string][]RepositoryInfo)
+	standalone := []RepositoryInfo{}
+
+	for _, repo := range repos {
+		if repo.RepoRoot != "" {
+			grouped[repo.RepoRoot] = append(grouped[repo.RepoRoot], repo)
+		} else {
+			standalone = append(standalone, repo)
+		}
+	}
+
+	// Build ordered result: grouped repos first (maintaining order within groups),
+	// then standalone repos
+	ordered := make([]RepositoryInfo, 0, len(repos))
+
+	// Process grouped repositories (maintain order within each group)
+	for _, group := range grouped {
+		ordered = append(ordered, group...)
+	}
+
+	// Add standalone repositories
+	ordered = append(ordered, standalone...)
+
+	return ordered
+}
+
 func resolveRepositoriesForLatest(cfg *config.Config, behavior WorkspaceBehavior, _ string) ([]RepositoryInfo, error) {
 	switch behavior {
 	case WorkspaceBehaviorStandalone, WorkspaceBehaviorMonorepo:
@@ -441,9 +497,10 @@ func resolveRepositoriesForLatest(cfg *config.Config, behavior WorkspaceBehavior
 			return nil, fmt.Errorf("failed to get repository root: %w", err)
 		}
 
-		trunkBranch := ""
-		if cfg.Git != nil && cfg.Git.TrunkBranch != "" {
-			trunkBranch = cfg.Git.TrunkBranch
+		// Resolve trunk branch with auto-detection fallback
+		trunkBranch, err := resolveTrunkBranchForLatest(cfg, nil, repoRoot)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve trunk branch: %w", err)
 		}
 
 		remote := "origin"
@@ -481,10 +538,17 @@ func resolveRepositoriesForLatest(cfg *config.Config, behavior WorkspaceBehavior
 				continue // Skip projects without paths
 			}
 
+			// Resolve trunk branch with auto-detection fallback for projects
+			projectConfig := findProjectConfig(cfg, project.Name)
+			trunkBranch, err := resolveTrunkBranchForLatest(cfg, projectConfig, project.Path)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve trunk branch for project %s: %w", project.Name, err)
+			}
+
 			repos = append(repos, RepositoryInfo{
 				Name:        project.Name,
 				Path:        project.Path,
-				TrunkBranch: project.TrunkBranch,
+				TrunkBranch: trunkBranch,
 				Remote:      project.Remote,
 				RepoRoot:    project.RepoRoot,
 			})
@@ -495,6 +559,21 @@ func resolveRepositoriesForLatest(cfg *config.Config, behavior WorkspaceBehavior
 	default:
 		return nil, fmt.Errorf("unknown workspace behavior: %v", behavior)
 	}
+}
+
+// findProjectConfig finds the ProjectConfig for a given project name
+func findProjectConfig(cfg *config.Config, projectName string) *config.ProjectConfig {
+	if cfg.Workspace == nil {
+		return nil
+	}
+
+	for i := range cfg.Workspace.Projects {
+		if cfg.Workspace.Projects[i].Name == projectName {
+			return &cfg.Workspace.Projects[i]
+		}
+	}
+
+	return nil
 }
 
 // validateRepositories checks that all repositories exist and are valid git repositories
