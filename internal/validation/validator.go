@@ -1516,12 +1516,12 @@ func extractBodyLines(lines []string) []string {
 func writeYAMLFrontMatter(sb *strings.Builder, workItem *WorkItem) {
 	fmt.Fprintf(sb, "%s\n", yamlSeparator)
 
-	// Write hardcoded fields first
-	fmt.Fprintf(sb, "id: %s\n", workItem.ID)
-	fmt.Fprintf(sb, "title: %s\n", workItem.Title)
-	fmt.Fprintf(sb, "status: %s\n", workItem.Status)
-	fmt.Fprintf(sb, "kind: %s\n", workItem.Kind)
-	fmt.Fprintf(sb, "created: %s\n", workItem.Created)
+	// Write hardcoded fields first (quote when values contain special YAML characters)
+	fmt.Fprintf(sb, "id: %s\n", yamlFormatStringValue(workItem.ID))
+	fmt.Fprintf(sb, "title: %s\n", yamlFormatStringValue(workItem.Title))
+	fmt.Fprintf(sb, "status: %s\n", yamlFormatStringValue(workItem.Status))
+	fmt.Fprintf(sb, "kind: %s\n", yamlFormatStringValue(workItem.Kind))
+	fmt.Fprintf(sb, "created: %s\n", yamlFormatStringValue(workItem.Created))
 
 	// Write other fields
 	for key, value := range workItem.Fields {
@@ -1546,11 +1546,66 @@ func writeYAMLBody(sb *strings.Builder, bodyLines []string) {
 	}
 }
 
+// yamlSpecialChars is the set of characters that require a scalar to be double-quoted in YAML.
+const yamlSpecialChars = ":#[]{},\"'\\\n\r\t&*!|>%"
+
+// needsYAMLQuoting returns true if the string must be double-quoted for valid YAML output.
+func needsYAMLQuoting(s string) bool {
+	if s == "" || strings.TrimSpace(s) != s {
+		return true
+	}
+	return strings.ContainsAny(s, yamlSpecialChars)
+}
+
+// yamlQuotedString returns a double-quoted YAML scalar with proper escaping.
+func yamlQuotedString(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// yamlFormatStringValue returns the YAML scalar representation of a string (quoted when necessary).
+func yamlFormatStringValue(s string) string {
+	if needsYAMLQuoting(s) {
+		return yamlQuotedString(s)
+	}
+	return s
+}
+
+// yamlFormatArrayItem returns the YAML scalar representation of an array element for flow style.
+func yamlFormatArrayItem(item interface{}) string {
+	switch v := item.(type) {
+	case string:
+		return yamlFormatStringValue(v)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
+		return fmt.Sprintf("%v", v)
+	default:
+		return yamlFormatStringValue(fmt.Sprintf("%v", v))
+	}
+}
+
 // writeYAMLField writes a YAML field to a string builder.
 func writeYAMLField(sb *strings.Builder, key string, value interface{}) error {
 	switch v := value.(type) {
 	case string:
-		fmt.Fprintf(sb, "%s: %s\n", key, v)
+		fmt.Fprintf(sb, "%s: %s\n", key, yamlFormatStringValue(v))
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
 		fmt.Fprintf(sb, "%s: %v\n", key, v)
 	case bool:
@@ -1561,11 +1616,11 @@ func writeYAMLField(sb *strings.Builder, key string, value interface{}) error {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			fmt.Fprintf(sb, "%v", item)
+			sb.WriteString(yamlFormatArrayItem(item))
 		}
 		sb.WriteString("]\n")
 	case time.Time:
-		fmt.Fprintf(sb, "%s: %s\n", key, v.Format(dateFormatDefault))
+		fmt.Fprintf(sb, "%s: %s\n", key, yamlFormatStringValue(v.Format(dateFormatDefault)))
 	default:
 		// For complex types, use YAML marshaling
 		yamlData, err := yaml.Marshal(map[string]interface{}{key: value})
