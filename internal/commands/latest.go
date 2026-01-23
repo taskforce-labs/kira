@@ -32,8 +32,9 @@ The command can be called repeatedly to work through conflicts progressively.
 
 If uncommitted changes are detected, they will be automatically stashed before rebase
 and popped after successful rebase (unless --no-pop-stash is specified).`,
-	Args: cobra.NoArgs,
-	RunE: runLatest,
+	Args:         cobra.NoArgs,
+	RunE:         runLatest,
+	SilenceUsage: true, // Don't show usage on errors - error messages are clear enough
 }
 
 func init() {
