@@ -1458,3 +1458,67 @@ created: 2024-01-15
 		assert.Equal(t, "line1\nline2\nline3", parsed["multiline"])
 	})
 }
+
+func TestWriteYAMLFieldErrorPropagation(t *testing.T) {
+	t.Run("writeYAMLField returns error for unmarshalable types", func(t *testing.T) {
+		var sb strings.Builder
+		// Use a channel type which cannot be marshaled to YAML
+		ch := make(chan int)
+		err := writeYAMLField(&sb, "test_field", ch)
+		require.Error(t, err, "writeYAMLField should return error for unmarshalable types")
+		assert.Contains(t, err.Error(), "yaml:", "error should mention YAML marshaling")
+	})
+
+	t.Run("writeYAMLFrontMatter propagates error from writeYAMLField", func(t *testing.T) {
+		var sb strings.Builder
+		workItem := &WorkItem{
+			ID:      "001",
+			Title:   "Test",
+			Status:  "todo",
+			Kind:    "prd",
+			Created: "2024-01-01",
+			Fields: map[string]interface{}{
+				"unmarshalable": make(chan int), // Channel cannot be marshaled
+			},
+		}
+
+		err := writeYAMLFrontMatter(&sb, workItem)
+		require.Error(t, err, "writeYAMLFrontMatter should return error when writeYAMLField fails")
+		assert.Contains(t, err.Error(), "failed to write field 'unmarshalable'", "error should include field name")
+		assert.Contains(t, err.Error(), "yaml:", "error should wrap the original YAML error")
+	})
+
+	t.Run("writeWorkItemFile propagates error from writeYAMLFrontMatter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		// Create a work item file
+		filePath := testWorkItemPath
+		require.NoError(t, os.WriteFile(filePath, []byte(minimalWorkItemContent), 0o600))
+
+		// Parse the work item
+		workItem, err := parseWorkItemFile(filePath)
+		require.NoError(t, err)
+
+		// Add an unmarshalable field
+		workItem.Fields["unmarshalable"] = make(chan int)
+
+		// Attempt to write it back - should fail
+		err = writeWorkItemFile(filePath, workItem)
+		require.Error(t, err, "writeWorkItemFile should return error when writeYAMLFrontMatter fails")
+		assert.Contains(t, err.Error(), "failed to write YAML front matter", "error should mention YAML front matter")
+		assert.Contains(t, err.Error(), "failed to write field 'unmarshalable'", "error should include field name in chain")
+	})
+
+	t.Run("writeYAMLField handles function types", func(t *testing.T) {
+		var sb strings.Builder
+		// Use a function type which cannot be marshaled to YAML
+		testFunc := func() {}
+		err := writeYAMLField(&sb, "test_field", testFunc)
+		require.Error(t, err, "writeYAMLField should return error for function types")
+		assert.Contains(t, err.Error(), "yaml:", "error should mention YAML marshaling")
+	})
+}

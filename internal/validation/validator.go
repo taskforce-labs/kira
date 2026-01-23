@@ -1491,7 +1491,9 @@ func writeWorkItemFile(filePath string, workItem *WorkItem) error {
 
 	// Rebuild YAML front matter
 	var newContent strings.Builder
-	writeYAMLFrontMatter(&newContent, workItem)
+	if err := writeYAMLFrontMatter(&newContent, workItem); err != nil {
+		return fmt.Errorf("failed to write YAML front matter: %w", err)
+	}
 	writeYAMLBody(&newContent, bodyLines)
 
 	return os.WriteFile(filePath, []byte(newContent.String()), 0o600)
@@ -1525,7 +1527,7 @@ func extractBodyLines(lines []string) []string {
 	return bodyLines
 }
 
-func writeYAMLFrontMatter(sb *strings.Builder, workItem *WorkItem) {
+func writeYAMLFrontMatter(sb *strings.Builder, workItem *WorkItem) error {
 	fmt.Fprintf(sb, "%s\n", yamlSeparator)
 
 	// Write hardcoded fields first (quote when values contain special YAML characters)
@@ -1541,12 +1543,12 @@ func writeYAMLFrontMatter(sb *strings.Builder, workItem *WorkItem) {
 			continue
 		}
 		if err := writeYAMLField(sb, key, value); err != nil {
-			// Error handling is minimal here as this is called from writeWorkItemFile
-			_ = err
+			return fmt.Errorf("failed to write field '%s': %w", key, err)
 		}
 	}
 
 	fmt.Fprintf(sb, "%s\n", yamlSeparator)
+	return nil
 }
 
 func writeYAMLBody(sb *strings.Builder, bodyLines []string) {
@@ -1635,7 +1637,17 @@ func writeYAMLField(sb *strings.Builder, key string, value interface{}) error {
 		fmt.Fprintf(sb, "%s: %s\n", key, yamlFormatStringValue(v.Format(dateFormatDefault)))
 	default:
 		// For complex types, use YAML marshaling
-		yamlData, err := yaml.Marshal(map[string]interface{}{key: value})
+		// Use a recover to handle panics from yaml.Marshal for unmarshalable types
+		var yamlData []byte
+		var err error
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("yaml: cannot marshal type: %v", r)
+				}
+			}()
+			yamlData, err = yaml.Marshal(map[string]interface{}{key: value})
+		}()
 		if err != nil {
 			return err
 		}
