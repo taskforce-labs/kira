@@ -309,3 +309,196 @@ ide:
 		assert.Equal(t, []string{"--new-window", "--wait"}, config.IDE.Args)
 	})
 }
+
+func TestFieldConfig(t *testing.T) {
+	t.Run("loads field configuration", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  assigned:
+    type: email
+    required: false
+    description: "Assigned user email address"
+  priority:
+    type: enum
+    required: false
+    allowed_values:
+      - low
+      - medium
+      - high
+    default: medium
+    description: "Priority level"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Fields)
+		assert.Len(t, config.Fields, 2)
+
+		assignedField, exists := config.Fields["assigned"]
+		require.True(t, exists)
+		assert.Equal(t, "email", assignedField.Type)
+		assert.False(t, assignedField.Required)
+		assert.Equal(t, "Assigned user email address", assignedField.Description)
+
+		priorityField, exists := config.Fields["priority"]
+		require.True(t, exists)
+		assert.Equal(t, "enum", priorityField.Type)
+		assert.Equal(t, []string{"low", "medium", "high"}, priorityField.AllowedValues)
+		assert.Equal(t, "medium", priorityField.Default)
+	})
+
+	t.Run("rejects configuration of hardcoded fields", func(t *testing.T) {
+		hardcodedFields := []string{"id", "title", "status", "kind", "created"}
+		for _, field := range hardcodedFields {
+			testConfig := `version: "1.0"
+fields:
+  ` + field + `:
+    type: string
+    required: false
+`
+			require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+
+			_, err := LoadConfig()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "cannot be configured and must use hardcoded validation")
+
+			_ = os.Remove("kira.yml")
+		}
+	})
+
+	t.Run("rejects invalid field type", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  custom_field:
+    type: invalid_type
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid type")
+		assert.Contains(t, err.Error(), "string, date, email, url, number, array, enum")
+	})
+
+	t.Run("rejects enum type without allowed_values", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  priority:
+    type: enum
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "enum type requires allowed_values")
+	})
+
+	t.Run("rejects array type without item_type", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  tags:
+    type: array
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "array type requires item_type")
+	})
+
+	t.Run("rejects invalid regex format", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  epic:
+    type: string
+    format: "[invalid regex"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid regex format")
+	})
+
+	t.Run("validates min/max length constraints", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  description:
+    type: string
+    min_length: 10
+    max_length: 5
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "min_length")
+		assert.Contains(t, err.Error(), "cannot be greater than max_length")
+	})
+
+	t.Run("validates min/max value constraints", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  estimate:
+    type: number
+    min: 10
+    max: 5
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "min")
+		assert.Contains(t, err.Error(), "cannot be greater than max")
+	})
+
+	t.Run("accepts valid field configuration", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  assigned:
+    type: email
+    required: false
+    description: "Assigned user email"
+  due:
+    type: date
+    required: false
+    format: "2006-01-02"
+    min_date: "today"
+  priority:
+    type: enum
+    required: false
+    allowed_values: [low, medium, high, critical]
+    default: medium
+    case_sensitive: false
+  tags:
+    type: array
+    required: false
+    item_type: string
+    unique: true
+  estimate:
+    type: number
+    required: false
+    min: 0
+    max: 100
+  url:
+    type: url
+    required: false
+    schemes: [http, https]
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Fields)
+		assert.Len(t, config.Fields, 6)
+	})
+}

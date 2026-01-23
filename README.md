@@ -177,15 +177,45 @@ kira idea "Add dark mode support"
 Scans for issues in work items.
 
 ```bash
-kira lint
+kira lint                    # Standard validation
+kira lint --strict          # Enable strict mode (flag unknown fields)
 ```
+
+Behavior:
+- Validates all work items for format, required fields, and field configuration compliance
+- Groups errors by category (Field Validation, Unknown Fields, Workflow, Duplicate IDs, Parse, Other)
+- Shows error counts for each category
+- With `--strict`: Flags fields not defined in configuration
 
 ### `kira doctor`
-Checks for and fixes duplicate work item IDs.
+Validates work items, automatically fixes issues where possible, and reports issues requiring manual attention.
 
 ```bash
-kira doctor
+kira doctor                  # Standard mode
+kira doctor --strict        # Enable strict mode (flag unknown fields)
 ```
+
+Behavior:
+1. **Validates all work items** (same as `kira lint`) and displays all issues grouped by category
+2. **Automatically fixes**:
+   - **Duplicate IDs**: Assigns new sequential IDs to duplicate work items
+   - **Date format issues**: Converts invalid date formats (e.g., ISO 8601 timestamps) to `YYYY-MM-DD` format for the `created` field
+   - **Field validation issues**: Fixes common field problems:
+     - Date format conversions
+     - Enum value case corrections (when case-insensitive)
+     - Email trimming and lowercasing
+   - **Missing required fields**: Adds missing required fields with default values
+3. **Reports unfixable issues** that require manual intervention:
+   - Workflow violations (e.g., multiple items in doing folder)
+   - Invalid status values
+   - Invalid ID formats
+   - Missing required fields without defaults
+   - Unknown fields (in strict mode)
+   - Parse errors
+
+**Note**: The `doctor` command preserves all markdown body content when fixing issues. Only the YAML front matter is modified.
+
+With `--strict`: Also flags fields not defined in configuration as unfixable issues.
 
 ### `kira release [status|path] [subfolder]`
 Generates release notes and archives completed work items.
@@ -292,6 +322,7 @@ validation:
   required_fields: ["id", "title", "status", "kind", "created"]
   id_format: "^\\d{3}$"
   status_values: ["backlog", "todo", "doing", "review", "done", "released", "abandoned", "archived"]
+  strict: false  # If true, flag fields not defined in configuration
 
 commit:
   default_message: "Update work items"
@@ -299,6 +330,132 @@ commit:
 release:
   releases_file: "RELEASES.md"
   archive_date_format: "2006-01-02"
+
+# Field Configuration (optional)
+# Define custom fields with validation rules, defaults, and metadata
+fields:
+  assigned:
+    type: email
+    required: false
+    description: "Assigned user email address"
+    default: ""
+
+  priority:
+    type: enum
+    required: false
+    allowed_values: [low, medium, high, critical]
+    default: medium
+    description: "Priority level"
+    case_sensitive: false
+
+  due:
+    type: date
+    required: false
+    format: "2006-01-02"
+    min_date: "today"  # Relative date: must be today or future
+    description: "Due date"
+
+  tags:
+    type: array
+    required: false
+    item_type: string
+    unique: true
+    description: "Tags for categorization"
+
+  estimate:
+    type: number
+    required: false
+    min: 0
+    max: 100
+    description: "Estimate in days"
+
+  epic:
+    type: string
+    required: false
+    format: "^[A-Z]+-\\d+$"  # Regex pattern, e.g., EPIC-001
+    description: "Epic identifier"
+
+  url:
+    type: url
+    required: false
+    schemes: [http, https]
+    description: "Related URL"
+```
+
+## Field Configuration
+
+Kira supports custom field definitions with validation rules, default values, and metadata. This allows teams to customize work items to match their workflow needs.
+
+### Field Types
+
+- **string**: Plain text with optional regex format validation
+- **date**: Date field with format validation and min/max date constraints
+- **email**: Email address validation
+- **url**: URL validation with optional scheme restrictions
+- **number**: Numeric values with min/max constraints
+- **array**: Arrays of values with item type validation and uniqueness constraints
+- **enum**: Predefined list of allowed values with optional case sensitivity
+
+### Field Configuration Options
+
+- **type**: Field data type (required)
+- **required**: Whether the field is required (default: false)
+- **default**: Default value for the field
+- **format**: Regex pattern for strings or date format for dates
+- **allowed_values**: List of allowed values for enum types
+- **description**: Human-readable description
+- **min/max**: Numeric or date range constraints
+- **min_length/max_length**: String or array length constraints
+- **item_type**: Type of array items (string, number, enum)
+- **unique**: Whether array values must be unique
+- **schemes**: Allowed URL schemes (http, https, etc.)
+- **case_sensitive**: Whether enum values are case-sensitive (default: true)
+
+### Strict Mode
+
+Strict mode flags fields in work items that are not defined in the configuration. This helps maintain consistency and catch typos.
+
+Enable strict mode:
+- **In configuration**: Set `validation.strict: true` in `kira.yml`
+- **Via CLI flag**: Use `--strict` flag with `kira lint` or `kira doctor`
+
+```bash
+# Enable strict mode via CLI
+kira lint --strict
+
+# Or set in kira.yml
+validation:
+  strict: true
+```
+
+**Note**: The fields `id`, `title`, `status`, `kind`, and `created` are hardcoded and cannot be configured. These fields are managed by other configuration systems.
+
+### Example Field Configuration
+
+```yaml
+fields:
+  assigned:
+    type: email
+    required: true
+    description: "Assigned user email address"
+
+  priority:
+    type: enum
+    allowed_values: [low, medium, high, critical]
+    default: medium
+    case_sensitive: false
+
+  due:
+    type: date
+    format: "2006-01-02"
+    min_date: "today"
+
+  tags:
+    type: array
+    item_type: string
+    unique: true
+    min_length: 1
+    max_length: 10
 ```
 
 ## Work Item Format
@@ -312,10 +469,10 @@ title: User Authentication Feature
 status: todo
 kind: prd
 assigned: user@example.com
-estimate: 3 days
-created: 2024-01-15T10:00:00Z
-updated: 2024-01-16T14:30:00Z
-due: 2024-01-20T17:00:00Z
+priority: high
+estimate: 5
+created: 2024-01-15
+due: 2024-01-20
 tags: [auth, security, frontend]
 ---
 

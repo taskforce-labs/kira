@@ -266,6 +266,11 @@ func collectInputs(cfg *config.Config, template, nextID, title, status, descript
 		inputs[k] = v
 	}
 
+	// Apply field defaults before interactive collection so defaults are shown
+	if err := applyFieldDefaultsToInputs(cfg, inputs); err != nil {
+		return nil, err
+	}
+
 	if interactive {
 		if err := collectInteractiveInputs(cfg, template, inputs); err != nil {
 			return nil, err
@@ -273,6 +278,96 @@ func collectInputs(cfg *config.Config, template, nextID, title, status, descript
 	}
 
 	return inputs, nil
+}
+
+// applyFieldDefaultsToInputs applies default values from field configuration to the inputs map.
+func applyFieldDefaultsToInputs(cfg *config.Config, inputs map[string]string) error {
+	if cfg.Fields == nil {
+		return nil // No field configuration
+	}
+
+	for fieldName, fieldConfig := range cfg.Fields {
+		// Skip if field already has a value
+		if _, exists := inputs[fieldName]; exists {
+			continue
+		}
+
+		// Skip hardcoded fields
+		isHardcoded := false
+		for _, hardcoded := range config.HardcodedFields {
+			if fieldName == hardcoded {
+				isHardcoded = true
+				break
+			}
+		}
+		if isHardcoded {
+			continue
+		}
+
+		// Apply default if configured
+		if fieldConfig.Default != nil {
+			defaultStr, err := convertDefaultToString(fieldConfig.Default, &fieldConfig)
+			if err != nil {
+				return fmt.Errorf("failed to convert default value for field '%s': %w", fieldName, err)
+			}
+			inputs[fieldName] = defaultStr
+		}
+	}
+
+	return nil
+}
+
+// convertDefaultToString converts a default value to a string for use in template inputs.
+func convertDefaultToString(defaultValue interface{}, fieldConfig *config.FieldConfig) (string, error) {
+	switch fieldConfig.Type {
+	case "string", "email", "url", "enum":
+		if str, ok := defaultValue.(string); ok {
+			return str, nil
+		}
+		return fmt.Sprintf("%v", defaultValue), nil
+	case "date":
+		if str, ok := defaultValue.(string); ok {
+			if str == "today" {
+				return time.Now().Format("2006-01-02"), nil
+			}
+			return str, nil
+		}
+		return "", fmt.Errorf("date default must be a string, got %T", defaultValue)
+	case "number":
+		if isNumeric(defaultValue) {
+			return fmt.Sprintf("%v", defaultValue), nil
+		}
+		if str, ok := defaultValue.(string); ok {
+			// Validate it's a number
+			if _, err := strconv.ParseFloat(str, 64); err == nil {
+				return str, nil
+			}
+		}
+		return "", fmt.Errorf("number default must be numeric, got %T", defaultValue)
+	case "array":
+		// For arrays, convert to YAML array format
+		if arr, ok := defaultValue.([]interface{}); ok {
+			// Convert to YAML array string
+			var items []string
+			for _, item := range arr {
+				items = append(items, fmt.Sprintf("%v", item))
+			}
+			return "[" + strings.Join(items, ", ") + "]", nil
+		}
+		// Single value becomes array with one element
+		return fmt.Sprintf("[%v]", defaultValue), nil
+	default:
+		return fmt.Sprintf("%v", defaultValue), nil
+	}
+}
+
+// isNumeric checks if a value is numeric (helper function, duplicated from validation package for convenience).
+func isNumeric(value interface{}) bool {
+	switch value.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return true
+	}
+	return false
 }
 
 func collectInteractiveInputs(cfg *config.Config, template string, inputs map[string]string) error {
