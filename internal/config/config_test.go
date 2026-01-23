@@ -448,6 +448,38 @@ fields:
 		assert.Contains(t, err.Error(), "cannot be greater than max_length")
 	})
 
+	t.Run("rejects negative min_length", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  description:
+    type: string
+    min_length: -1
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "min_length")
+		assert.Contains(t, err.Error(), "cannot be negative")
+	})
+
+	t.Run("rejects negative max_length", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  description:
+    type: string
+    max_length: -5
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "max_length")
+		assert.Contains(t, err.Error(), "cannot be negative")
+	})
+
 	t.Run("validates min/max value constraints", func(t *testing.T) {
 		testConfig := `version: "1.0"
 fields:

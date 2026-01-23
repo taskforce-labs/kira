@@ -371,6 +371,15 @@ func validateFieldFormat(fieldName string, fieldConfig *FieldConfig) error {
 }
 
 func validateFieldConstraints(fieldName string, fieldConfig *FieldConfig) error {
+	// Validate min_length is non-negative
+	if fieldConfig.MinLength != nil && *fieldConfig.MinLength < 0 {
+		return fmt.Errorf("field '%s': min_length (%d) cannot be negative", fieldName, *fieldConfig.MinLength)
+	}
+	// Validate max_length is non-negative
+	if fieldConfig.MaxLength != nil && *fieldConfig.MaxLength < 0 {
+		return fmt.Errorf("field '%s': max_length (%d) cannot be negative", fieldName, *fieldConfig.MaxLength)
+	}
+	// Validate min_length <= max_length
 	if fieldConfig.MinLength != nil && fieldConfig.MaxLength != nil {
 		if *fieldConfig.MinLength > *fieldConfig.MaxLength {
 			return fmt.Errorf("field '%s': min_length (%d) cannot be greater than max_length (%d)", fieldName, *fieldConfig.MinLength, *fieldConfig.MaxLength)
