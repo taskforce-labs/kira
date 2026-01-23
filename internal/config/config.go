@@ -385,6 +385,15 @@ func validateFieldConstraints(fieldName string, fieldConfig *FieldConfig) error 
 			return fmt.Errorf("field '%s': min_length (%d) cannot be greater than max_length (%d)", fieldName, *fieldConfig.MinLength, *fieldConfig.MaxLength)
 		}
 	}
+	// Validate that max is not negative when min is not set or is non-negative
+	// This prevents cases where max: -5 would reject all positive values
+	// This check must come before the min > max check to provide a more specific error
+	if fieldConfig.MaxValue != nil && *fieldConfig.MaxValue < 0 {
+		if fieldConfig.MinValue == nil || *fieldConfig.MinValue >= 0 {
+			return fmt.Errorf("field '%s': max (%v) cannot be negative when min is not set or is non-negative", fieldName, *fieldConfig.MaxValue)
+		}
+	}
+	// Validate numeric min/max constraints
 	if fieldConfig.MinValue != nil && fieldConfig.MaxValue != nil {
 		if *fieldConfig.MinValue > *fieldConfig.MaxValue {
 			return fmt.Errorf("field '%s': min (%v) cannot be greater than max (%v)", fieldName, *fieldConfig.MinValue, *fieldConfig.MaxValue)
