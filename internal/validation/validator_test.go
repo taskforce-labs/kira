@@ -929,12 +929,13 @@ priority: MEDIUM
 		require.NoError(t, err)
 		originalModTime := originalInfo.ModTime()
 
+		caseSensitive := false
 		cfg := &config.Config{
 			Fields: map[string]config.FieldConfig{
 				"priority": {
 					Type:          "enum",
 					AllowedValues: []string{"low", "medium", "high"},
-					CaseSensitive: false, // Case-insensitive, so MEDIUM should be fixed to medium
+					CaseSensitive: &caseSensitive, // Case-insensitive, so MEDIUM should be fixed to medium
 				},
 			},
 		}

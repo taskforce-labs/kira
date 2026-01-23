@@ -415,7 +415,8 @@ func validateFieldValue(fieldName string, value interface{}, fieldConfig *config
 
 	// Enum validation
 	if fieldConfig.Type == fieldTypeEnum {
-		if err := validateEnumValue(value, fieldConfig.AllowedValues, fieldConfig.CaseSensitive); err != nil {
+		caseSensitive := isCaseSensitive(fieldConfig.CaseSensitive)
+		if err := validateEnumValue(value, fieldConfig.AllowedValues, caseSensitive); err != nil {
 			return fmt.Errorf("field '%s': %w", fieldName, err)
 		}
 	}
@@ -562,6 +563,14 @@ func validateDateFormat(value interface{}, format string) error {
 		return nil
 	}
 	return fmt.Errorf("format validation requires string or time.Time value, got %T", value)
+}
+
+// isCaseSensitive returns the case-sensitive setting, defaulting to true if not set.
+func isCaseSensitive(caseSensitive *bool) bool {
+	if caseSensitive == nil {
+		return true // Default to case-sensitive
+	}
+	return *caseSensitive
 }
 
 // validateEnumValue checks that a value is in the allowed values list.
@@ -765,7 +774,8 @@ func validateArrayItem(item interface{}, fieldConfig *config.FieldConfig) error 
 		if !ok {
 			return fmt.Errorf("expected enum string item, got %T", item)
 		}
-		return validateEnumValue(str, fieldConfig.AllowedValues, fieldConfig.CaseSensitive)
+		caseSensitive := isCaseSensitive(fieldConfig.CaseSensitive)
+		return validateEnumValue(str, fieldConfig.AllowedValues, caseSensitive)
 	}
 	return nil
 }
@@ -1086,8 +1096,9 @@ func resolveEnumDefault(defaultValue interface{}, fieldConfig *config.FieldConfi
 		// Validate against allowed values
 		if len(fieldConfig.AllowedValues) > 0 {
 			valid := false
+			caseSensitive := isCaseSensitive(fieldConfig.CaseSensitive)
 			for _, allowed := range fieldConfig.AllowedValues {
-				if fieldConfig.CaseSensitive {
+				if caseSensitive {
 					if str == allowed {
 						valid = true
 						break
@@ -1444,7 +1455,8 @@ func tryFixDateValue(value interface{}, fieldConfig *config.FieldConfig) (interf
 
 func tryFixEnumValue(value interface{}, fieldConfig *config.FieldConfig) (interface{}, bool) {
 	// Try case-insensitive matching
-	if str, ok := value.(string); ok && !fieldConfig.CaseSensitive {
+	caseSensitive := isCaseSensitive(fieldConfig.CaseSensitive)
+	if str, ok := value.(string); ok && !caseSensitive {
 		for _, allowed := range fieldConfig.AllowedValues {
 			if strings.EqualFold(str, allowed) {
 				return allowed, true // Return the canonical value

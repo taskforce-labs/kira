@@ -130,11 +130,13 @@ type FieldConfig struct {
 	ItemType      string      `yaml:"item_type"`      // for arrays
 	Unique        bool        `yaml:"unique"`         // for arrays
 	Schemes       []string    `yaml:"schemes"`        // for URLs
-	CaseSensitive bool        `yaml:"case_sensitive"` // for enums
+	CaseSensitive *bool       `yaml:"case_sensitive"` // for enums (default: true if nil)
 }
 
 // HardcodedFields is a list of fields that cannot be configured.
 var HardcodedFields = []string{"id", "title", "status", "kind", "created"}
+
+const fieldTypeEnum = "enum"
 
 // DefaultConfig provides default configuration values.
 var DefaultConfig = Config{
@@ -304,13 +306,13 @@ func validateFieldType(fieldName string, fieldConfig *FieldConfig) error {
 		return fmt.Errorf("field '%s': type is required", fieldName)
 	}
 	validTypes := map[string]bool{
-		"string": true,
-		"date":   true,
-		"email":  true,
-		"url":    true,
-		"number": true,
-		"array":  true,
-		"enum":   true,
+		"string":      true,
+		"date":        true,
+		"email":       true,
+		"url":         true,
+		"number":      true,
+		"array":       true,
+		fieldTypeEnum: true,
 	}
 	if !validTypes[fieldConfig.Type] {
 		return fmt.Errorf("field '%s': invalid type '%s'. Valid types: string, date, email, url, number, array, enum", fieldName, fieldConfig.Type)
@@ -319,7 +321,7 @@ func validateFieldType(fieldName string, fieldConfig *FieldConfig) error {
 }
 
 func validateFieldTypeSpecifics(fieldName string, fieldConfig *FieldConfig) error {
-	if fieldConfig.Type == "enum" {
+	if fieldConfig.Type == fieldTypeEnum {
 		if len(fieldConfig.AllowedValues) == 0 {
 			return fmt.Errorf("field '%s': enum type requires allowed_values", fieldName)
 		}
@@ -335,14 +337,14 @@ func validateArrayFieldConfig(fieldName string, fieldConfig *FieldConfig) error 
 		return fmt.Errorf("field '%s': array type requires item_type", fieldName)
 	}
 	validItemTypes := map[string]bool{
-		"string": true,
-		"number": true,
-		"enum":   true,
+		"string":      true,
+		"number":      true,
+		fieldTypeEnum: true,
 	}
 	if !validItemTypes[fieldConfig.ItemType] {
 		return fmt.Errorf("field '%s': invalid item_type '%s' for array. Valid item types: string, number, enum", fieldName, fieldConfig.ItemType)
 	}
-	if fieldConfig.ItemType == "enum" && len(fieldConfig.AllowedValues) == 0 {
+	if fieldConfig.ItemType == fieldTypeEnum && len(fieldConfig.AllowedValues) == 0 {
 		return fmt.Errorf("field '%s': array with enum item_type requires allowed_values", fieldName)
 	}
 	return nil
@@ -446,6 +448,17 @@ func mergeWithDefaults(config *Config) {
 func mergeFieldDefaults(config *Config) {
 	if config.Fields == nil {
 		config.Fields = make(map[string]FieldConfig)
+		return
+	}
+
+	// Set default CaseSensitive to true for enum fields when not explicitly set
+	for fieldName := range config.Fields {
+		fieldConfig := config.Fields[fieldName]
+		if fieldConfig.Type == fieldTypeEnum && fieldConfig.CaseSensitive == nil {
+			caseSensitive := true
+			fieldConfig.CaseSensitive = &caseSensitive
+			config.Fields[fieldName] = fieldConfig
+		}
 	}
 }
 
