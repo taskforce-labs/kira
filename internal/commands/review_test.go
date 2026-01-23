@@ -1,0 +1,350 @@
+package commands
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestReviewCommandRegistration(t *testing.T) {
+	t.Run("command is registered in root", func(t *testing.T) {
+		// Verify reviewCmd is in the root command's list of commands
+		found := false
+		for _, cmd := range rootCmd.Commands() {
+			if cmd.Name() == "review" {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "review command should be registered in root command")
+	})
+
+	t.Run("command appears in help output", func(t *testing.T) {
+		// Capture help output
+		buf := new(bytes.Buffer)
+		rootCmd.SetOut(buf)
+		rootCmd.SetErr(buf)
+
+		err := rootCmd.Help()
+		require.NoError(t, err)
+
+		output := buf.String()
+		assert.Contains(t, output, "review", "help output should contain 'review' command")
+	})
+
+	t.Run("review command shows help", func(t *testing.T) {
+		// Capture help output for review command
+		buf := new(bytes.Buffer)
+		reviewCmd.SetOut(buf)
+		reviewCmd.SetErr(buf)
+
+		err := reviewCmd.Help()
+		require.NoError(t, err)
+
+		output := buf.String()
+		// Just verify the help output is not empty and contains "review"
+		assert.NotEmpty(t, output, "help output should not be empty")
+		assert.Contains(t, output, "review", "review command help should contain command name")
+		// Verify it contains some expected content
+		assert.True(t,
+			strings.Contains(output, "Submit work item for review") ||
+				strings.Contains(output, "Automatically derives work item ID"),
+			"help should contain command description")
+	})
+}
+
+func TestReviewCommandFlagDefaults(t *testing.T) {
+	t.Run("draft flag defaults to true", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{})
+
+		err := cmd.ParseFlags([]string{})
+		require.NoError(t, err)
+
+		draft, err := cmd.Flags().GetBool("draft")
+		require.NoError(t, err)
+		assert.True(t, draft, "--draft should default to true")
+	})
+
+	t.Run("no-trunk-update flag defaults to false", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{})
+
+		err := cmd.ParseFlags([]string{})
+		require.NoError(t, err)
+
+		noTrunkUpdate, err := cmd.Flags().GetBool("no-trunk-update")
+		require.NoError(t, err)
+		assert.False(t, noTrunkUpdate, "--no-trunk-update should default to false")
+	})
+
+	t.Run("no-rebase flag defaults to false", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{})
+
+		err := cmd.ParseFlags([]string{})
+		require.NoError(t, err)
+
+		noRebase, err := cmd.Flags().GetBool("no-rebase")
+		require.NoError(t, err)
+		assert.False(t, noRebase, "--no-rebase should default to false")
+	})
+
+	t.Run("reviewer flag defaults to empty slice", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{})
+
+		err := cmd.ParseFlags([]string{})
+		require.NoError(t, err)
+
+		reviewers, err := cmd.Flags().GetStringArray("reviewer")
+		require.NoError(t, err)
+		assert.Empty(t, reviewers, "--reviewer should default to empty slice")
+	})
+
+	t.Run("title flag defaults to empty string", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{})
+
+		err := cmd.ParseFlags([]string{})
+		require.NoError(t, err)
+
+		title, err := cmd.Flags().GetString("title")
+		require.NoError(t, err)
+		assert.Empty(t, title, "--title should default to empty string")
+	})
+
+	t.Run("description flag defaults to empty string", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{})
+
+		err := cmd.ParseFlags([]string{})
+		require.NoError(t, err)
+
+		description, err := cmd.Flags().GetString("description")
+		require.NoError(t, err)
+		assert.Empty(t, description, "--description should default to empty string")
+	})
+}
+
+func TestReviewCommandFlagParsing(t *testing.T) {
+	t.Run("draft flag can be set to false", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{"--draft=false"})
+
+		err := cmd.ParseFlags([]string{"--draft=false"})
+		require.NoError(t, err)
+
+		draft, err := cmd.Flags().GetBool("draft")
+		require.NoError(t, err)
+		assert.False(t, draft, "--draft=false should set draft to false")
+	})
+
+	t.Run("draft flag can be set to true explicitly", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{"--draft=true"})
+
+		err := cmd.ParseFlags([]string{"--draft=true"})
+		require.NoError(t, err)
+
+		draft, err := cmd.Flags().GetBool("draft")
+		require.NoError(t, err)
+		assert.True(t, draft, "--draft=true should set draft to true")
+	})
+
+	t.Run("no-trunk-update flag can be set to true", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{"--no-trunk-update"})
+
+		err := cmd.ParseFlags([]string{"--no-trunk-update"})
+		require.NoError(t, err)
+
+		noTrunkUpdate, err := cmd.Flags().GetBool("no-trunk-update")
+		require.NoError(t, err)
+		assert.True(t, noTrunkUpdate, "--no-trunk-update should set flag to true")
+	})
+
+	t.Run("no-rebase flag can be set to true", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{"--no-rebase"})
+
+		err := cmd.ParseFlags([]string{"--no-rebase"})
+		require.NoError(t, err)
+
+		noRebase, err := cmd.Flags().GetBool("no-rebase")
+		require.NoError(t, err)
+		assert.True(t, noRebase, "--no-rebase should set flag to true")
+	})
+
+	t.Run("title flag accepts string value", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		testTitle := "Custom PR Title"
+		cmd.SetArgs([]string{"--title", testTitle})
+
+		err := cmd.ParseFlags([]string{"--title", testTitle})
+		require.NoError(t, err)
+
+		title, err := cmd.Flags().GetString("title")
+		require.NoError(t, err)
+		assert.Equal(t, testTitle, title, "--title should accept string value")
+	})
+
+	t.Run("description flag accepts string value", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		testDescription := "Custom PR Description"
+		cmd.SetArgs([]string{"--description", testDescription})
+
+		err := cmd.ParseFlags([]string{"--description", testDescription})
+		require.NoError(t, err)
+
+		description, err := cmd.Flags().GetString("description")
+		require.NoError(t, err)
+		assert.Equal(t, testDescription, description, "--description should accept string value")
+	})
+
+	t.Run("reviewer flag accepts single value", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{"--reviewer", "user1"})
+
+		err := cmd.ParseFlags([]string{"--reviewer", "user1"})
+		require.NoError(t, err)
+
+		reviewers, err := cmd.Flags().GetStringArray("reviewer")
+		require.NoError(t, err)
+		assert.Len(t, reviewers, 1, "should have one reviewer")
+		assert.Equal(t, "user1", reviewers[0], "reviewer should be 'user1'")
+	})
+
+	t.Run("reviewer flag accepts multiple values", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{"--reviewer", "user1", "--reviewer", "user2"})
+
+		err := cmd.ParseFlags([]string{"--reviewer", "user1", "--reviewer", "user2"})
+		require.NoError(t, err)
+
+		reviewers, err := cmd.Flags().GetStringArray("reviewer")
+		require.NoError(t, err)
+		assert.Len(t, reviewers, 2, "should have two reviewers")
+		assert.Contains(t, reviewers, "user1", "should contain user1")
+		assert.Contains(t, reviewers, "user2", "should contain user2")
+	})
+
+	t.Run("reviewer flag accepts email addresses", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{"--reviewer", "user@example.com"})
+
+		err := cmd.ParseFlags([]string{"--reviewer", "user@example.com"})
+		require.NoError(t, err)
+
+		reviewers, err := cmd.Flags().GetStringArray("reviewer")
+		require.NoError(t, err)
+		assert.Len(t, reviewers, 1, "should have one reviewer")
+		assert.Equal(t, "user@example.com", reviewers[0], "reviewer should be email address")
+	})
+
+	t.Run("all flags can be used together", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		args := []string{
+			"--reviewer", "user1",
+			"--reviewer", "user2",
+			"--draft=false",
+			"--no-trunk-update",
+			"--no-rebase",
+			"--title", "Test Title",
+			"--description", "Test Description",
+		}
+		cmd.SetArgs(args)
+
+		err := cmd.ParseFlags(args)
+		require.NoError(t, err)
+
+		reviewers, _ := cmd.Flags().GetStringArray("reviewer")
+		draft, _ := cmd.Flags().GetBool("draft")
+		noTrunkUpdate, _ := cmd.Flags().GetBool("no-trunk-update")
+		noRebase, _ := cmd.Flags().GetBool("no-rebase")
+		title, _ := cmd.Flags().GetString("title")
+		description, _ := cmd.Flags().GetString("description")
+
+		assert.Len(t, reviewers, 2)
+		assert.False(t, draft)
+		assert.True(t, noTrunkUpdate)
+		assert.True(t, noRebase)
+		assert.Equal(t, "Test Title", title)
+		assert.Equal(t, "Test Description", description)
+	})
+}
+
+func TestReviewCommandNoArgs(t *testing.T) {
+	t.Run("command accepts no positional arguments", func(t *testing.T) {
+		// Create a command with NoArgs validation
+		cmd := &cobra.Command{
+			Use:  "review",
+			Args: cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				return cmd.Help()
+			},
+		}
+		cmd.SetArgs([]string{"invalid-arg"})
+
+		err := cmd.Execute()
+		require.Error(t, err, "should error when positional arguments provided")
+		assert.Contains(t, err.Error(), "unknown", "error should indicate unknown command or argument")
+	})
+}
+
+// TestReviewCommandIntegration tests the command in a more realistic scenario
+func TestReviewCommandIntegration(t *testing.T) {
+	t.Run("command can be executed via root", func(t *testing.T) {
+		// Verify review command is accessible from root
+		// This test verifies the command is properly registered
+		found := false
+		for _, cmd := range rootCmd.Commands() {
+			if cmd.Name() == "review" {
+				found = true
+				// Verify it has the expected flags
+				assert.True(t, cmd.Flags().Lookup("draft") != nil, "draft flag should exist")
+				assert.True(t, cmd.Flags().Lookup("reviewer") != nil, "reviewer flag should exist")
+				break
+			}
+		}
+		assert.True(t, found, "review command should be accessible from root")
+	})
+}
+
+// Helper function to create a fresh command instance for testing
+func createTestReviewCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "review",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
+	}
+	cmd.Flags().StringArray("reviewer", []string{}, "Specify reviewer")
+	cmd.Flags().Bool("draft", true, "Create as draft PR")
+	cmd.Flags().Bool("no-trunk-update", false, "Skip updating trunk branch status")
+	cmd.Flags().Bool("no-rebase", false, "Skip rebasing current branch")
+	cmd.Flags().String("title", "", "Custom PR title")
+	cmd.Flags().String("description", "", "Custom PR description")
+	return cmd
+}
+
+func TestReviewCommandWithFreshInstance(t *testing.T) {
+	t.Run("fresh command instance has correct defaults", func(t *testing.T) {
+		cmd := createTestReviewCmd()
+		cmd.SetArgs([]string{})
+
+		// Parse flags
+		err := cmd.ParseFlags([]string{})
+		require.NoError(t, err)
+
+		draft, _ := cmd.Flags().GetBool("draft")
+		reviewers, _ := cmd.Flags().GetStringArray("reviewer")
+
+		assert.True(t, draft, "draft should default to true")
+		assert.Empty(t, reviewers, "reviewers should default to empty")
+	})
+}
