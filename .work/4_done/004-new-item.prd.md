@@ -3,9 +3,9 @@ id: 004
 title: New item flow
 status: done
 kind: prd
+created: 2025-10-23
 assigned: wkallan1984@gmail.com
 estimate: 1 day
-created: 2025-10-23T15:00:00Z
 ---
 # New item flow with interactive input prompts enabled via --interactive flag
 

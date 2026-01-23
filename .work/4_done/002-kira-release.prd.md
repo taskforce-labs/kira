@@ -3,9 +3,9 @@ id: 002
 title: Kira Release
 status: done
 kind: prd
+created: 2025-10-08
 assigned: wkallan1984@gmail.com
 estimate: 1 day
-created: 2025-10-08T15:00:00Z
 ---
 # Kira Release
 
