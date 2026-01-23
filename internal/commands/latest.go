@@ -616,10 +616,22 @@ func checkRepositoryState(repo RepositoryInfo) (RepositoryStateInfo, error) {
 }
 
 // checkActiveOperations checks if repository is in the middle of a rebase or merge
+// If conflicts exist during the operation, it returns StateConflictsExist instead
 func checkActiveOperations(repo RepositoryInfo) *RepositoryStateInfo {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
 	// Check for active rebase operation
 	rebaseMergePath := filepath.Join(repo.Path, ".git", "rebase-merge")
 	if _, err := os.Stat(rebaseMergePath); err == nil {
+		// Check if there are conflicts during the rebase
+		if checkForConflicts(ctx, repo) {
+			return &RepositoryStateInfo{
+				Repo:    repo,
+				State:   StateConflictsExist,
+				Details: "conflicts detected during rebase operation",
+			}
+		}
 		return &RepositoryStateInfo{
 			Repo:    repo,
 			State:   StateInRebase,
@@ -630,6 +642,14 @@ func checkActiveOperations(repo RepositoryInfo) *RepositoryStateInfo {
 	// Check for active merge operation
 	mergeHeadPath := filepath.Join(repo.Path, ".git", "MERGE_HEAD")
 	if _, err := os.Stat(mergeHeadPath); err == nil {
+		// Check if there are conflicts during the merge
+		if checkForConflicts(ctx, repo) {
+			return &RepositoryStateInfo{
+				Repo:    repo,
+				State:   StateConflictsExist,
+				Details: "conflicts detected during merge operation",
+			}
+		}
 		return &RepositoryStateInfo{
 			Repo:    repo,
 			State:   StateInMerge,

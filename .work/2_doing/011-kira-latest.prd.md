@@ -236,27 +236,7 @@ feat: integrate kira configuration settings
 - Add dependency ordering for repository updates
 ```
 
-#### Phase 8. Iterative Workflow Logic
-```
-feat: implement iterative workflow state machine
-
-- Add logic to handle repeated command calls
-- Implement state persistence between calls
-- Create workflow progression (detect → display → update)
-- Add user guidance for iterative resolution
-```
-
-#### Phase 9. Unit Tests
-```
-test: add unit tests for kira latest components
-
-- Mock git operations and repository interactions
-- Test state detection and conflict parsing
-- Add configuration parsing tests
-- Cover error scenarios and edge cases
-```
-
-#### Phase 10. Integration Tests
+#### Phase 8. Integration Tests and E2E Tests
 ```
 test: add integration tests for kira latest workflows
 
@@ -264,10 +244,7 @@ test: add integration tests for kira latest workflows
 - Add iterative workflow testing
 - Implement configuration integration tests
 - Test error recovery scenarios
-```
 
-#### Phase 11. E2E Tests
-```
 test: add e2e tests for kira latest command
 
 - Test complete command workflow in test environment
