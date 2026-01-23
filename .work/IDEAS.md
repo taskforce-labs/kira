@@ -35,3 +35,9 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 26. [2026-01-20] kira skills: add some skills for using kira for planning and manging workflow in skills.sh
 27. [2026-01-20] feature flag: work items can articulate feature flags they trigger (boolean, gradual, conditional) - this can be used by the release command to trigger them
 28. [2026-01-20] release strategy: configuration that helps kira trigger the right steps for releasing software across a number of commands
+29. [2026-01-23] ralph planning: a ralph loop that helps create a roadmap
+30. [2026-01-23] ralph elaboration: a ralph loop that help elaborate items in the backlog
+31. [2026-01-23] ralph build: a ralph loop that builds all the items in todo
+32. [2026-01-23] kira cursor plugin: a plugin that allows kira to control agents in the ide
+33. [2026-01-23] make run: run the kira cli command via go
+34. [2026-01-23] make e2e: run the end to end tests from make
