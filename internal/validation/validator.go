@@ -1342,6 +1342,10 @@ func processFieldFixes(workItem *WorkItem, cfg *config.Config, result *Validatio
 			if _, exists := workItem.Fields[fieldName]; exists {
 				// Default was applied by ApplyFieldDefaults (even if empty), mark as modified
 				modified = true
+				// Report the fix if a default was configured (ApplyFieldDefaults only adds fields with defaults)
+				if fieldConfig.Default != nil {
+					result.AddError(file, fmt.Sprintf("fixed field '%s': applied default value", fieldName))
+				}
 			}
 			// If field doesn't exist, no default was configured/applied, so nothing was modified
 		}

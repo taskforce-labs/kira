@@ -2,6 +2,7 @@ package validation
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -792,7 +793,7 @@ func TestFixFieldIssues(t *testing.T) {
 		// Wait a bit to ensure mod time would change if file is written
 		time.Sleep(10 * time.Millisecond)
 
-		_, err = FixFieldIssues(cfg)
+		result, err := FixFieldIssues(cfg)
 		require.NoError(t, err)
 
 		// File should have been modified (default was applied)
@@ -804,6 +805,17 @@ func TestFixFieldIssues(t *testing.T) {
 		content, err := os.ReadFile(filePath)
 		require.NoError(t, err)
 		assert.Contains(t, string(content), "priority: medium")
+
+		// Verify the fix is reported to the user
+		require.True(t, result.HasErrors(), "Result should contain error messages about fixes")
+		found := false
+		for _, validationErr := range result.Errors {
+			if validationErr.File == filePath && strings.Contains(validationErr.Message, "fixed field 'priority': applied default value") {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "Should report that default value was applied for priority field")
 	})
 
 	t.Run("does not mark file as modified when required field is missing but has no default", func(t *testing.T) {
