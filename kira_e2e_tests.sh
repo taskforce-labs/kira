@@ -1309,7 +1309,7 @@ fi
 
 # Test 25e: Field validation - invalid email
 echo ""
-echo "  ❌ Test 25e: Field validation - invalid email"
+echo "  🧪 Test 25e: Field validation - invalid email"
 
 cat > .work/1_todo/010-invalid-email.prd.md << 'EOF'
 ---
@@ -1333,7 +1333,7 @@ fi
 
 # Test 25f: Field validation - invalid enum (using a field we'll add manually)
 echo ""
-echo "  ❌ Test 25f: Field validation - invalid enum"
+echo "  🧪 Test 25f: Field validation - invalid enum"
 
 # Add enum field to config
 cat > kira.yml << 'EOF'
@@ -1397,7 +1397,7 @@ fi
 
 # Test 25g: Field validation - invalid date
 echo ""
-echo "  ❌ Test 25g: Field validation - invalid date"
+echo "  🧪 Test 25g: Field validation - invalid date"
 
 # Update config to include due field with min_date
 cat > kira.yml << 'EOF'
@@ -1463,7 +1463,7 @@ fi
 
 # Test 25h: Field validation - invalid number range
 echo ""
-echo "  ❌ Test 25h: Field validation - invalid number range"
+echo "  🧪 Test 25h: Field validation - invalid number range"
 
 # Update config to include estimate field with max
 cat > kira.yml << 'EOF'
@@ -1529,7 +1529,7 @@ fi
 
 # Test 25i: Field validation - invalid string format
 echo ""
-echo "  ❌ Test 25i: Field validation - invalid string format"
+echo "  🧪 Test 25i: Field validation - invalid string format"
 
 # Add epic field to config
 cat > kira.yml << 'EOF'
@@ -1593,7 +1593,7 @@ fi
 
 # Test 25j: Required field validation
 echo ""
-echo "  ❌ Test 25j: Required field validation"
+echo "  🧪 Test 25j: Required field validation"
 
 # Update config to require assigned field
 cat > kira.yml << 'EOF'
