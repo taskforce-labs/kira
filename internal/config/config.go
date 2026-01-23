@@ -269,6 +269,10 @@ func validateFieldConfig(config *Config) error {
 	}
 
 	for fieldName, fieldConfig := range config.Fields {
+		// Reject empty field names as they are likely configuration errors
+		if fieldName == "" {
+			return fmt.Errorf("field name cannot be empty")
+		}
 		if err := validateSingleFieldConfig(fieldName, &fieldConfig); err != nil {
 			return err
 		}

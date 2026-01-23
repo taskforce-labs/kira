@@ -373,6 +373,21 @@ fields:
 		}
 	})
 
+	t.Run("rejects empty field name", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  "":
+    type: string
+    required: false
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "field name cannot be empty")
+	})
+
 	t.Run("rejects invalid field type", func(t *testing.T) {
 		testConfig := `version: "1.0"
 fields:
