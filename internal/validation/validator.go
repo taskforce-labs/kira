@@ -1144,27 +1144,8 @@ func resolveEnumDefault(defaultValue interface{}, fieldConfig *config.FieldConfi
 	return nil, fmt.Errorf("enum default must be a string, got %T", defaultValue)
 }
 
-func validateWorkflowRules(cfg *config.Config) error {
-	// Check that only one item is in doing folder
-	doingPath := filepath.Join(".work", cfg.StatusFolders["doing"])
-	if _, err := os.Stat(doingPath); err == nil {
-		files, err := os.ReadDir(doingPath)
-		if err != nil {
-			return fmt.Errorf("failed to read doing folder: %w", err)
-		}
-
-		var workItems []string
-		for _, file := range files {
-			if !file.IsDir() && strings.HasSuffix(file.Name(), ".md") {
-				workItems = append(workItems, file.Name())
-			}
-		}
-
-		if len(workItems) > 1 {
-			return fmt.Errorf("multiple items in doing folder. Only one item allowed at a time. Found: %s", strings.Join(workItems, ", "))
-		}
-	}
-
+func validateWorkflowRules(_ *config.Config) error {
+	// Workflow validation rules can be added here in the future
 	return nil
 }
 
