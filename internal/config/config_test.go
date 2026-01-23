@@ -497,6 +497,61 @@ fields:
 		assert.Contains(t, err.Error(), "cannot be greater than max")
 	})
 
+	t.Run("rejects negative max when min is not set", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  estimate:
+    type: number
+    max: -5
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "max")
+		assert.Contains(t, err.Error(), "cannot be negative")
+	})
+
+	t.Run("rejects negative max when min is non-negative", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  estimate:
+    type: number
+    min: 0
+    max: -5
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "max")
+		assert.Contains(t, err.Error(), "cannot be negative")
+	})
+
+	t.Run("allows negative range when both min and max are negative", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  offset:
+    type: number
+    min: -10
+    max: -5
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Fields)
+		offsetField, exists := config.Fields["offset"]
+		require.True(t, exists)
+		assert.NotNil(t, offsetField.MinValue)
+		assert.NotNil(t, offsetField.MaxValue)
+		assert.Equal(t, -10.0, *offsetField.MinValue)
+		assert.Equal(t, -5.0, *offsetField.MaxValue)
+	})
+
 	t.Run("accepts valid field configuration", func(t *testing.T) {
 		testConfig := `version: "1.0"
 fields:
