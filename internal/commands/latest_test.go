@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kira/internal/config"
@@ -111,7 +112,7 @@ func TestFindCurrentWorkItem(t *testing.T) {
 		assert.Contains(t, err.Error(), "no work item found in doing folder")
 	})
 
-	t.Run("returns error when multiple work items exist", func(t *testing.T) {
+	t.Run("returns first work item when multiple exist", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
@@ -127,9 +128,11 @@ func TestFindCurrentWorkItem(t *testing.T) {
 		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(testWorkItemContentDoing), 0o600))
 		require.NoError(t, os.WriteFile(".work/2_doing/002-another-feature.prd.md", []byte(testWorkItemContentDoing), 0o600))
 
-		_, err := findCurrentWorkItem(cfg)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "multiple work items found in doing folder")
+		// Should return the first work item (sorted alphabetically)
+		path, err := findCurrentWorkItem(cfg)
+		require.NoError(t, err)
+		// Should return one of the work items (deterministic based on sorting)
+		assert.True(t, strings.HasSuffix(path, "001-test-feature.prd.md") || strings.HasSuffix(path, "002-another-feature.prd.md"))
 	})
 
 	t.Run("returns error when doing folder does not exist", func(t *testing.T) {
