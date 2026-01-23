@@ -670,11 +670,14 @@ func TestApplyFieldDefaults(t *testing.T) {
 			},
 		}
 
-		err := ApplyFieldDefaults(workItem, cfg)
+		added, err := ApplyFieldDefaults(workItem, cfg)
 		require.NoError(t, err)
 
 		assert.Equal(t, "medium", workItem.Fields["priority"])
 		assert.Equal(t, 5, workItem.Fields["estimate"])
+		assert.Len(t, added, 2)
+		assert.Contains(t, added, "priority")
+		assert.Contains(t, added, "estimate")
 	})
 
 	t.Run("does not override existing field values", func(t *testing.T) {
@@ -699,10 +702,11 @@ func TestApplyFieldDefaults(t *testing.T) {
 			},
 		}
 
-		err := ApplyFieldDefaults(workItem, cfg)
+		added, err := ApplyFieldDefaults(workItem, cfg)
 		require.NoError(t, err)
 
 		assert.Equal(t, "high", workItem.Fields["priority"]) // Should not be overridden
+		assert.Empty(t, added)
 	})
 
 	t.Run("applies 'today' default for date fields", func(t *testing.T) {
@@ -724,9 +728,11 @@ func TestApplyFieldDefaults(t *testing.T) {
 			},
 		}
 
-		err := ApplyFieldDefaults(workItem, cfg)
+		added, err := ApplyFieldDefaults(workItem, cfg)
 		require.NoError(t, err)
 
+		assert.Len(t, added, 1)
+		assert.Contains(t, added, "due")
 		dueValue, exists := workItem.Fields["due"]
 		require.True(t, exists)
 		dueStr, ok := dueValue.(string)
@@ -755,12 +761,13 @@ func TestApplyFieldDefaults(t *testing.T) {
 			},
 		}
 
-		err := ApplyFieldDefaults(workItem, cfg)
+		added, err := ApplyFieldDefaults(workItem, cfg)
 		require.NoError(t, err)
 
 		// ID should not be changed (it's a hardcoded field)
 		assert.Equal(t, "001", workItem.ID)
 		assert.NotEqual(t, "999", workItem.ID)
+		assert.Empty(t, added)
 	})
 }
 
@@ -901,6 +908,55 @@ func TestFixFieldIssues(t *testing.T) {
 		content, err := os.ReadFile(filePath)
 		require.NoError(t, err)
 		assert.Contains(t, string(content), "assigned:")
+	})
+
+	t.Run("marks file as modified when non-required field with default is applied", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		filePath := testWorkItemPath
+		require.NoError(t, os.WriteFile(filePath, []byte(minimalWorkItemContent), 0o600))
+
+		originalInfo, err := os.Stat(filePath)
+		require.NoError(t, err)
+		originalModTime := originalInfo.ModTime()
+
+		cfg := &config.Config{
+			Fields: map[string]config.FieldConfig{
+				"priority": {
+					Type:          "enum",
+					Required:      false, // non-required
+					Default:       "medium",
+					AllowedValues: []string{"low", "medium", "high"},
+				},
+			},
+		}
+
+		time.Sleep(10 * time.Millisecond)
+
+		result, err := FixFieldIssues(cfg)
+		require.NoError(t, err)
+
+		newInfo, err := os.Stat(filePath)
+		require.NoError(t, err)
+		assert.True(t, newInfo.ModTime().After(originalModTime), "File should have been modified when default was applied for non-required field")
+
+		content, err := os.ReadFile(filePath)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "priority: medium")
+
+		require.True(t, result.HasErrors())
+		found := false
+		for _, validationErr := range result.Errors {
+			if validationErr.File == filePath && strings.Contains(validationErr.Message, "fixed field 'priority': applied default value") {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "Should report that default value was applied for priority field")
 	})
 
 	t.Run("marks file as modified when field value is fixed", func(t *testing.T) {

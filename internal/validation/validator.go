@@ -957,9 +957,11 @@ func isEmptyValue(value interface{}) bool {
 }
 
 // ApplyFieldDefaults applies default values to a work item for configured fields that are missing.
-func ApplyFieldDefaults(workItem *WorkItem, cfg *config.Config) error {
+// It returns the names of fields that were added (i.e. had defaults applied) so callers can
+// persist changes and report fixes.
+func ApplyFieldDefaults(workItem *WorkItem, cfg *config.Config) (added []string, err error) {
 	if cfg.Fields == nil {
-		return nil // No field configuration
+		return nil, nil // No field configuration
 	}
 
 	for fieldName, fieldConfig := range cfg.Fields {
@@ -982,15 +984,16 @@ func ApplyFieldDefaults(workItem *WorkItem, cfg *config.Config) error {
 
 		// Apply default if configured
 		if fieldConfig.Default != nil {
-			defaultValue, err := resolveDefaultValue(fieldConfig.Default, &fieldConfig)
-			if err != nil {
-				return fmt.Errorf("failed to resolve default value for field '%s': %w", fieldName, err)
+			defaultValue, resolveErr := resolveDefaultValue(fieldConfig.Default, &fieldConfig)
+			if resolveErr != nil {
+				return nil, fmt.Errorf("failed to resolve default value for field '%s': %w", fieldName, resolveErr)
 			}
 			workItem.Fields[fieldName] = defaultValue
+			added = append(added, fieldName)
 		}
 	}
 
-	return nil
+	return added, nil
 }
 
 // resolveDefaultValue converts a default value to the appropriate type for the field.
@@ -1323,13 +1326,20 @@ func fixWorkItemFields(file string, cfg *config.Config, result *ValidationResult
 		return fmt.Errorf("failed to parse file: %w", err)
 	}
 
-	// Apply defaults for missing required fields
-	if err := ApplyFieldDefaults(workItem, cfg); err != nil {
+	// Apply defaults for missing fields (required or not)
+	added, err := ApplyFieldDefaults(workItem, cfg)
+	if err != nil {
 		return fmt.Errorf("failed to apply defaults: %w", err)
 	}
+	modified := len(added) > 0
+	for _, fieldName := range added {
+		result.AddError(file, fmt.Sprintf("fixed field '%s': applied default value", fieldName))
+	}
 
-	// Check if work item was modified
-	modified := processFieldFixes(workItem, cfg, result, file)
+	// Apply value fixes (date format, enum case, etc.) and detect if any were made
+	if processFieldFixes(workItem, cfg, result, file) {
+		modified = true
+	}
 
 	// Write back if modified
 	if modified {
@@ -1341,6 +1351,9 @@ func fixWorkItemFields(file string, cfg *config.Config, result *ValidationResult
 	return nil
 }
 
+// processFieldFixes applies value-level fixes (date format, enum case, email trim, etc.)
+// and returns true if any fix was applied. Default application is handled by ApplyFieldDefaults
+// and fixWorkItemFields; this only handles correcting invalid existing values.
 func processFieldFixes(workItem *WorkItem, cfg *config.Config, result *ValidationResult, file string) bool {
 	modified := false
 	for fieldName, fieldConfig := range cfg.Fields {
@@ -1348,20 +1361,7 @@ func processFieldFixes(workItem *WorkItem, cfg *config.Config, result *Validatio
 			continue
 		}
 
-		// Check if field is required and missing
-		if fieldConfig.Required {
-			if _, exists := workItem.Fields[fieldName]; exists {
-				// Default was applied by ApplyFieldDefaults (even if empty), mark as modified
-				modified = true
-				// Report the fix if a default was configured (ApplyFieldDefaults only adds fields with defaults)
-				if fieldConfig.Default != nil {
-					result.AddError(file, fmt.Sprintf("fixed field '%s': applied default value", fieldName))
-				}
-			}
-			// If field doesn't exist, no default was configured/applied, so nothing was modified
-		}
-
-		// Try to fix invalid field values
+		// Try to fix invalid field values (date format, enum case, etc.)
 		if value, exists := workItem.Fields[fieldName]; exists && !isEmptyValue(value) {
 			if fixedValue, shouldUpdate := tryFixFieldValue(fieldName, value, &fieldConfig); shouldUpdate {
 				workItem.Fields[fieldName] = fixedValue
