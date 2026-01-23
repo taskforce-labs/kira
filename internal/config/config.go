@@ -5,26 +5,29 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	yaml "gopkg.in/yaml.v3"
 )
 
 // Config represents the kira configuration structure.
 type Config struct {
-	Version       string            `yaml:"version"`
-	Templates     map[string]string `yaml:"templates"`
-	StatusFolders map[string]string `yaml:"status_folders"`
-	Validation    ValidationConfig  `yaml:"validation"`
-	Commit        CommitConfig      `yaml:"commit"`
-	Release       ReleaseConfig     `yaml:"release"`
-	DefaultStatus string            `yaml:"default_status"`
-	Git           *GitConfig        `yaml:"git"`
-	Start         *StartConfig      `yaml:"start"`
-	IDE           *IDEConfig        `yaml:"ide"`
-	Workspace     *WorkspaceConfig  `yaml:"workspace"`
-	Users         UsersConfig       `yaml:"users"`
+	Version       string                 `yaml:"version"`
+	Templates     map[string]string      `yaml:"templates"`
+	StatusFolders map[string]string      `yaml:"status_folders"`
+	Validation    ValidationConfig       `yaml:"validation"`
+	Commit        CommitConfig           `yaml:"commit"`
+	Release       ReleaseConfig          `yaml:"release"`
+	DefaultStatus string                 `yaml:"default_status"`
+	Git           *GitConfig             `yaml:"git"`
+	Start         *StartConfig           `yaml:"start"`
+	IDE           *IDEConfig             `yaml:"ide"`
+	Workspace     *WorkspaceConfig       `yaml:"workspace"`
+	Users         UsersConfig            `yaml:"users"`
+	Fields        map[string]FieldConfig `yaml:"fields"`
 }
 
 // GitConfig contains git-related settings.
@@ -76,6 +79,7 @@ type ValidationConfig struct {
 	RequiredFields []string `yaml:"required_fields"`
 	IDFormat       string   `yaml:"id_format"`
 	StatusValues   []string `yaml:"status_values"`
+	Strict         bool     `yaml:"strict"` // If true, flag fields not in configuration
 }
 
 // CommitConfig contains git commit settings.
@@ -106,6 +110,32 @@ type UsersConfig struct {
 	SavedUsers      []SavedUser `yaml:"saved_users"`               // Users added via configuration
 }
 
+// FieldConfig represents configuration for a custom field in work items.
+type FieldConfig struct {
+	Type          string      `yaml:"type"`           // string, date, email, url, number, array, enum
+	Required      bool        `yaml:"required"`       // whether the field is required
+	Default       interface{} `yaml:"default"`        // default value for the field
+	Format        string      `yaml:"format"`         // regex pattern or date format
+	AllowedValues []string    `yaml:"allowed_values"` // for enum type
+	Description   string      `yaml:"description"`    // human-readable description
+	DisplayName   string      `yaml:"display_name"`   // alternative display name
+	Category      string      `yaml:"category"`       // optional grouping
+	Deprecated    bool        `yaml:"deprecated"`     // mark field as deprecated
+	MinLength     *int        `yaml:"min_length"`     // for strings/arrays
+	MaxLength     *int        `yaml:"max_length"`     // for strings/arrays
+	MinValue      *float64    `yaml:"min"`            // for numbers
+	MaxValue      *float64    `yaml:"max"`            // for numbers
+	MinDate       string      `yaml:"min_date"`       // for dates (absolute or relative)
+	MaxDate       string      `yaml:"max_date"`       // for dates (absolute or relative)
+	ItemType      string      `yaml:"item_type"`      // for arrays
+	Unique        bool        `yaml:"unique"`         // for arrays
+	Schemes       []string    `yaml:"schemes"`        // for URLs
+	CaseSensitive bool        `yaml:"case_sensitive"` // for enums
+}
+
+// HardcodedFields is a list of fields that cannot be configured.
+var HardcodedFields = []string{"id", "title", "status", "kind", "created"}
+
 // DefaultConfig provides default configuration values.
 var DefaultConfig = Config{
 	Version: "1.0",
@@ -128,6 +158,7 @@ var DefaultConfig = Config{
 		RequiredFields: []string{"id", "title", "status", "kind", "created"},
 		IDFormat:       "^\\d{3}$",
 		StatusValues:   []string{"backlog", "todo", "doing", "review", "done", "released", "abandoned", "archived"},
+		Strict:         false,
 	},
 	Commit: CommitConfig{
 		DefaultMessage:      "Update work items",
@@ -217,6 +248,137 @@ func validateConfig(config *Config) error {
 		}
 	}
 
+	// Validate field configuration
+	if err := validateFieldConfig(config); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateFieldConfig validates the field configuration.
+func validateFieldConfig(config *Config) error {
+	if config.Fields == nil {
+		return nil
+	}
+
+	if err := validateNoHardcodedFields(config.Fields); err != nil {
+		return err
+	}
+
+	for fieldName, fieldConfig := range config.Fields {
+		if err := validateSingleFieldConfig(fieldName, &fieldConfig); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateNoHardcodedFields(fields map[string]FieldConfig) error {
+	for fieldName := range fields {
+		for _, hardcoded := range HardcodedFields {
+			if fieldName == hardcoded {
+				return fmt.Errorf("fields 'id', 'title', 'status', 'kind', and 'created' cannot be configured and must use hardcoded validation")
+			}
+		}
+	}
+	return nil
+}
+
+func validateSingleFieldConfig(fieldName string, fieldConfig *FieldConfig) error {
+	if err := validateFieldType(fieldName, fieldConfig); err != nil {
+		return err
+	}
+	if err := validateFieldTypeSpecifics(fieldName, fieldConfig); err != nil {
+		return err
+	}
+	if err := validateFieldFormat(fieldName, fieldConfig); err != nil {
+		return err
+	}
+	return validateFieldConstraints(fieldName, fieldConfig)
+}
+
+func validateFieldType(fieldName string, fieldConfig *FieldConfig) error {
+	if fieldConfig.Type == "" {
+		return fmt.Errorf("field '%s': type is required", fieldName)
+	}
+	validTypes := map[string]bool{
+		"string": true,
+		"date":   true,
+		"email":  true,
+		"url":    true,
+		"number": true,
+		"array":  true,
+		"enum":   true,
+	}
+	if !validTypes[fieldConfig.Type] {
+		return fmt.Errorf("field '%s': invalid type '%s'. Valid types: string, date, email, url, number, array, enum", fieldName, fieldConfig.Type)
+	}
+	return nil
+}
+
+func validateFieldTypeSpecifics(fieldName string, fieldConfig *FieldConfig) error {
+	if fieldConfig.Type == "enum" {
+		if len(fieldConfig.AllowedValues) == 0 {
+			return fmt.Errorf("field '%s': enum type requires allowed_values", fieldName)
+		}
+	}
+	if fieldConfig.Type == "array" {
+		return validateArrayFieldConfig(fieldName, fieldConfig)
+	}
+	return nil
+}
+
+func validateArrayFieldConfig(fieldName string, fieldConfig *FieldConfig) error {
+	if fieldConfig.ItemType == "" {
+		return fmt.Errorf("field '%s': array type requires item_type", fieldName)
+	}
+	validItemTypes := map[string]bool{
+		"string": true,
+		"number": true,
+		"enum":   true,
+	}
+	if !validItemTypes[fieldConfig.ItemType] {
+		return fmt.Errorf("field '%s': invalid item_type '%s' for array. Valid item types: string, number, enum", fieldName, fieldConfig.ItemType)
+	}
+	if fieldConfig.ItemType == "enum" && len(fieldConfig.AllowedValues) == 0 {
+		return fmt.Errorf("field '%s': array with enum item_type requires allowed_values", fieldName)
+	}
+	return nil
+}
+
+func validateFieldFormat(fieldName string, fieldConfig *FieldConfig) error {
+	if fieldConfig.Format == "" {
+		return nil
+	}
+	if fieldConfig.Type == "string" {
+		if _, err := regexp.Compile(fieldConfig.Format); err != nil {
+			return fmt.Errorf("field '%s': invalid regex format '%s': %w", fieldName, fieldConfig.Format, err)
+		}
+	}
+	if fieldConfig.Type == "date" {
+		// Date format validation is best-effort
+		testDate := "2006-01-02"
+		if _, err := time.Parse(fieldConfig.Format, testDate); err != nil {
+			// Try parsing with the format itself as a test
+			_, _ = time.Parse(fieldConfig.Format, fieldConfig.Format)
+		}
+	}
+	return nil
+}
+
+func validateFieldConstraints(fieldName string, fieldConfig *FieldConfig) error {
+	if fieldConfig.MinLength != nil && fieldConfig.MaxLength != nil {
+		if *fieldConfig.MinLength > *fieldConfig.MaxLength {
+			return fmt.Errorf("field '%s': min_length (%d) cannot be greater than max_length (%d)", fieldName, *fieldConfig.MinLength, *fieldConfig.MaxLength)
+		}
+	}
+	if fieldConfig.MinValue != nil && fieldConfig.MaxValue != nil {
+		if *fieldConfig.MinValue > *fieldConfig.MaxValue {
+			return fmt.Errorf("field '%s': min (%v) cannot be greater than max (%v)", fieldName, *fieldConfig.MinValue, *fieldConfig.MaxValue)
+		}
+	}
 	return nil
 }
 
@@ -278,6 +440,13 @@ func mergeWithDefaults(config *Config) {
 	mergeStartDefaults(config)
 	mergeWorkspaceDefaults(config)
 	mergeUsersDefaults(config)
+	mergeFieldDefaults(config)
+}
+
+func mergeFieldDefaults(config *Config) {
+	if config.Fields == nil {
+		config.Fields = make(map[string]FieldConfig)
+	}
 }
 
 func mergeGitDefaults(config *Config) {

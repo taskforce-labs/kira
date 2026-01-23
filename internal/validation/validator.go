@@ -3,8 +3,10 @@ package validation
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -15,6 +17,26 @@ import (
 
 	"kira/internal/config"
 )
+
+// Field type constants
+const (
+	fieldTypeString = "string"
+	fieldTypeDate   = "date"
+	fieldTypeEmail  = "email"
+	fieldTypeURL    = "url"
+	fieldTypeNumber = "number"
+	fieldTypeArray  = "array"
+	fieldTypeEnum   = "enum"
+)
+
+// Date format constants
+const (
+	dateFormatDefault = "2006-01-02"
+	dateValueToday    = "today"
+)
+
+// YAML separator
+const yamlSeparator = "---"
 
 // ValidationError represents a validation error for a specific file.
 //
@@ -102,9 +124,21 @@ func ValidateWorkItems(cfg *config.Config) (*ValidationResult, error) {
 			result.AddError(file, err.Error())
 		}
 
-		// Validate date formats
-		if err := validateDateFormats(workItem); err != nil {
+		// Validate date formats (uses field config if available, falls back to hardcoded logic)
+		if err := validateDateFormats(workItem, cfg); err != nil {
 			result.AddError(file, err.Error())
+		}
+
+		// Validate configured fields
+		if err := validateConfiguredFields(workItem, cfg); err != nil {
+			result.AddError(file, err.Error())
+		}
+
+		// Validate unknown fields in strict mode
+		if cfg.Validation.Strict {
+			if err := validateUnknownFields(workItem, cfg, file); err != nil {
+				result.AddError(file, err.Error())
+			}
 		}
 
 		// Track ID for duplicate checking
@@ -193,12 +227,12 @@ func parseWorkItemFile(filePath string) (*WorkItem, error) {
 	inYAML := false
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if i == 0 && trimmed == "---" {
+		if i == 0 && trimmed == yamlSeparator {
 			inYAML = true
 			continue
 		}
 		if inYAML {
-			if trimmed == "---" {
+			if trimmed == yamlSeparator {
 				break
 			}
 			yamlLines = append(yamlLines, line)
@@ -216,27 +250,56 @@ func parseWorkItemFile(filePath string) (*WorkItem, error) {
 }
 
 func validateRequiredFields(workItem *WorkItem, cfg *config.Config) error {
+	if err := validateHardcodedRequiredFields(workItem, cfg); err != nil {
+		return err
+	}
+	return validateConfiguredRequiredFields(workItem, cfg)
+}
+
+func validateHardcodedRequiredFields(workItem *WorkItem, cfg *config.Config) error {
 	for _, field := range cfg.Validation.RequiredFields {
-		switch field {
-		case "id":
-			if workItem.ID == "" {
-				return fmt.Errorf("missing required field: id")
-			}
-		case "title":
-			if workItem.Title == "" {
-				return fmt.Errorf("missing required field: title")
-			}
-		case "status":
-			if workItem.Status == "" {
-				return fmt.Errorf("missing required field: status")
-			}
-		case "kind":
-			if workItem.Kind == "" {
-				return fmt.Errorf("missing required field: kind")
-			}
-		case "created":
-			if workItem.Created == "" {
-				return fmt.Errorf("missing required field: created")
+		if err := validateHardcodedField(workItem, field); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateHardcodedField(workItem *WorkItem, field string) error {
+	switch field {
+	case "id":
+		if workItem.ID == "" {
+			return fmt.Errorf("missing required field: id")
+		}
+	case "title":
+		if workItem.Title == "" {
+			return fmt.Errorf("missing required field: title")
+		}
+	case "status":
+		if workItem.Status == "" {
+			return fmt.Errorf("missing required field: status")
+		}
+	case "kind":
+		if workItem.Kind == "" {
+			return fmt.Errorf("missing required field: kind")
+		}
+	case "created":
+		if workItem.Created == "" {
+			return fmt.Errorf("missing required field: created")
+		}
+	}
+	return nil
+}
+
+func validateConfiguredRequiredFields(workItem *WorkItem, cfg *config.Config) error {
+	if cfg.Fields == nil {
+		return nil
+	}
+	for fieldName, fieldConfig := range cfg.Fields {
+		if fieldConfig.Required {
+			value, exists := workItem.Fields[fieldName]
+			if !exists || isEmptyValue(value) {
+				return fmt.Errorf("missing required field: %s", fieldName)
 			}
 		}
 	}
@@ -263,16 +326,26 @@ func validateStatus(status string, cfg *config.Config) error {
 	return fmt.Errorf("invalid status '%s'. Valid values: %s", status, strings.Join(cfg.Validation.StatusValues, ", "))
 }
 
-func validateDateFormats(workItem *WorkItem) error {
-	// Validate created date
+func validateDateFormats(workItem *WorkItem, cfg *config.Config) error {
+	// Validate created date (always use hardcoded validation)
 	if workItem.Created != "" {
 		if _, err := time.Parse("2006-01-02", workItem.Created); err != nil {
 			return fmt.Errorf("invalid created date format: %s", workItem.Created)
 		}
 	}
 
-	// Validate other date fields if present
+	// Validate other date fields
+	// If field config exists for a date field, skip it here (it will be validated in validateConfiguredFields)
+	// Otherwise fall back to hardcoded logic
 	for key, value := range workItem.Fields {
+		// Skip if this field is configured (it will be validated in validateConfiguredFields)
+		if cfg.Fields != nil {
+			if _, exists := cfg.Fields[key]; exists {
+				continue
+			}
+		}
+
+		// Fall back to hardcoded logic (check if field name contains "date" or "due")
 		if strings.Contains(key, "date") || strings.Contains(key, "due") {
 			if str, ok := value.(string); ok && str != "" {
 				if _, err := time.Parse("2006-01-02", str); err != nil {
@@ -283,6 +356,748 @@ func validateDateFormats(workItem *WorkItem) error {
 	}
 
 	return nil
+}
+
+// validateConfiguredFields validates all configured fields in a work item.
+func validateConfiguredFields(workItem *WorkItem, cfg *config.Config) error {
+	if cfg.Fields == nil {
+		return nil // No field configuration, skip validation
+	}
+
+	var errors []string
+
+	// Validate each configured field that exists in the work item
+	for fieldName, value := range workItem.Fields {
+		// Skip hardcoded fields - they use hardcoded validation
+		isHardcoded := false
+		for _, hardcoded := range config.HardcodedFields {
+			if fieldName == hardcoded {
+				isHardcoded = true
+				break
+			}
+		}
+		if isHardcoded {
+			continue
+		}
+
+		// Check if field is configured
+		fieldConfig, exists := cfg.Fields[fieldName]
+		if !exists {
+			continue // Field not configured, skip validation
+		}
+
+		// Validate the field value
+		if err := validateFieldValue(fieldName, value, &fieldConfig); err != nil {
+			errors = append(errors, err.Error())
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("%s", strings.Join(errors, "; "))
+	}
+
+	return nil
+}
+
+// validateFieldValue validates a single field value against its configuration.
+func validateFieldValue(fieldName string, value interface{}, fieldConfig *config.FieldConfig) error {
+	// Type validation
+	if err := validateFieldType(value, fieldConfig.Type); err != nil {
+		return fmt.Errorf("field '%s': %w", fieldName, err)
+	}
+
+	// Format validation
+	if fieldConfig.Format != "" {
+		if err := validateFieldFormat(value, fieldConfig.Format, fieldConfig.Type); err != nil {
+			return fmt.Errorf("field '%s': %w", fieldName, err)
+		}
+	}
+
+	// Enum validation
+	if fieldConfig.Type == fieldTypeEnum {
+		if err := validateEnumValue(value, fieldConfig.AllowedValues, fieldConfig.CaseSensitive); err != nil {
+			return fmt.Errorf("field '%s': %w", fieldName, err)
+		}
+	}
+
+	// Range validation
+	if err := validateFieldRange(value, fieldConfig); err != nil {
+		return fmt.Errorf("field '%s': %w", fieldName, err)
+	}
+
+	return nil
+}
+
+// validateFieldType checks that a value matches the declared field type.
+func validateFieldType(value interface{}, fieldType string) error {
+	switch fieldType {
+	case fieldTypeString:
+		return validateStringType(value)
+	case fieldTypeDate:
+		return validateDateType(value)
+	case fieldTypeEmail:
+		return validateEmailType(value)
+	case fieldTypeURL:
+		return validateURLType(value)
+	case fieldTypeNumber:
+		return validateNumberType(value)
+	case fieldTypeArray:
+		return validateArrayType(value)
+	case fieldTypeEnum:
+		return validateEnumType(value)
+	default:
+		return fmt.Errorf("unknown field type: %s", fieldType)
+	}
+}
+
+func validateStringType(value interface{}) error {
+	if _, ok := value.(string); !ok {
+		return fmt.Errorf("expected string, got %T", value)
+	}
+	return nil
+}
+
+func validateDateType(value interface{}) error {
+	// YAML may parse dates as time.Time, so accept both
+	if _, ok := value.(string); !ok {
+		if _, ok := value.(time.Time); !ok {
+			return fmt.Errorf("expected date string or time.Time, got %T", value)
+		}
+	}
+	// Format validation happens in validateFieldFormat
+	return nil
+}
+
+func validateEmailType(value interface{}) error {
+	if str, ok := value.(string); ok {
+		if !isValidEmail(str) {
+			return fmt.Errorf("invalid email format: %s", str)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected email string, got %T", value)
+}
+
+func validateURLType(value interface{}) error {
+	if str, ok := value.(string); ok {
+		if !isValidURL(str) {
+			return fmt.Errorf("invalid URL format: %s", str)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected URL string, got %T", value)
+}
+
+func validateNumberType(value interface{}) error {
+	if !isNumeric(value) {
+		return fmt.Errorf("expected number, got %T", value)
+	}
+	return nil
+}
+
+func validateArrayType(value interface{}) error {
+	if _, ok := value.([]interface{}); !ok {
+		// Also check for []string, []int, etc.
+		val := reflect.ValueOf(value)
+		if val.Kind() != reflect.Slice && val.Kind() != reflect.Array {
+			return fmt.Errorf("expected array, got %T", value)
+		}
+	}
+	return nil
+}
+
+func validateEnumType(value interface{}) error {
+	if _, ok := value.(string); !ok {
+		return fmt.Errorf("expected enum string, got %T", value)
+	}
+	return nil
+}
+
+// validateFieldFormat applies format validation (regex for strings, date format for dates).
+func validateFieldFormat(value interface{}, format, fieldType string) error {
+	switch fieldType {
+	case fieldTypeString:
+		return validateStringFormat(value, format)
+	case fieldTypeDate:
+		return validateDateFormat(value, format)
+	default:
+		return nil
+	}
+}
+
+func validateStringFormat(value interface{}, format string) error {
+	str, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("format validation requires string value")
+	}
+	matched, err := regexp.MatchString(format, str)
+	if err != nil {
+		return fmt.Errorf("invalid regex format: %w", err)
+	}
+	if !matched {
+		return fmt.Errorf("value '%s' does not match format pattern: %s", str, format)
+	}
+	return nil
+}
+
+func validateDateFormat(value interface{}, format string) error {
+	// YAML may parse dates as time.Time, so handle both
+	if str, ok := value.(string); ok {
+		if format == "" {
+			format = dateFormatDefault
+		}
+		if _, err := time.Parse(format, str); err != nil {
+			return fmt.Errorf("date '%s' does not match format: %s", str, format)
+		}
+		return nil
+	}
+	if t, ok := value.(time.Time); ok {
+		// For time.Time, validate the format by formatting and parsing
+		if format != "" {
+			formatted := t.Format(format)
+			if _, err := time.Parse(format, formatted); err != nil {
+				return fmt.Errorf("date format validation failed: %s", format)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("format validation requires string or time.Time value, got %T", value)
+}
+
+// validateEnumValue checks that a value is in the allowed values list.
+func validateEnumValue(value interface{}, allowedValues []string, caseSensitive bool) error {
+	str, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("enum validation requires string value")
+	}
+
+	for _, allowed := range allowedValues {
+		if caseSensitive {
+			if str == allowed {
+				return nil
+			}
+		} else {
+			if strings.EqualFold(str, allowed) {
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("value '%s' is not in allowed values: %s", str, strings.Join(allowedValues, ", "))
+}
+
+// validateFieldRange checks min/max constraints for fields.
+func validateFieldRange(value interface{}, fieldConfig *config.FieldConfig) error {
+	switch fieldConfig.Type {
+	case fieldTypeString:
+		return validateStringRange(value, fieldConfig)
+	case fieldTypeNumber:
+		return validateNumberRange(value, fieldConfig)
+	case fieldTypeDate:
+		return validateDateRangeValue(value, fieldConfig)
+	case fieldTypeArray:
+		return validateArrayRange(value, fieldConfig)
+	case fieldTypeURL:
+		return validateURLRange(value, fieldConfig)
+	default:
+		return nil
+	}
+}
+
+func validateStringRange(value interface{}, fieldConfig *config.FieldConfig) error {
+	str, ok := value.(string)
+	if !ok {
+		return nil // Type validation will catch this
+	}
+	length := len(str)
+	if fieldConfig.MinLength != nil && length < *fieldConfig.MinLength {
+		return fmt.Errorf("string length %d is less than min_length %d", length, *fieldConfig.MinLength)
+	}
+	if fieldConfig.MaxLength != nil && length > *fieldConfig.MaxLength {
+		return fmt.Errorf("string length %d is greater than max_length %d", length, *fieldConfig.MaxLength)
+	}
+	return nil
+}
+
+func validateNumberRange(value interface{}, fieldConfig *config.FieldConfig) error {
+	num, err := getNumericValue(value)
+	if err != nil {
+		return nil // Type validation will catch this
+	}
+	if fieldConfig.MinValue != nil && num < *fieldConfig.MinValue {
+		return fmt.Errorf("value %v is less than min %v", num, *fieldConfig.MinValue)
+	}
+	if fieldConfig.MaxValue != nil && num > *fieldConfig.MaxValue {
+		return fmt.Errorf("value %v is greater than max %v", num, *fieldConfig.MaxValue)
+	}
+	return nil
+}
+
+func validateDateRangeValue(value interface{}, fieldConfig *config.FieldConfig) error {
+	var date time.Time
+	var err error
+
+	// Handle both string and time.Time (YAML may parse dates as time.Time)
+	if str, ok := value.(string); ok {
+		dateFormat := fieldConfig.Format
+		if dateFormat == "" {
+			dateFormat = dateFormatDefault
+		}
+		date, err = time.Parse(dateFormat, str)
+		if err != nil {
+			return nil // Format validation will catch this
+		}
+	} else if t, ok := value.(time.Time); ok {
+		date = t
+	} else {
+		return nil // Type validation will catch this
+	}
+
+	return validateDateRange(date, fieldConfig.MinDate, fieldConfig.MaxDate)
+}
+
+func validateArrayRange(value interface{}, fieldConfig *config.FieldConfig) error {
+	arr, err := convertToArray(value)
+	if err != nil {
+		return nil // Type validation will catch this
+	}
+	if err := validateArrayLength(arr, fieldConfig); err != nil {
+		return err
+	}
+	if err := validateArrayItems(arr, fieldConfig); err != nil {
+		return err
+	}
+	return validateArrayUniqueness(arr, fieldConfig)
+}
+
+func convertToArray(value interface{}) ([]interface{}, error) {
+	switch v := value.(type) {
+	case []interface{}:
+		return v, nil
+	default:
+		val := reflect.ValueOf(value)
+		if val.Kind() == reflect.Slice || val.Kind() == reflect.Array {
+			arr := make([]interface{}, val.Len())
+			for i := 0; i < val.Len(); i++ {
+				arr[i] = val.Index(i).Interface()
+			}
+			return arr, nil
+		}
+		return nil, fmt.Errorf("not an array")
+	}
+}
+
+func validateArrayLength(arr []interface{}, fieldConfig *config.FieldConfig) error {
+	length := len(arr)
+	if fieldConfig.MinLength != nil && length < *fieldConfig.MinLength {
+		return fmt.Errorf("array length %d is less than min_length %d", length, *fieldConfig.MinLength)
+	}
+	if fieldConfig.MaxLength != nil && length > *fieldConfig.MaxLength {
+		return fmt.Errorf("array length %d is greater than max_length %d", length, *fieldConfig.MaxLength)
+	}
+	return nil
+}
+
+func validateArrayItems(arr []interface{}, fieldConfig *config.FieldConfig) error {
+	if fieldConfig.ItemType == "" {
+		return nil
+	}
+	for i, item := range arr {
+		if err := validateArrayItem(item, fieldConfig); err != nil {
+			return fmt.Errorf("array item at index %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func validateArrayUniqueness(arr []interface{}, fieldConfig *config.FieldConfig) error {
+	if !fieldConfig.Unique {
+		return nil
+	}
+	seen := make(map[interface{}]bool)
+	for _, item := range arr {
+		key := getItemKey(item)
+		if seen[key] {
+			return fmt.Errorf("array contains duplicate value: %v", item)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+func validateURLRange(value interface{}, fieldConfig *config.FieldConfig) error {
+	str, ok := value.(string)
+	if !ok {
+		return nil // Type validation will catch this
+	}
+	if len(fieldConfig.Schemes) > 0 {
+		parsedURL, err := url.Parse(str)
+		if err != nil {
+			return nil // URL validation will catch this
+		}
+		validScheme := false
+		for _, scheme := range fieldConfig.Schemes {
+			if parsedURL.Scheme == scheme {
+				validScheme = true
+				break
+			}
+		}
+		if !validScheme {
+			return fmt.Errorf("URL scheme '%s' is not allowed. Allowed schemes: %s", parsedURL.Scheme, strings.Join(fieldConfig.Schemes, ", "))
+		}
+	}
+	return nil
+}
+
+// validateArrayItem validates a single array item against the item_type.
+func validateArrayItem(item interface{}, fieldConfig *config.FieldConfig) error {
+	switch fieldConfig.ItemType {
+	case fieldTypeString:
+		if _, ok := item.(string); !ok {
+			return fmt.Errorf("expected string item, got %T", item)
+		}
+	case fieldTypeNumber:
+		if !isNumeric(item) {
+			return fmt.Errorf("expected number item, got %T", item)
+		}
+	case fieldTypeEnum:
+		str, ok := item.(string)
+		if !ok {
+			return fmt.Errorf("expected enum string item, got %T", item)
+		}
+		return validateEnumValue(str, fieldConfig.AllowedValues, fieldConfig.CaseSensitive)
+	}
+	return nil
+}
+
+// validateDateRange validates a date against min/max date constraints.
+func validateDateRange(date time.Time, minDate, maxDate string) error {
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	if minDate != "" {
+		var minTime time.Time
+		var err error
+		switch minDate {
+		case dateValueToday:
+			minTime = today
+		case "future":
+			minTime = today.AddDate(0, 0, 1) // Tomorrow
+		default:
+			// Try to parse as absolute date
+			minTime, err = time.Parse(dateFormatDefault, minDate)
+			if err != nil {
+				// If parsing fails, try relative date parsing
+				return fmt.Errorf("invalid min_date format: %s", minDate)
+			}
+		}
+		if date.Before(minTime) {
+			return fmt.Errorf("date %s is before min_date %s", date.Format("2006-01-02"), minDate)
+		}
+	}
+
+	if maxDate != "" {
+		var maxTime time.Time
+		var err error
+		switch maxDate {
+		case dateValueToday:
+			maxTime = today
+		case "future":
+			// No upper bound for "future"
+			return nil
+		default:
+			// Try to parse as absolute date
+			maxTime, err = time.Parse(dateFormatDefault, maxDate)
+			if err != nil {
+				return fmt.Errorf("invalid max_date format: %s", maxDate)
+			}
+		}
+		if date.After(maxTime) {
+			return fmt.Errorf("date %s is after max_date %s", date.Format("2006-01-02"), maxDate)
+		}
+	}
+
+	return nil
+}
+
+// Helper functions
+
+// isValidEmail checks if a string is a valid email address.
+func isValidEmail(email string) bool {
+	// Simple email validation regex
+	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+	return emailRegex.MatchString(email)
+}
+
+// isValidURL checks if a string is a valid URL.
+// Note: This function uses url.ParseRequestURI which has a known vulnerability
+// (GO-2025-4010) in Go < 1.25.2. For production use, upgrade to Go 1.25.2+.
+func isValidURL(urlStr string) bool {
+	// Basic validation before parsing to reduce attack surface
+	if len(urlStr) == 0 || len(urlStr) > 2048 {
+		return false
+	}
+	// Check for potentially problematic patterns
+	if strings.Contains(urlStr, "[") && strings.Contains(urlStr, "]") {
+		// IPv6 addresses in brackets - validate format more strictly
+		// This is a partial workaround for GO-2025-4010
+		if !isValidIPv6Bracketed(urlStr) {
+			return false
+		}
+	}
+	_, err := url.ParseRequestURI(urlStr)
+	return err == nil
+}
+
+// isValidIPv6Bracketed performs basic validation of bracketed IPv6 addresses
+// as a workaround for GO-2025-4010 until Go 1.25.2+ is available.
+func isValidIPv6Bracketed(urlStr string) bool {
+	// Find the bracketed portion
+	start := strings.Index(urlStr, "[")
+	end := strings.Index(urlStr, "]")
+	if start == -1 || end == -1 || end <= start {
+		return false
+	}
+	// Extract the bracketed content
+	bracketed := urlStr[start+1 : end]
+	// Basic validation: should contain colons and hex characters only
+	// This is a simplified check - proper IPv6 validation is complex
+	if len(bracketed) == 0 || len(bracketed) > 45 {
+		return false
+	}
+	// Check for valid IPv6 characters (simplified)
+	for _, r := range bracketed {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') && r != ':' && r != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+// isNumeric checks if a value is numeric (int, int64, float64, etc.).
+func isNumeric(value interface{}) bool {
+	switch value.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return true
+	}
+	return false
+}
+
+// getNumericValue converts a value to float64 for comparison.
+func getNumericValue(value interface{}) (float64, error) {
+	switch v := value.(type) {
+	case int:
+		return float64(v), nil
+	case int8:
+		return float64(v), nil
+	case int16:
+		return float64(v), nil
+	case int32:
+		return float64(v), nil
+	case int64:
+		return float64(v), nil
+	case uint:
+		return float64(v), nil
+	case uint8:
+		return float64(v), nil
+	case uint16:
+		return float64(v), nil
+	case uint32:
+		return float64(v), nil
+	case uint64:
+		return float64(v), nil
+	case float32:
+		return float64(v), nil
+	case float64:
+		return v, nil
+	default:
+		return 0, fmt.Errorf("not a numeric value: %T", value)
+	}
+}
+
+// getItemKey returns a key for an array item for uniqueness checking.
+func getItemKey(item interface{}) interface{} {
+	// For strings and numbers, use the value directly
+	// For other types, convert to string
+	switch v := item.(type) {
+	case string, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return v
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// isEmptyValue checks if a value is empty (nil, empty string, empty array, etc.).
+func isEmptyValue(value interface{}) bool {
+	if value == nil {
+		return true
+	}
+	switch v := value.(type) {
+	case string:
+		return v == ""
+	case []interface{}:
+		return len(v) == 0
+	default:
+		val := reflect.ValueOf(value)
+		if val.Kind() == reflect.Slice || val.Kind() == reflect.Array {
+			return val.Len() == 0
+		}
+		return false
+	}
+}
+
+// ApplyFieldDefaults applies default values to a work item for configured fields that are missing.
+func ApplyFieldDefaults(workItem *WorkItem, cfg *config.Config) error {
+	if cfg.Fields == nil {
+		return nil // No field configuration
+	}
+
+	for fieldName, fieldConfig := range cfg.Fields {
+		// Skip if field already exists and is not empty
+		if value, exists := workItem.Fields[fieldName]; exists && !isEmptyValue(value) {
+			continue
+		}
+
+		// Skip hardcoded fields
+		isHardcoded := false
+		for _, hardcoded := range config.HardcodedFields {
+			if fieldName == hardcoded {
+				isHardcoded = true
+				break
+			}
+		}
+		if isHardcoded {
+			continue
+		}
+
+		// Apply default if configured
+		if fieldConfig.Default != nil {
+			defaultValue, err := resolveDefaultValue(fieldConfig.Default, &fieldConfig)
+			if err != nil {
+				return fmt.Errorf("failed to resolve default value for field '%s': %w", fieldName, err)
+			}
+			workItem.Fields[fieldName] = defaultValue
+		}
+	}
+
+	return nil
+}
+
+// resolveDefaultValue converts a default value to the appropriate type for the field.
+func resolveDefaultValue(defaultValue interface{}, fieldConfig *config.FieldConfig) (interface{}, error) {
+	switch fieldConfig.Type {
+	case fieldTypeString:
+		return resolveStringDefault(defaultValue)
+	case fieldTypeDate:
+		return resolveDateDefault(defaultValue, fieldConfig)
+	case fieldTypeEmail:
+		return resolveEmailDefault(defaultValue)
+	case fieldTypeURL:
+		return resolveURLDefault(defaultValue)
+	case fieldTypeNumber:
+		return resolveNumberDefault(defaultValue)
+	case fieldTypeArray:
+		return resolveArrayDefault(defaultValue)
+	case fieldTypeEnum:
+		return resolveEnumDefault(defaultValue, fieldConfig)
+	default:
+		return defaultValue, nil
+	}
+}
+
+func resolveStringDefault(defaultValue interface{}) (interface{}, error) {
+	if str, ok := defaultValue.(string); ok {
+		return str, nil
+	}
+	return fmt.Sprintf("%v", defaultValue), nil
+}
+
+func resolveDateDefault(defaultValue interface{}, fieldConfig *config.FieldConfig) (interface{}, error) {
+	if str, ok := defaultValue.(string); ok {
+		// Handle special values like "today"
+		if str == dateValueToday {
+			return time.Now().Format(dateFormatDefault), nil
+		}
+		// Validate the date format
+		dateFormat := fieldConfig.Format
+		if dateFormat == "" {
+			dateFormat = dateFormatDefault
+		}
+		if _, err := time.Parse(dateFormat, str); err != nil {
+			return nil, fmt.Errorf("invalid date default value '%s': %w", str, err)
+		}
+		return str, nil
+	}
+	return nil, fmt.Errorf("date default must be a string, got %T", defaultValue)
+}
+
+func resolveEmailDefault(defaultValue interface{}) (interface{}, error) {
+	if str, ok := defaultValue.(string); ok {
+		if !isValidEmail(str) {
+			return nil, fmt.Errorf("invalid email default value: %s", str)
+		}
+		return str, nil
+	}
+	return nil, fmt.Errorf("email default must be a string, got %T", defaultValue)
+}
+
+func resolveURLDefault(defaultValue interface{}) (interface{}, error) {
+	if str, ok := defaultValue.(string); ok {
+		if !isValidURL(str) {
+			return nil, fmt.Errorf("invalid URL default value: %s", str)
+		}
+		return str, nil
+	}
+	return nil, fmt.Errorf("URL default must be a string, got %T", defaultValue)
+}
+
+func resolveNumberDefault(defaultValue interface{}) (interface{}, error) {
+	if isNumeric(defaultValue) {
+		return defaultValue, nil
+	}
+	// Try to convert string to number
+	if str, ok := defaultValue.(string); ok {
+		if num, err := strconv.ParseFloat(str, 64); err == nil {
+			return num, nil
+		}
+	}
+	return nil, fmt.Errorf("number default must be numeric, got %T", defaultValue)
+}
+
+func resolveArrayDefault(defaultValue interface{}) (interface{}, error) {
+	// Default can be an array or a single value that becomes an array
+	if arr, ok := defaultValue.([]interface{}); ok {
+		return arr, nil
+	}
+	// Single value becomes array with one element
+	return []interface{}{defaultValue}, nil
+}
+
+func resolveEnumDefault(defaultValue interface{}, fieldConfig *config.FieldConfig) (interface{}, error) {
+	if str, ok := defaultValue.(string); ok {
+		// Validate against allowed values
+		if len(fieldConfig.AllowedValues) > 0 {
+			valid := false
+			for _, allowed := range fieldConfig.AllowedValues {
+				if fieldConfig.CaseSensitive {
+					if str == allowed {
+						valid = true
+						break
+					}
+				} else {
+					if strings.EqualFold(str, allowed) {
+						valid = true
+						break
+					}
+				}
+			}
+			if !valid {
+				return nil, fmt.Errorf("enum default '%s' is not in allowed values: %s", str, strings.Join(fieldConfig.AllowedValues, ", "))
+			}
+		}
+		return str, nil
+	}
+	return nil, fmt.Errorf("enum default must be a string, got %T", defaultValue)
 }
 
 func validateWorkflowRules(cfg *config.Config) error {
@@ -398,4 +1213,359 @@ func updateWorkItemID(filePath, newID string) error {
 	}
 
 	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o600)
+}
+
+// FixFieldIssues fixes field validation issues in work items.
+func FixFieldIssues(cfg *config.Config) (*ValidationResult, error) {
+	result := &ValidationResult{}
+
+	files, err := getWorkItemFiles()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get work item files: %w", err)
+	}
+
+	if cfg.Fields == nil {
+		// No field configuration, nothing to fix
+		return result, nil
+	}
+
+	for _, file := range files {
+		if err := fixWorkItemFields(file, cfg, result); err != nil {
+			result.AddError(file, fmt.Sprintf("failed to fix fields: %v", err))
+		}
+	}
+
+	return result, nil
+}
+
+// FixHardcodedDateFormats fixes date format issues in hardcoded fields like `created`.
+func FixHardcodedDateFormats() (*ValidationResult, error) {
+	result := &ValidationResult{}
+
+	files, err := getWorkItemFiles()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get work item files: %w", err)
+	}
+
+	for _, file := range files {
+		workItem, err := parseWorkItemFile(file)
+		if err != nil {
+			continue
+		}
+
+		// Fix created date format
+		if workItem.Created != "" {
+			originalDate := workItem.Created
+			if _, err := time.Parse(dateFormatDefault, workItem.Created); err != nil {
+				// Try to fix the date format
+				if fixedDate, fixed := tryFixHardcodedDate(workItem.Created); fixed {
+					workItem.Created = fixedDate
+					// Write back the fixed work item
+					if err := writeWorkItemFile(file, workItem); err != nil {
+						result.AddError(file, fmt.Sprintf("failed to fix created date: %v", err))
+					} else {
+						result.AddError(file, fmt.Sprintf("fixed created date format: %s -> %s", originalDate, fixedDate))
+					}
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// tryFixHardcodedDate attempts to fix a hardcoded date field value.
+func tryFixHardcodedDate(dateStr string) (string, bool) {
+	// Try common date formats
+	commonFormats := []string{
+		dateFormatDefault,           // 2006-01-02
+		"2006-01-02T15:04:05Z",      // ISO 8601 with time
+		"2006-01-02T15:04:05-07:00", // ISO 8601 with timezone
+		"2006-01-02T15:04:05.000Z",  // ISO 8601 with milliseconds
+		"2006/01/02",                // Slash format
+		"01/02/2006",                // US format
+		time.RFC3339,                // RFC3339
+		time.RFC3339Nano,            // RFC3339 with nanoseconds
+	}
+
+	for _, format := range commonFormats {
+		if t, err := time.Parse(format, dateStr); err == nil {
+			// Found a valid format, convert to expected format (YYYY-MM-DD)
+			return t.Format(dateFormatDefault), true
+		}
+	}
+
+	return dateStr, false
+}
+
+func fixWorkItemFields(file string, cfg *config.Config, result *ValidationResult) error {
+	workItem, err := parseWorkItemFile(file)
+	if err != nil {
+		return fmt.Errorf("failed to parse file: %w", err)
+	}
+
+	// Apply defaults for missing required fields
+	if err := ApplyFieldDefaults(workItem, cfg); err != nil {
+		return fmt.Errorf("failed to apply defaults: %w", err)
+	}
+
+	// Check if work item was modified
+	modified := processFieldFixes(workItem, cfg, result, file)
+
+	// Write back if modified
+	if modified {
+		if err := writeWorkItemFile(file, workItem); err != nil {
+			return fmt.Errorf("failed to write fixes: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func processFieldFixes(workItem *WorkItem, cfg *config.Config, result *ValidationResult, file string) bool {
+	modified := false
+	for fieldName, fieldConfig := range cfg.Fields {
+		if isHardcodedField(fieldName) {
+			continue
+		}
+
+		// Check if field is required and missing
+		if fieldConfig.Required {
+			if value, exists := workItem.Fields[fieldName]; !exists || isEmptyValue(value) {
+				// Default was applied by ApplyFieldDefaults, mark as modified
+				modified = true
+			}
+		}
+
+		// Try to fix invalid field values
+		if value, exists := workItem.Fields[fieldName]; exists && !isEmptyValue(value) {
+			if fixedValue, shouldUpdate := tryFixFieldValue(fieldName, value, &fieldConfig); shouldUpdate {
+				workItem.Fields[fieldName] = fixedValue
+				modified = true
+				result.AddError(file, fmt.Sprintf("fixed field '%s': corrected value", fieldName))
+			}
+		}
+	}
+	return modified
+}
+
+func isHardcodedField(fieldName string) bool {
+	for _, hardcoded := range config.HardcodedFields {
+		if fieldName == hardcoded {
+			return true
+		}
+	}
+	return false
+}
+
+// validateUnknownFields checks for fields that are not defined in the configuration.
+// This is only called when strict mode is enabled.
+func validateUnknownFields(workItem *WorkItem, cfg *config.Config, _ string) error {
+	var unknownFields []string
+
+	if len(cfg.Fields) == 0 {
+		// If no fields are configured, all custom fields are unknown in strict mode
+		for fieldName := range workItem.Fields {
+			if !isHardcodedField(fieldName) {
+				unknownFields = append(unknownFields, fieldName)
+			}
+		}
+	} else {
+		// Check each field against configuration
+		for fieldName := range workItem.Fields {
+			// Skip hardcoded fields
+			if isHardcodedField(fieldName) {
+				continue
+			}
+			// Check if field is configured
+			if _, exists := cfg.Fields[fieldName]; !exists {
+				unknownFields = append(unknownFields, fieldName)
+			}
+		}
+	}
+
+	if len(unknownFields) > 0 {
+		return fmt.Errorf("unknown fields found (not in configuration): %s", strings.Join(unknownFields, ", "))
+	}
+
+	return nil
+}
+
+// tryFixFieldValue attempts to fix an invalid field value.
+// Returns the fixed value and true if the value was fixed.
+func tryFixFieldValue(_ string, value interface{}, fieldConfig *config.FieldConfig) (interface{}, bool) {
+	switch fieldConfig.Type {
+	case fieldTypeDate:
+		return tryFixDateValue(value, fieldConfig)
+	case fieldTypeEnum:
+		return tryFixEnumValue(value, fieldConfig)
+	case fieldTypeEmail:
+		return tryFixEmailValue(value)
+	default:
+		return value, false
+	}
+}
+
+func tryFixDateValue(value interface{}, fieldConfig *config.FieldConfig) (interface{}, bool) {
+	str, ok := value.(string)
+	if !ok {
+		return value, false
+	}
+	dateFormat := fieldConfig.Format
+	if dateFormat == "" {
+		dateFormat = dateFormatDefault
+	}
+	// Try parsing with the expected format
+	if _, err := time.Parse(dateFormat, str); err != nil {
+		// Try common date formats
+		commonFormats := []string{dateFormatDefault, "2006/01/02", "01/02/2006", "2006-01-02T15:04:05Z"}
+		for _, format := range commonFormats {
+			if t, err := time.Parse(format, str); err == nil {
+				// Found a valid format, convert to expected format
+				return t.Format(dateFormat), true
+			}
+		}
+	}
+	return value, false
+}
+
+func tryFixEnumValue(value interface{}, fieldConfig *config.FieldConfig) (interface{}, bool) {
+	// Try case-insensitive matching
+	if str, ok := value.(string); ok && !fieldConfig.CaseSensitive {
+		for _, allowed := range fieldConfig.AllowedValues {
+			if strings.EqualFold(str, allowed) {
+				return allowed, true // Return the canonical value
+			}
+		}
+	}
+	return value, false
+}
+
+func tryFixEmailValue(value interface{}) (interface{}, bool) {
+	// Try to fix common email issues (trim whitespace, lowercase)
+	if str, ok := value.(string); ok {
+		trimmed := strings.TrimSpace(str)
+		lower := strings.ToLower(trimmed)
+		if trimmed != str || (lower != trimmed && isValidEmail(lower)) {
+			return lower, true
+		}
+	}
+	return value, false
+}
+
+// writeWorkItemFile writes a work item back to a file.
+func writeWorkItemFile(filePath string, workItem *WorkItem) error {
+	content, err := safeReadWorkItemFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	// Extract non-YAML content (everything after the second ---)
+	lines := strings.Split(string(content), "\n")
+	bodyLines := extractBodyLines(lines)
+
+	// Rebuild YAML front matter
+	var newContent strings.Builder
+	writeYAMLFrontMatter(&newContent, workItem)
+	writeYAMLBody(&newContent, bodyLines)
+
+	return os.WriteFile(filePath, []byte(newContent.String()), 0o600)
+}
+
+func extractBodyLines(lines []string) []string {
+	var bodyLines []string
+	inYAML := false
+	yamlEndFound := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if i == 0 && trimmed == yamlSeparator {
+			inYAML = true
+			continue
+		}
+		if inYAML {
+			if trimmed == yamlSeparator {
+				yamlEndFound = true
+				inYAML = false
+				continue
+			}
+			// Skip YAML content lines
+			continue
+		}
+		// After YAML ends, collect all remaining lines
+		if yamlEndFound {
+			bodyLines = append(bodyLines, line)
+		}
+	}
+	return bodyLines
+}
+
+func writeYAMLFrontMatter(sb *strings.Builder, workItem *WorkItem) {
+	fmt.Fprintf(sb, "%s\n", yamlSeparator)
+
+	// Write hardcoded fields first
+	fmt.Fprintf(sb, "id: %s\n", workItem.ID)
+	fmt.Fprintf(sb, "title: %s\n", workItem.Title)
+	fmt.Fprintf(sb, "status: %s\n", workItem.Status)
+	fmt.Fprintf(sb, "kind: %s\n", workItem.Kind)
+	fmt.Fprintf(sb, "created: %s\n", workItem.Created)
+
+	// Write other fields
+	for key, value := range workItem.Fields {
+		if isHardcodedField(key) {
+			continue
+		}
+		if err := writeYAMLField(sb, key, value); err != nil {
+			// Error handling is minimal here as this is called from writeWorkItemFile
+			_ = err
+		}
+	}
+
+	fmt.Fprintf(sb, "%s\n", yamlSeparator)
+}
+
+func writeYAMLBody(sb *strings.Builder, bodyLines []string) {
+	if len(bodyLines) > 0 {
+		sb.WriteString(strings.Join(bodyLines, "\n"))
+		if !strings.HasSuffix(sb.String(), "\n") {
+			sb.WriteString("\n")
+		}
+	}
+}
+
+// writeYAMLField writes a YAML field to a string builder.
+func writeYAMLField(sb *strings.Builder, key string, value interface{}) error {
+	switch v := value.(type) {
+	case string:
+		fmt.Fprintf(sb, "%s: %s\n", key, v)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		fmt.Fprintf(sb, "%s: %v\n", key, v)
+	case bool:
+		fmt.Fprintf(sb, "%s: %v\n", key, v)
+	case []interface{}:
+		fmt.Fprintf(sb, "%s: [", key)
+		for i, item := range v {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			fmt.Fprintf(sb, "%v", item)
+		}
+		sb.WriteString("]\n")
+	case time.Time:
+		fmt.Fprintf(sb, "%s: %s\n", key, v.Format(dateFormatDefault))
+	default:
+		// For complex types, use YAML marshaling
+		yamlData, err := yaml.Marshal(map[string]interface{}{key: value})
+		if err != nil {
+			return err
+		}
+		// Remove the key from the marshaled output and add it back with proper formatting
+		yamlStr := string(yamlData)
+		lines := strings.Split(strings.TrimSpace(yamlStr), "\n")
+		for _, line := range lines {
+			sb.WriteString(line)
+			sb.WriteString("\n")
+		}
+	}
+	return nil
 }

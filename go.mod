@@ -1,6 +1,9 @@
 module kira
 
-go 1.23
+// Note: Go 1.25.2+ is required to avoid GO-2025-4010 vulnerability in net/url.
+// The vulnerability affects URL validation functions used in field configuration.
+// See: https://pkg.go.dev/vuln/GO-2025-4010
+go 1.25.2
 
 require (
 	github.com/spf13/cobra v1.8.0

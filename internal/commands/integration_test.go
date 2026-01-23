@@ -163,7 +163,7 @@ func TestCLIIntegration(t *testing.T) {
 		doctorCmd := exec.Command("./kira", "doctor")
 		output, err = doctorCmd.CombinedOutput()
 		require.NoError(t, err, "doctor failed: %s", string(output))
-		assert.Contains(t, string(output), "No duplicate IDs found")
+		assert.Contains(t, string(output), "No issues found")
 	})
 
 	t.Run("new command splits colon-delimited title and description", func(t *testing.T) {
@@ -923,5 +923,197 @@ created: 2024-01-01
 		require.NoError(t, err)
 		contentStr3 := string(workItemContent3)
 		assert.Contains(t, contentStr3, "title: fix login bug")
+	})
+}
+
+func TestDoctorCommand(t *testing.T) {
+	t.Run("fixes date formats and preserves body content", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Build the kira binary for testing
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize kira
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		err = initCmd.Run()
+		require.NoError(t, err)
+
+		// Create a work item with invalid date format
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		workItemContent := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-15T10:30:00Z
+---
+# Test Feature
+
+## Context
+This is a test feature with body content.
+
+## Requirements
+- Requirement 1
+- Requirement 2
+`
+
+		filePath := filepath.Join(tmpDir, ".work", "1_todo", "001-test-feature.prd.md")
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		// Run doctor command
+		doctorCmd, err := safeExecCommand(tmpDir, kiraPath, "doctor")
+		require.NoError(t, err)
+		output, err := doctorCmd.CombinedOutput()
+		require.NoError(t, err)
+
+		outputStr := string(output)
+		// Should show validation errors
+		assert.Contains(t, outputStr, "Validation errors found")
+		// Should fix date formats
+		assert.Contains(t, outputStr, "Fixed date formats")
+		assert.Contains(t, outputStr, "fixed created date format")
+
+		// Verify the file was updated
+		// #nosec G304 - filePath is constructed from tmpDir which is validated
+		content, err := os.ReadFile(filePath)
+		require.NoError(t, err)
+		contentStr := string(content)
+		assert.Contains(t, contentStr, "created: 2024-01-15")
+		assert.NotContains(t, contentStr, "created: 2024-01-15T10:30:00Z")
+
+		// Verify body content is preserved
+		assert.Contains(t, contentStr, "# Test Feature")
+		assert.Contains(t, contentStr, "## Context")
+		assert.Contains(t, contentStr, "This is a test feature with body content.")
+		assert.Contains(t, contentStr, "## Requirements")
+		assert.Contains(t, contentStr, "- Requirement 1")
+		assert.Contains(t, contentStr, "- Requirement 2")
+	})
+
+	t.Run("reports unfixable workflow errors", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Build the kira binary for testing
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize kira
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		err = initCmd.Run()
+		require.NoError(t, err)
+
+		// Create multiple items in doing folder (workflow violation)
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		workItemContent1 := `---
+id: 001
+title: First Feature
+status: doing
+kind: prd
+created: 2024-01-15
+---
+# First Feature
+`
+
+		workItemContent2 := `---
+id: 002
+title: Second Feature
+status: doing
+kind: prd
+created: 2024-01-16
+---
+# Second Feature
+`
+
+		filePath1 := filepath.Join(tmpDir, ".work", "2_doing", "001-first-feature.prd.md")
+		filePath2 := filepath.Join(tmpDir, ".work", "2_doing", "002-second-feature.prd.md")
+		require.NoError(t, os.WriteFile(filePath1, []byte(workItemContent1), 0o600))
+		require.NoError(t, os.WriteFile(filePath2, []byte(workItemContent2), 0o600))
+
+		// Run doctor command
+		doctorCmd, err := safeExecCommand(tmpDir, kiraPath, "doctor")
+		require.NoError(t, err)
+		output, err := doctorCmd.CombinedOutput()
+		// Doctor should not fail, just report issues
+		require.NoError(t, err)
+
+		outputStr := string(output)
+		// Should show validation errors
+		assert.Contains(t, outputStr, "Validation errors found")
+		// Should show workflow errors
+		assert.Contains(t, outputStr, "Workflow Errors")
+		// Should report unfixable issues
+		assert.Contains(t, outputStr, "Issues requiring manual attention")
+		assert.Contains(t, outputStr, "cannot be automatically fixed")
+	})
+
+	t.Run("fixes duplicate IDs", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Build the kira binary for testing
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize kira
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		err = initCmd.Run()
+		require.NoError(t, err)
+
+		// Create two work items with the same ID
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		workItemContent1 := `---
+id: 001
+title: First Feature
+status: todo
+kind: prd
+created: 2024-01-15
+---
+# First Feature
+`
+
+		workItemContent2 := `---
+id: 001
+title: Second Feature
+status: todo
+kind: prd
+created: 2024-01-16
+---
+# Second Feature
+`
+
+		filePath1 := filepath.Join(tmpDir, ".work", "1_todo", "001-first-feature.prd.md")
+		filePath2 := filepath.Join(tmpDir, ".work", "1_todo", "001-second-feature.prd.md")
+		require.NoError(t, os.WriteFile(filePath1, []byte(workItemContent1), 0o600))
+		require.NoError(t, os.WriteFile(filePath2, []byte(workItemContent2), 0o600))
+
+		// Run doctor command
+		doctorCmd, err := safeExecCommand(tmpDir, kiraPath, "doctor")
+		require.NoError(t, err)
+		output, err := doctorCmd.CombinedOutput()
+		require.NoError(t, err)
+
+		outputStr := string(output)
+		// Should show duplicate ID errors
+		assert.Contains(t, outputStr, "Duplicate ID Errors")
+		// Should attempt to fix issues
+		assert.Contains(t, outputStr, "Attempting to fix issues")
+
+		// Verify one of the files got a new ID
+		// #nosec G304 - filePath1 and filePath2 are constructed from tmpDir which is validated
+		content1, err := os.ReadFile(filePath1)
+		require.NoError(t, err)
+		// #nosec G304 - filePath2 is constructed from tmpDir which is validated
+		content2, err := os.ReadFile(filePath2)
+		require.NoError(t, err)
+
+		// At least one should have a different ID (duplicates should be fixed)
+		idsDifferent := !strings.Contains(string(content1), "id: 001") || !strings.Contains(string(content2), "id: 001")
+		assert.True(t, idsDifferent, "At least one file should have a different ID after fixing duplicates")
 	})
 }
