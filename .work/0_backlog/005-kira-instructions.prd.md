@@ -176,7 +176,7 @@ Document the following commands with agent-focused examples:
   - Example mappings (but note these are configurable):
     - `backlog` → Ideas being shaped
     - `todo` → Ready to work on
-    - `doing` → Currently in progress (ideally one item)
+    - `doing` → Currently in progress
     - `review` → Ready for review/PR
     - `done` → Completed work
     - `archived` → Archived items
@@ -188,7 +188,6 @@ Document the following commands with agent-focused examples:
 - Always run `kira lint` before `kira save`
 - Use meaningful commit messages with `kira save`
 - Update work items as you progress (move through statuses)
-- Only one item in `2_doing` at a time
 - Use `kira idea` for quick thoughts, formal work items for actionable tasks
 - Keep work item descriptions clear and detailed
 - Update the `updated` timestamp is handled automatically by `kira save`
