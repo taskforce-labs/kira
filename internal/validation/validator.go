@@ -1033,6 +1033,10 @@ func resolveDateDefault(defaultValue interface{}, fieldConfig *config.FieldConfi
 
 func resolveEmailDefault(defaultValue interface{}) (interface{}, error) {
 	if str, ok := defaultValue.(string); ok {
+		// Allow empty strings as defaults (placeholders), validation happens later
+		if str == "" {
+			return str, nil
+		}
 		if !isValidEmail(str) {
 			return nil, fmt.Errorf("invalid email default value: %s", str)
 		}
@@ -1043,6 +1047,10 @@ func resolveEmailDefault(defaultValue interface{}) (interface{}, error) {
 
 func resolveURLDefault(defaultValue interface{}) (interface{}, error) {
 	if str, ok := defaultValue.(string); ok {
+		// Allow empty strings as defaults (placeholders), validation happens later
+		if str == "" {
+			return str, nil
+		}
 		if !isValidURL(str) {
 			return nil, fmt.Errorf("invalid URL default value: %s", str)
 		}
@@ -1331,8 +1339,8 @@ func processFieldFixes(workItem *WorkItem, cfg *config.Config, result *Validatio
 
 		// Check if field is required and missing
 		if fieldConfig.Required {
-			if value, exists := workItem.Fields[fieldName]; exists && !isEmptyValue(value) {
-				// Default was applied by ApplyFieldDefaults, mark as modified
+			if _, exists := workItem.Fields[fieldName]; exists {
+				// Default was applied by ApplyFieldDefaults (even if empty), mark as modified
 				modified = true
 			}
 			// If field doesn't exist, no default was configured/applied, so nothing was modified
