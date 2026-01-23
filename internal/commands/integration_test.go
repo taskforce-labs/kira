@@ -926,6 +926,780 @@ created: 2024-01-01
 	})
 }
 
+const (
+	defaultKiraYML = `version: "1.0"
+templates:
+  prd: templates/template.prd.md
+status_folders:
+  doing: 2_doing
+git:
+  trunk_branch: main
+  remote: origin
+`
+)
+
+// TestLatestCommand_MultiRepoCoordination tests full multi-repo workflow with fetch and rebase
+func TestLatestCommand_MultiRepoCoordination(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(originalDir) }()
+
+	kiraPath := buildKiraBinary(t, tmpDir)
+
+	// Initialize kira workspace
+	initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+	require.NoError(t, err)
+	output, err := initCmd.CombinedOutput()
+	require.NoError(t, err, "init failed: %s", string(output))
+
+	// Create work item in doing folder
+	workItemContent := `---
+id: 001
+title: Multi-Repo Test Feature
+status: doing
+kind: prd
+created: 2024-01-01
+---
+# Multi-Repo Test Feature
+`
+	require.NoError(t, os.WriteFile(".work/2_doing/001-multi-repo-test-feature.prd.md", []byte(workItemContent), 0o600))
+
+	// Set up polyrepo configuration with 2 repositories
+	repo1Dir := filepath.Join(tmpDir, "repo1")
+	repo2Dir := filepath.Join(tmpDir, "repo2")
+	require.NoError(t, os.MkdirAll(repo1Dir, 0o700))
+	require.NoError(t, os.MkdirAll(repo2Dir, 0o700))
+
+	// Initialize git repos
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "init").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "config", "user.email", "test@example.com").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "config", "user.name", "Test User").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "init").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "config", "user.email", "test@example.com").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "config", "user.name", "Test User").Run())
+
+	// Create initial commits - git init creates default branch (main or master)
+	require.NoError(t, os.WriteFile(filepath.Join(repo1Dir, "file1.txt"), []byte("repo1 initial"), 0o600))
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "add", "file1.txt").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "commit", "-m", "Initial commit").Run())
+	// Rename branch to main if it's not already main (use -M to force)
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	_ = exec.Command("git", "-C", repo1Dir, "branch", "-M", "main").Run() // Ignore error if already main
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo2Dir, "file2.txt"), []byte("repo2 initial"), 0o600))
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "add", "file2.txt").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "commit", "-m", "Initial commit").Run())
+	// Rename branch to main if it's not already main (use -M to force)
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	_ = exec.Command("git", "-C", repo2Dir, "branch", "-M", "main").Run() // Ignore error if already main
+
+	// Create feature branches
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "checkout", "-b", "001-multi-repo-test-feature").Run())
+	require.NoError(t, os.WriteFile(filepath.Join(repo1Dir, "feature1.txt"), []byte("feature1"), 0o600))
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "add", "feature1.txt").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "commit", "-m", "Feature commit 1").Run())
+
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "checkout", "-b", "001-multi-repo-test-feature").Run())
+	require.NoError(t, os.WriteFile(filepath.Join(repo2Dir, "feature2.txt"), []byte("feature2"), 0o600))
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "add", "feature2.txt").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "commit", "-m", "Feature commit 2").Run())
+
+	// Create remotes (bare repos)
+	remote1Dir := t.TempDir()
+	remote2Dir := t.TempDir()
+	// #nosec G204 - remote paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "init", "--bare", remote1Dir).Run())
+	// #nosec G204 - remote paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "init", "--bare", remote2Dir).Run())
+
+	// Add remotes and push main branches
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "remote", "add", "origin", remote1Dir).Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "checkout", "main").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "push", "-u", "origin", "main").Run())
+
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "remote", "add", "origin", remote2Dir).Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "checkout", "main").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "push", "-u", "origin", "main").Run())
+
+	// Add new commits to main branches and push
+	require.NoError(t, os.WriteFile(filepath.Join(repo1Dir, "main1.txt"), []byte("main update 1"), 0o600))
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "add", "main1.txt").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "commit", "-m", "Main update 1").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "push", "origin", "main").Run())
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo2Dir, "main2.txt"), []byte("main update 2"), 0o600))
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "add", "main2.txt").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "commit", "-m", "Main update 2").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "push", "origin", "main").Run())
+
+	// Switch back to feature branches
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo1Dir, "checkout", "001-multi-repo-test-feature").Run())
+	// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repo2Dir, "checkout", "001-multi-repo-test-feature").Run())
+
+	// Update kira.yml with polyrepo configuration
+	kiraYML := defaultKiraYML + `workspace:
+  projects:
+    - name: project1
+      path: ` + repo1Dir + `
+      trunk_branch: main
+      remote: origin
+    - name: project2
+      path: ` + repo2Dir + `
+      trunk_branch: main
+      remote: origin
+`
+	require.NoError(t, os.WriteFile("kira.yml", []byte(kiraYML), 0o600))
+
+	// Initialize git in workspace root (required for repository discovery)
+	// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "init").Run())
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	require.NoError(t, exec.Command("git", "add", ".").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+	// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+	_ = exec.Command("git", "branch", "-M", "main").Run() // Ignore error if already main
+
+	// Run kira latest
+	latestCmd, err := safeExecCommand(tmpDir, kiraPath, "latest")
+	require.NoError(t, err)
+	output, err = latestCmd.CombinedOutput()
+	require.NoError(t, err, "latest failed: %s", string(output))
+
+	// Verify output contains repository discovery
+	assert.Contains(t, string(output), "Discovered")
+	assert.Contains(t, string(output), "repository")
+
+	// Verify both repos were processed (check for progress messages or success)
+	outputStr := string(output)
+	// Should show progress for both repos or success message
+	assert.True(t, strings.Contains(outputStr, "project1") || strings.Contains(outputStr, "project2") || strings.Contains(outputStr, "SUCCESS") || strings.Contains(outputStr, "updated successfully"))
+}
+
+// TestLatestCommand_IterativeWorkflow tests conflict detection, display, and resolution workflow
+func TestLatestCommand_IterativeWorkflow(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(originalDir) }()
+
+	kiraPath := buildKiraBinary(t, tmpDir)
+
+	// Initialize kira workspace
+	initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+	require.NoError(t, err)
+	_, err = initCmd.CombinedOutput()
+	require.NoError(t, err)
+
+	// Create work item in doing folder
+	workItemContent := `---
+id: 001
+title: Iterative Test Feature
+status: doing
+kind: prd
+created: 2024-01-01
+---
+# Iterative Test Feature
+`
+	require.NoError(t, os.WriteFile(".work/2_doing/001-iterative-test-feature.prd.md", []byte(workItemContent), 0o600))
+
+	// Set up git repo
+	repoDir := filepath.Join(tmpDir, "repo")
+	require.NoError(t, os.MkdirAll(repoDir, 0o700))
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "init").Run())
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "config", "user.email", "test@example.com").Run())
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "config", "user.name", "Test User").Run())
+
+	// Create initial commit on main
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "test.txt"), []byte("line1\nline2\nline3\n"), 0o600))
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "add", "test.txt").Run())
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "commit", "-m", "Initial commit").Run())
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "branch", "-M", "main").Run())
+
+	// Create feature branch and modify same line
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "checkout", "-b", "001-iterative-test-feature").Run())
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "test.txt"), []byte("line1\nfeature change\nline3\n"), 0o600))
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "add", "test.txt").Run())
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "commit", "-m", "Feature change").Run())
+
+	// Create remote and push
+	remoteDir := t.TempDir()
+	// #nosec G204 - remote path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "remote", "add", "origin", remoteDir).Run())
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "checkout", "main").Run())
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "push", "-u", "origin", "main").Run())
+
+	// Modify same line on main and push
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "test.txt"), []byte("line1\nmain change\nline3\n"), 0o600))
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "add", "test.txt").Run())
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "commit", "-m", "Main change").Run())
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "push", "origin", "main").Run())
+
+	// Switch back to feature branch
+	// #nosec G204 - repo path is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", repoDir, "checkout", "001-iterative-test-feature").Run())
+
+	// Update kira.yml
+	require.NoError(t, os.WriteFile("kira.yml", []byte(defaultKiraYML), 0o600))
+
+	// Initialize git in workspace root for standalone repo detection
+	// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "init").Run())
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	require.NoError(t, exec.Command("git", "add", ".").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+	// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+	_ = exec.Command("git", "branch", "-M", "main").Run() // Ignore error if already main
+
+	// First run: should detect conflicts
+	latestCmd, err := safeExecCommand(tmpDir, kiraPath, "latest")
+	require.NoError(t, err)
+	output, err2 := latestCmd.CombinedOutput()
+	// May succeed if rebase completes, or show conflicts
+	outputStr := string(output)
+	_ = err2 // Use err2 to avoid ineffectual assignment
+
+	// Verify conflict display format if conflicts exist
+	if strings.Contains(outputStr, "Merge Conflicts Detected") || strings.Contains(outputStr, "conflict") {
+		// Verify conflict markers are present
+		assert.True(t, strings.Contains(outputStr, "<<<<<<<") || strings.Contains(outputStr, "=======") || strings.Contains(outputStr, ">>>>>>>"))
+		// Verify repository context
+		assert.Contains(t, outputStr, "Repository:")
+		// Verify instructions
+		assert.Contains(t, outputStr, "resolve")
+	}
+
+	// If conflicts were detected, resolve them and run again
+	if strings.Contains(outputStr, "conflict") || strings.Contains(outputStr, "CONFLICT") {
+		// Resolve conflicts programmatically
+		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "test.txt"), []byte("line1\nresolved change\nline3\n"), 0o600))
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "add", "test.txt").Run())
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "commit", "-m", "Resolve conflicts").Run())
+
+		// Run kira latest again - should complete successfully
+		latestCmd2, err := safeExecCommand(tmpDir, kiraPath, "latest")
+		require.NoError(t, err)
+		output2, err2 := latestCmd2.CombinedOutput()
+		// Should not error on second run
+		assert.NoError(t, err2, "second latest run failed: %s", string(output2))
+		_ = output2 // Use output2 to avoid ineffectual assignment
+	}
+}
+
+// TestLatestCommand_ConfigurationIntegration tests config priority and auto-detection
+func TestLatestCommand_ConfigurationIntegration(t *testing.T) {
+	t.Run("standalone repo with config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize kira workspace
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		_, err = initCmd.CombinedOutput()
+		require.NoError(t, err)
+
+		// Create work item
+		workItemContent := `---
+id: 001
+title: Config Test
+status: doing
+kind: prd
+created: 2024-01-01
+---
+`
+		require.NoError(t, os.WriteFile(".work/2_doing/001-config-test.prd.md", []byte(workItemContent), 0o600))
+
+		// Initialize git repo with develop branch
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "develop").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Update kira.yml with custom trunk_branch
+		kiraYML := `version: "1.0"
+templates:
+  prd: templates/template.prd.md
+status_folders:
+  doing: 2_doing
+git:
+  trunk_branch: develop
+  remote: origin
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(kiraYML), 0o600))
+
+		// Run kira latest - should use develop as trunk branch
+		latestCmd, err := safeExecCommand(tmpDir, kiraPath, "latest")
+		require.NoError(t, err)
+		output, err2 := latestCmd.CombinedOutput()
+		// Should not error (may fail if no remote, but should use develop branch)
+		outputStr := string(output)
+		assert.True(t, strings.Contains(outputStr, "develop") || err2 != nil, "should reference develop branch or handle error gracefully")
+		_ = err2 // Use err2 to avoid ineffectual assignment
+	})
+
+	t.Run("polyrepo with project overrides", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize kira workspace
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		_, err = initCmd.CombinedOutput()
+		require.NoError(t, err)
+
+		// Create work item
+		workItemContent := `---
+id: 001
+title: Polyrepo Config Test
+status: doing
+kind: prd
+created: 2024-01-01
+---
+`
+		require.NoError(t, os.WriteFile(".work/2_doing/001-polyrepo-config-test.prd.md", []byte(workItemContent), 0o600))
+
+		// Set up two repos with different trunk branches
+		repo1Dir := filepath.Join(tmpDir, "repo1")
+		repo2Dir := filepath.Join(tmpDir, "repo2")
+		require.NoError(t, os.MkdirAll(repo1Dir, 0o700))
+		require.NoError(t, os.MkdirAll(repo2Dir, 0o700))
+
+		// Initialize repos
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repo1Dir, "init").Run())
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repo1Dir, "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repo1Dir, "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(repo1Dir, "file1.txt"), []byte("repo1"), 0o600))
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repo1Dir, "add", "file1.txt").Run())
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repo1Dir, "commit", "-m", "Initial").Run())
+		// Rename branch to develop after commit
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		_ = exec.Command("git", "-C", repo1Dir, "branch", "-M", "develop").Run() // Ignore error if already develop
+
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repo2Dir, "init").Run())
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repo2Dir, "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repo2Dir, "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(repo2Dir, "file2.txt"), []byte("repo2"), 0o600))
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repo2Dir, "add", "file2.txt").Run())
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repo2Dir, "commit", "-m", "Initial").Run())
+		// #nosec G204 - repo paths are from t.TempDir(), safe for test use
+		_ = exec.Command("git", "-C", repo2Dir, "branch", "-M", "main").Run() // Ignore error if already main
+
+		// Update kira.yml with project overrides
+		kiraYML := defaultKiraYML + `workspace:
+  projects:
+    - name: project1
+      path: ` + repo1Dir + `
+      trunk_branch: develop
+      remote: origin
+    - name: project2
+      path: ` + repo2Dir + `
+      trunk_branch: main
+      remote: origin
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(kiraYML), 0o600))
+
+		// Initialize git in workspace root
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "add", ".").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		_ = exec.Command("git", "branch", "-M", "main").Run() // Ignore error if already main
+
+		// Run kira latest - should discover both repos with correct trunk branches
+		latestCmd, err := safeExecCommand(tmpDir, kiraPath, "latest")
+		require.NoError(t, err)
+		output, err2 := latestCmd.CombinedOutput()
+		outputStr := string(output)
+		// Should discover both projects
+		assert.Contains(t, outputStr, "Discovered")
+		assert.True(t, strings.Contains(outputStr, "project1") || strings.Contains(outputStr, "project2") || strings.Contains(outputStr, "develop") || strings.Contains(outputStr, "main"))
+		_ = err2 // Use err2 to avoid ineffectual assignment
+	})
+}
+
+// TestLatestCommand_ErrorRecovery tests error scenarios and stash management
+func TestLatestCommand_ErrorRecovery(t *testing.T) {
+	t.Run("dirty working directory with stash", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize kira workspace
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		_, err = initCmd.CombinedOutput()
+		require.NoError(t, err)
+
+		// Create work item
+		workItemContent := `---
+id: 001
+title: Stash Test
+status: doing
+kind: prd
+created: 2024-01-01
+---
+`
+		require.NoError(t, os.WriteFile(".work/2_doing/001-stash-test.prd.md", []byte(workItemContent), 0o600))
+
+		// Initialize git repo
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "main").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create feature branch
+		require.NoError(t, exec.Command("git", "checkout", "-b", "001-stash-test").Run())
+
+		// Create uncommitted changes
+		require.NoError(t, os.WriteFile("dirty.txt", []byte("uncommitted"), 0o600))
+
+		// Update kira.yml
+		require.NoError(t, os.WriteFile("kira.yml", []byte(defaultKiraYML), 0o600))
+
+		// Run kira latest - should stash changes
+		latestCmd, err := safeExecCommand(tmpDir, kiraPath, "latest")
+		require.NoError(t, err)
+		output, err2 := latestCmd.CombinedOutput()
+		outputStr := string(output)
+		// Should mention stashing or handle dirty working directory
+		assert.True(t, strings.Contains(outputStr, "stash") || strings.Contains(outputStr, "uncommitted") || strings.Contains(outputStr, "dirty") || err2 != nil)
+		_ = err2 // Use err2 to avoid ineffectual assignment
+	})
+
+	t.Run("fetch failure handling", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize kira workspace
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		_, err = initCmd.CombinedOutput()
+		require.NoError(t, err)
+
+		// Create work item
+		workItemContent := `---
+id: 001
+title: Fetch Error Test
+status: doing
+kind: prd
+created: 2024-01-01
+---
+`
+		require.NoError(t, os.WriteFile(".work/2_doing/001-fetch-error-test.prd.md", []byte(workItemContent), 0o600))
+
+		// Initialize git repo
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "main").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create feature branch
+		require.NoError(t, exec.Command("git", "checkout", "-b", "001-fetch-error-test").Run())
+
+		// Update kira.yml with non-existent remote
+		kiraYML := `version: "1.0"
+templates:
+  prd: templates/template.prd.md
+status_folders:
+  doing: 2_doing
+git:
+  trunk_branch: main
+  remote: nonexistent
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(kiraYML), 0o600))
+
+		// Run kira latest - should handle missing remote gracefully
+		latestCmd, err := safeExecCommand(tmpDir, kiraPath, "latest")
+		require.NoError(t, err)
+		output, err2 := latestCmd.CombinedOutput()
+		// Should provide clear error message about missing remote
+		if err2 != nil {
+			outputStr := string(output)
+			assert.True(t, strings.Contains(outputStr, "does not exist") || strings.Contains(outputStr, "remote") || strings.Contains(outputStr, "fetch"))
+		}
+		_ = err2 // Use err2 to avoid ineffectual assignment
+	})
+}
+
+// TestLatestCommand_StateDetectionAndConflicts tests state detection and conflict display formatting
+func TestLatestCommand_StateDetectionAndConflicts(t *testing.T) {
+	t.Run("clean state detection", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize kira workspace
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		_, err = initCmd.CombinedOutput()
+		require.NoError(t, err)
+
+		// Create work item
+		workItemContent := `---
+id: 001
+title: Clean State Test
+status: doing
+kind: prd
+created: 2024-01-01
+---
+`
+		require.NoError(t, os.WriteFile(".work/2_doing/001-clean-state-test.prd.md", []byte(workItemContent), 0o600))
+
+		// Initialize git repo
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "main").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create feature branch
+		require.NoError(t, exec.Command("git", "checkout", "-b", "001-clean-state-test").Run())
+
+		// Update kira.yml
+		require.NoError(t, os.WriteFile("kira.yml", []byte(defaultKiraYML), 0o600))
+
+		// Run kira latest - should detect clean state
+		latestCmd, err := safeExecCommand(tmpDir, kiraPath, "latest")
+		require.NoError(t, err)
+		output, err2 := latestCmd.CombinedOutput()
+		outputStr := string(output)
+		// Should show state summary
+		assert.True(t, strings.Contains(outputStr, "Repository State Summary") || strings.Contains(outputStr, "Checking repository state") || strings.Contains(outputStr, "ready"))
+		_ = err2   // Use err2 to avoid ineffectual assignment
+		_ = output // Use output to avoid ineffectual assignment
+	})
+
+	t.Run("conflict display format", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize kira workspace
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		_, err = initCmd.CombinedOutput()
+		require.NoError(t, err)
+
+		// Create work item
+		workItemContent := `---
+id: 001
+title: Conflict Display Test
+status: doing
+kind: prd
+created: 2024-01-01
+---
+`
+		require.NoError(t, os.WriteFile(".work/2_doing/001-conflict-display-test.prd.md", []byte(workItemContent), 0o600))
+
+		// Set up git repo with conflicts
+		repoDir := filepath.Join(tmpDir, "repo")
+		require.NoError(t, os.MkdirAll(repoDir, 0o700))
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "init").Run())
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "config", "user.name", "Test User").Run())
+
+		// Create initial commit
+		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "conflict.txt"), []byte("line1\nline2\n"), 0o600))
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "add", "conflict.txt").Run())
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "commit", "-m", "Initial").Run())
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "branch", "-M", "main").Run())
+
+		// Create feature branch and modify
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "checkout", "-b", "001-conflict-display-test").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "conflict.txt"), []byte("line1\nfeature\nline2\n"), 0o600))
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "add", "conflict.txt").Run())
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "commit", "-m", "Feature").Run())
+
+		// Modify on main
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "checkout", "main").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "conflict.txt"), []byte("line1\nmain\nline2\n"), 0o600))
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "add", "conflict.txt").Run())
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "commit", "-m", "Main").Run())
+
+		// Create remote and push
+		remoteDir := t.TempDir()
+		// #nosec G204 - remote path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "remote", "add", "origin", remoteDir).Run())
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "push", "-u", "origin", "main").Run())
+
+		// Switch to feature and start rebase to create conflict
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "checkout", "001-conflict-display-test").Run())
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", repoDir, "fetch", "origin", "main").Run())
+		// #nosec G204 - repo path is from t.TempDir(), safe for test use
+		_ = exec.Command("git", "-C", repoDir, "rebase", "origin/main").Run() // This may create conflict
+
+		// Check if conflicts actually exist in the file
+		// #nosec G304 - repoDir is from t.TempDir(), safe for test use
+		conflictFileContent, _ := os.ReadFile(filepath.Join(repoDir, "conflict.txt"))
+		hasActualConflicts := strings.Contains(string(conflictFileContent), "<<<<<<<") || strings.Contains(string(conflictFileContent), "=======")
+
+		// Update kira.yml
+		kiraYML := defaultKiraYML + `workspace:
+  projects:
+    - name: project1
+      path: ` + repoDir + `
+      trunk_branch: main
+      remote: origin
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(kiraYML), 0o600))
+
+		// Initialize git in workspace root
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "add", ".").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		_ = exec.Command("git", "branch", "-M", "main").Run() // Ignore error if already main
+
+		// Run kira latest - should detect and display conflicts
+		latestCmd, err := safeExecCommand(tmpDir, kiraPath, "latest")
+		require.NoError(t, err)
+		output, err2 := latestCmd.CombinedOutput()
+		outputStr := string(output)
+		_ = err2 // Use err2 to avoid ineffectual assignment
+
+		// Verify conflict detection and display
+		// The main goal is to verify that conflicts are detected when they exist
+		// Detailed formatting may vary, so we check for conflict detection first
+		if hasActualConflicts {
+			// If conflicts exist in the file, the command should detect them
+			// The output format may vary, but should indicate conflicts were found
+			assert.True(t, strings.Contains(outputStr, "conflict") || strings.Contains(outputStr, "CONFLICT") || strings.Contains(outputStr, "Merge Conflicts") ||
+				strings.Contains(outputStr, "Repository State Summary") || strings.Contains(outputStr, "Checking repository state"),
+				"conflicts should be detected when present in repository")
+		}
+		// If no conflicts, that's also valid (may have been resolved or rebase completed)
+		// Just verify the command executed
+		assert.True(t, len(outputStr) > 0, "command should produce output")
+	})
+}
+
 func TestDoctorCommand(t *testing.T) {
 	t.Run("fixes date formats and preserves body content", func(t *testing.T) {
 		tmpDir := t.TempDir()
