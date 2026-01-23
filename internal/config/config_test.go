@@ -348,6 +348,9 @@ fields:
 		assert.Equal(t, "enum", priorityField.Type)
 		assert.Equal(t, []string{"low", "medium", "high"}, priorityField.AllowedValues)
 		assert.Equal(t, "medium", priorityField.Default)
+		// Verify default case_sensitive is true when not set
+		require.NotNil(t, priorityField.CaseSensitive, "CaseSensitive should be set to true by default")
+		assert.True(t, *priorityField.CaseSensitive, "CaseSensitive should default to true")
 	})
 
 	t.Run("rejects configuration of hardcoded fields", func(t *testing.T) {
@@ -502,5 +505,31 @@ fields:
 		require.NoError(t, err)
 		require.NotNil(t, config.Fields)
 		assert.Len(t, config.Fields, 6)
+
+		// Verify that explicitly setting case_sensitive: false works
+		priorityField, exists := config.Fields["priority"]
+		require.True(t, exists)
+		require.NotNil(t, priorityField.CaseSensitive, "CaseSensitive should be set")
+		assert.False(t, *priorityField.CaseSensitive, "CaseSensitive should be false when explicitly set")
+	})
+
+	t.Run("defaults case_sensitive to true for enum fields when not set", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  priority:
+    type: enum
+    allowed_values: [low, medium, high]
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Fields)
+
+		priorityField, exists := config.Fields["priority"]
+		require.True(t, exists)
+		require.NotNil(t, priorityField.CaseSensitive, "CaseSensitive should be set to true by default")
+		assert.True(t, *priorityField.CaseSensitive, "CaseSensitive should default to true when not specified")
 	})
 }
