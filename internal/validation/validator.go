@@ -489,7 +489,7 @@ func validateURLType(value interface{}) error {
 }
 
 func validateNumberType(value interface{}) error {
-	if !isNumeric(value) {
+	if !IsNumeric(value) {
 		return fmt.Errorf("expected number, got %T", value)
 	}
 	return nil
@@ -757,7 +757,7 @@ func validateArrayItem(item interface{}, fieldConfig *config.FieldConfig) error 
 			return fmt.Errorf("expected string item, got %T", item)
 		}
 	case fieldTypeNumber:
-		if !isNumeric(item) {
+		if !IsNumeric(item) {
 			return fmt.Errorf("expected number item, got %T", item)
 		}
 	case fieldTypeEnum:
@@ -874,8 +874,8 @@ func isValidIPv6Bracketed(urlStr string) bool {
 	return true
 }
 
-// isNumeric checks if a value is numeric (int, int64, float64, etc.).
-func isNumeric(value interface{}) bool {
+// IsNumeric checks if a value is numeric (int, int64, float64, etc.).
+func IsNumeric(value interface{}) bool {
 	switch value.(type) {
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
 		return true
@@ -1052,7 +1052,7 @@ func resolveURLDefault(defaultValue interface{}) (interface{}, error) {
 }
 
 func resolveNumberDefault(defaultValue interface{}) (interface{}, error) {
-	if isNumeric(defaultValue) {
+	if IsNumeric(defaultValue) {
 		return defaultValue, nil
 	}
 	// Try to convert string to number

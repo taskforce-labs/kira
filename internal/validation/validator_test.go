@@ -929,3 +929,36 @@ Some important notes here.
 		assert.Contains(t, contentStr, "Some important notes here.")
 	})
 }
+
+func TestIsNumeric(t *testing.T) {
+	t.Run("returns true for all integer types", func(t *testing.T) {
+		assert.True(t, IsNumeric(int(42)))
+		assert.True(t, IsNumeric(int8(42)))
+		assert.True(t, IsNumeric(int16(42)))
+		assert.True(t, IsNumeric(int32(42)))
+		assert.True(t, IsNumeric(int64(42)))
+	})
+
+	t.Run("returns true for all unsigned integer types", func(t *testing.T) {
+		assert.True(t, IsNumeric(uint(42)))
+		assert.True(t, IsNumeric(uint8(42)))
+		assert.True(t, IsNumeric(uint16(42)))
+		assert.True(t, IsNumeric(uint32(42)))
+		assert.True(t, IsNumeric(uint64(42)))
+	})
+
+	t.Run("returns true for floating point types", func(t *testing.T) {
+		assert.True(t, IsNumeric(float32(3.14)))
+		assert.True(t, IsNumeric(float64(3.14)))
+	})
+
+	t.Run("returns false for non-numeric types", func(t *testing.T) {
+		assert.False(t, IsNumeric("42"))
+		assert.False(t, IsNumeric(true))
+		assert.False(t, IsNumeric(false))
+		assert.False(t, IsNumeric(nil))
+		assert.False(t, IsNumeric([]int{1, 2, 3}))
+		assert.False(t, IsNumeric(map[string]int{"a": 1}))
+		assert.False(t, IsNumeric(struct{}{}))
+	})
+}
