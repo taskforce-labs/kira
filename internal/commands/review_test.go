@@ -739,3 +739,25 @@ func TestValidateRequiredFieldsForReview(t *testing.T) {
 		assert.Contains(t, msg, "review_pr_url")
 	})
 }
+
+func TestCheckUncommittedChangesForReview(t *testing.T) {
+	t.Run("returns nil when repository is clean", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "main")
+		_ = tmpDir // avoid unused variable warning
+
+		err := checkUncommittedChangesForReview()
+		assert.NoError(t, err, "expected no error for clean repository")
+	})
+
+	t.Run("returns error when repository has uncommitted changes", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "main")
+		_ = tmpDir // avoid unused variable warning
+
+		// Introduce an uncommitted change
+		require.NoError(t, os.WriteFile("test.txt", []byte("modified"), 0o600))
+
+		err := checkUncommittedChangesForReview()
+		require.Error(t, err, "expected error when uncommitted changes are present")
+		assert.Contains(t, err.Error(), "uncommitted changes detected. Commit or stash changes before submitting for review")
+	})
+}

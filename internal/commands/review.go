@@ -68,6 +68,11 @@ The command will:
 			return err
 		}
 
+		// Ensure working directory is clean before proceeding with review operations (Phase 5)
+		if err := checkUncommittedChangesForReview(); err != nil {
+			return err
+		}
+
 		// Extract flags to validate parsing (actual logic will be implemented in later phases)
 		_, _ = cmd.Flags().GetStringArray("reviewer")
 		_, _ = cmd.Flags().GetBool("draft")
@@ -293,4 +298,20 @@ func isEmptyWorkItemField(value interface{}) bool {
 	default:
 		return false
 	}
+}
+
+// checkUncommittedChangesForReview ensures there are no uncommitted changes
+// in the current repository before running review operations.
+// It returns a clear, PRD-aligned error message when changes are detected.
+func checkUncommittedChangesForReview() error {
+	hasUncommitted, err := checkUncommittedChanges("", false)
+	if err != nil {
+		return err
+	}
+
+	if hasUncommitted {
+		return fmt.Errorf("uncommitted changes detected. Commit or stash changes before submitting for review")
+	}
+
+	return nil
 }
