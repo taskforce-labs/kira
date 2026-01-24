@@ -4,9 +4,10 @@ set -euo pipefail
 # Development helper script to run the kira CLI from source
 # without building or installing the binary.
 
-# Ensure we run from the repository root (directory of this script)
+# Determine the repository root (directory of this script), but
+# keep the caller's current working directory so kira operates
+# on the intended workspace (current directory's `.work/`, config, etc.).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-${0}}")" && pwd)"
-cd "$SCRIPT_DIR"
 
-go run ./cmd/kira/main.go "$@"
+go run "$SCRIPT_DIR/cmd/kira/main.go" "$@"
 
