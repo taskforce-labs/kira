@@ -364,11 +364,21 @@ func validateFieldFormat(fieldName string, fieldConfig *FieldConfig) error {
 		}
 	}
 	if fieldConfig.Type == "date" {
-		// Date format validation is best-effort
-		testDate := "2006-01-02"
-		if _, err := time.Parse(fieldConfig.Format, testDate); err != nil {
-			// Try parsing with the format itself as a test
-			_, _ = time.Parse(fieldConfig.Format, fieldConfig.Format)
+		// Validate date format by checking if it produces different outputs for different times
+		// If two different times produce the same formatted output, the format is invalid (just literal text)
+		testTime1 := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
+		testTime2 := time.Date(2007, 2, 3, 16, 5, 6, 0, time.UTC)
+		formatted1 := testTime1.Format(fieldConfig.Format)
+		formatted2 := testTime2.Format(fieldConfig.Format)
+
+		// If both times produce the same output, the format is just literal text (invalid)
+		if formatted1 == formatted2 {
+			return fmt.Errorf("field '%s': invalid date format '%s': format does not contain time components", fieldName, fieldConfig.Format)
+		}
+
+		// Verify the format can round-trip by parsing the formatted output
+		if _, err := time.Parse(fieldConfig.Format, formatted1); err != nil {
+			return fmt.Errorf("field '%s': invalid date format '%s': %w", fieldName, fieldConfig.Format, err)
 		}
 	}
 	return nil

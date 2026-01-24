@@ -446,6 +446,42 @@ fields:
 		assert.Contains(t, err.Error(), "invalid regex format")
 	})
 
+	t.Run("rejects invalid date format with no time components", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  due:
+    type: date
+    format: "invalid-date-format"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid date format")
+		assert.Contains(t, err.Error(), "field 'due'")
+		assert.Contains(t, err.Error(), "does not contain time components")
+	})
+
+	t.Run("accepts valid date format", func(t *testing.T) {
+		testConfig := `version: "1.0"
+fields:
+  due:
+    type: date
+    format: "2006-01-02"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Fields)
+		dueField, exists := config.Fields["due"]
+		require.True(t, exists)
+		assert.Equal(t, "date", dueField.Type)
+		assert.Equal(t, "2006-01-02", dueField.Format)
+	})
+
 	t.Run("validates min/max length constraints", func(t *testing.T) {
 		testConfig := `version: "1.0"
 fields:
