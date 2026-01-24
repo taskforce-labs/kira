@@ -350,12 +350,12 @@ func convertDefaultToString(defaultValue interface{}, fieldConfig *config.FieldC
 			// Convert to YAML array string
 			var items []string
 			for _, item := range arr {
-				items = append(items, fmt.Sprintf("%v", item))
+				items = append(items, validation.YAMLFormatArrayItem(item))
 			}
 			return "[" + strings.Join(items, ", ") + "]", nil
 		}
 		// Single value becomes array with one element
-		return fmt.Sprintf("[%v]", defaultValue), nil
+		return "[" + validation.YAMLFormatArrayItem(defaultValue) + "]", nil
 	default:
 		return fmt.Sprintf("%v", defaultValue), nil
 	}
