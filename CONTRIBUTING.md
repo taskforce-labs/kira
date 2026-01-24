@@ -126,13 +126,15 @@ After building, test the binary:
 ./kira --help
 ```
 
-During development, you can run kira commands directly via `make run` without building the binary first:
+### Running from source during development
+
+To run kira commands from source without building or installing the binary, use the `kdev` helper script at the repo root:
 
 ```bash
-make run version
-make run new prd todo Test
-make run move 001 doing
-make run --help
+./kdev version
+./kdev new prd todo Test
+./kdev move 001 doing
+./kdev --help
 ```
 
 This is useful for testing commands during development without needing to rebuild the binary each time.

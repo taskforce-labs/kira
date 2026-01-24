@@ -1,4 +1,4 @@
-.PHONY: build test test-coverage e2e clean clean-all install uninstall lint fmt check security build-all release-snapshot install-tools clean-tools dev-setup demo run
+.PHONY: build test test-coverage e2e clean clean-all install uninstall lint fmt check security build-all release-snapshot install-tools clean-tools dev-setup help demo
 
 PREFIX ?= /usr/local
 DESTDIR ?=
@@ -68,13 +68,8 @@ uninstall:
 	@echo "kira uninstalled"
 
 # Run linter
-# When 'run' is the primary goal (e.g. `make run lint`), skip defining the
-# Make 'lint' target so that 'lint' is treated purely as a kira CLI command
-# and we don't also invoke golangci-lint.
-ifneq ($(firstword $(MAKECMDGOALS)),run)
 lint:
 	@PATH="$$(go env GOPATH)/bin:$$PATH" golangci-lint run
-endif
 
 # Format code (writes changes) via golangci-lint config
 fmt:
@@ -188,19 +183,6 @@ GOLANGCI_LINT_VERSION ?= latest
 dev-setup: install-tools
 	go mod download
 	go mod tidy
-
-# Run kira CLI command via go run
-run:
-	@go run cmd/kira/main.go $(filter-out run,$(MAKECMDGOALS))
-
-# When 'run' is the primary goal, treat any additional goals as CLI
-# arguments by defining a no-op catch-all target. For other primary
-# goals (e.g. 'build', 'test'), let Make report unknown or misspelled
-# targets as errors as usual.
-ifeq ($(firstword $(MAKECMDGOALS)),run)
-%:
-	@:
-endif
 
 # Demo initialization
 demo:
