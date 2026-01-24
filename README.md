@@ -279,7 +279,7 @@ kira.yml          # Configuration
 .work/
 ├── 0_backlog/    # Ideas being shaped
 ├── 1_todo/       # Ready to work on
-├── 2_doing/      # Currently in progress (one item only)
+├── 2_doing/      # Currently in progress
 ├── 3_review/     # Ready for review
 ├── 4_done/       # Completed work
 ├── templates/    # Work item templates

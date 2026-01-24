@@ -32,7 +32,11 @@ simultaneously, ensuring consistency and coordination between related repositori
 The command can be called repeatedly to work through conflicts progressively.
 
 If uncommitted changes are detected, they will be automatically stashed before rebase
-and popped after successful rebase (unless --no-pop-stash is specified).`,
+and popped after successful rebase (unless --no-pop-stash is specified).
+
+By default, when a rebase encounters conflicts, kira leaves the repository in the conflicted
+rebase state so you can resolve conflicts and continue the rebase yourself (or by re-running
+kira latest).`,
 	Args:         cobra.NoArgs,
 	RunE:         runLatest,
 	SilenceUsage: true, // Don't show usage on errors - error messages are clear enough
@@ -40,6 +44,7 @@ and popped after successful rebase (unless --no-pop-stash is specified).`,
 
 func init() {
 	latestCmd.Flags().Bool("no-pop-stash", false, "Stash uncommitted changes before rebase but do not automatically pop them after")
+	latestCmd.Flags().Bool("abort-on-conflict", false, "Abort rebase and restore pre-rebase state when conflicts occur during rebase")
 }
 
 // RepositoryInfo contains information about a repository that needs to be updated
@@ -156,8 +161,19 @@ func runLatest(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Get flag value for stash handling
+	// Get flag values
 	noPopStash, _ := cmd.Flags().GetBool("no-pop-stash")
+	abortOnConflict, _ := cmd.Flags().GetBool("abort-on-conflict")
+
+	// Phase 4.5: If repositories are in an in-progress rebase without conflicts, attempt to continue
+	if aggregated.OverallState == StateInRebase {
+		if err := handleInProgressRebases(stateInfos); err != nil {
+			return err
+		}
+		// After continuing in-progress rebases, exit and let the user re-run `kira latest`
+		// to either see any new conflicts or perform further updates.
+		return nil
+	}
 
 	// Phase 5: Perform fetch and rebase if repositories are ready
 	// Also handle repositories with uncommitted changes (stash them)
@@ -177,7 +193,7 @@ func runLatest(cmd *cobra.Command, _ []string) error {
 		// Order repositories by dependencies (respects repo_root grouping and config order)
 		orderedRepos := orderRepositoriesByDependencies(reposToProcess)
 
-		results := performFetchAndRebaseForAllRepos(orderedRepos, noPopStash)
+		results := performFetchAndRebaseForAllRepos(orderedRepos, abortOnConflict, noPopStash)
 		return handleUpdateResults(results)
 	}
 
@@ -1271,15 +1287,50 @@ func displayAllConflicts(stateInfos []RepositoryStateInfo) {
 	}
 }
 
+// handleInProgressRebases attempts to continue in-progress rebases for repositories
+// that are in the StateInRebase state (no current conflicts, but a rebase is ongoing).
+// It runs `git rebase --continue` for each such repository and leaves any new conflicts
+// for the user to resolve.
+func handleInProgressRebases(stateInfos []RepositoryStateInfo) error {
+	var reposInRebase []RepositoryInfo
+	for _, stateInfo := range stateInfos {
+		if stateInfo.State == StateInRebase {
+			reposInRebase = append(reposInRebase, stateInfo.Repo)
+		}
+	}
+
+	if len(reposInRebase) == 0 {
+		return nil
+	}
+
+	fmt.Println("\nRepositories with in-progress rebases detected. Attempting to continue rebase operations...")
+
+	for _, repo := range reposInRebase {
+		fmt.Printf("  Updating %s: rebase-continue...\n", repo.Name)
+		if err := continueRebase(repo); err != nil {
+			// Surface the error but do not attempt to abort; the repository will remain
+			// in its current rebase state so the user can inspect conflicts or issues.
+			fmt.Printf("  ✗ %s: rebase --continue failed: %v\n", repo.Name, err)
+			fmt.Printf("    Resolve any reported issues or conflicts in %s, then run 'kira latest' again.\n", repo.Path)
+			return fmt.Errorf("failed to continue rebase for %s: %w", repo.Name, err)
+		}
+		fmt.Printf("  ✓ %s: rebase continue completed\n", repo.Name)
+	}
+
+	fmt.Println("\nRebase operations continued. If new conflicts were introduced, resolve them and run 'kira latest' again.")
+	return nil
+}
+
 // RepositoryOperationResult contains the result of a fetch/rebase operation for a repository
 type RepositoryOperationResult struct {
-	Repo            RepositoryInfo
-	Error           error
-	Steps           []string // e.g., ["fetch", "rebase"] for progress tracking
-	HadStash        bool     // Whether changes were stashed before rebase
-	StashPopped     bool     // Whether stash was successfully popped after rebase
-	RebaseAttempted bool     // Whether rebase operation was attempted (for rollback purposes)
-	RebaseAborted   bool     // Whether rebase was aborted during rollback
+	Repo               RepositoryInfo
+	Error              error
+	Steps              []string // e.g., ["fetch", "rebase"] for progress tracking
+	HadStash           bool     // Whether changes were stashed before rebase
+	StashPopped        bool     // Whether stash was successfully popped after rebase
+	RebaseAttempted    bool     // Whether rebase operation was attempted (for rollback purposes)
+	RebaseAborted      bool     // Whether rebase was aborted during rollback
+	RebaseHadConflicts bool     // Whether the rebase failure was due to merge conflicts
 }
 
 // isNetworkError checks if an error string indicates a network error
@@ -1465,6 +1516,28 @@ func abortRebase(repo RepositoryInfo) error {
 	return nil
 }
 
+// continueRebase continues an in-progress rebase operation in the repository.
+// It is expected to be called only when git indicates a rebase is in progress.
+func continueRebase(repo RepositoryInfo) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Use GIT_EDITOR=true to prevent git from trying to open an editor when running
+	// in non-interactive environments. This keeps the original commit message while
+	// allowing rebase --continue to proceed.
+	env := []string{"GIT_EDITOR=true"}
+	_, err := executeCommandCombinedOutputWithEnv(ctx, "git", []string{"rebase", "--continue"}, repo.Path, env, false)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "CONFLICT") || strings.Contains(errStr, "conflict") {
+			return fmt.Errorf("rebase --continue failed due to conflicts. Resolve conflicts and run 'kira latest' again: %w", err)
+		}
+		return fmt.Errorf("rebase --continue failed: %w", err)
+	}
+
+	return nil
+}
+
 // rebaseOntoTrunk rebases the current branch onto the remote trunk branch
 func rebaseOntoTrunk(repo RepositoryInfo) error {
 	// Get current branch name
@@ -1547,7 +1620,7 @@ func performFetchAndRebase(repo RepositoryInfo, noPopStash bool) (bool, error) {
 }
 
 // performFetchAndRebaseForAllRepos performs fetch and rebase operations for all repositories in parallel
-func performFetchAndRebaseForAllRepos(repos []RepositoryInfo, noPopStash bool) []RepositoryOperationResult {
+func performFetchAndRebaseForAllRepos(repos []RepositoryInfo, abortOnConflict, noPopStash bool) []RepositoryOperationResult {
 	var wg sync.WaitGroup
 	results := make([]RepositoryOperationResult, len(repos))
 	var mu sync.Mutex
@@ -1556,7 +1629,7 @@ func performFetchAndRebaseForAllRepos(repos []RepositoryInfo, noPopStash bool) [
 		wg.Add(1)
 		go func(index int, repository RepositoryInfo) {
 			defer wg.Done()
-			result := processRepositoryUpdate(repository, noPopStash, &mu)
+			result := processRepositoryUpdate(repository, abortOnConflict, noPopStash, &mu)
 			mu.Lock()
 			results[index] = result
 			mu.Unlock()
@@ -1568,7 +1641,7 @@ func performFetchAndRebaseForAllRepos(repos []RepositoryInfo, noPopStash bool) [
 }
 
 // processRepositoryUpdate handles the update process for a single repository
-func processRepositoryUpdate(repo RepositoryInfo, noPopStash bool, mu *sync.Mutex) RepositoryOperationResult {
+func processRepositoryUpdate(repo RepositoryInfo, abortOnConflict, noPopStash bool, mu *sync.Mutex) RepositoryOperationResult {
 	result := RepositoryOperationResult{
 		Repo:  repo,
 		Steps: []string{},
@@ -1581,13 +1654,13 @@ func processRepositoryUpdate(repo RepositoryInfo, noPopStash bool, mu *sync.Mute
 
 	// Perform fetch
 	if err := performFetchStep(&result, repo, mu); err != nil {
-		restoreStashIfNeeded(&result, repo, noPopStash)
+		restoreStashIfNeeded(&result, repo, abortOnConflict, noPopStash)
 		return result
 	}
 
 	// Perform rebase
 	if err := performRebaseStep(&result, repo, mu); err != nil {
-		restoreStashIfNeeded(&result, repo, noPopStash)
+		restoreStashIfNeeded(&result, repo, abortOnConflict, noPopStash)
 		return result
 	}
 
@@ -1649,6 +1722,10 @@ func performRebaseStep(result *RepositoryOperationResult, repo RepositoryInfo, m
 	result.RebaseAttempted = true
 
 	if err := rebaseOntoTrunk(repo); err != nil {
+		// Detect conflict-driven failures so we can decide later whether to abort
+		if strings.Contains(err.Error(), "rebase failed due to conflicts") {
+			result.RebaseHadConflicts = true
+		}
 		result.Error = fmt.Errorf("rebase failed: %w", err)
 		result.Steps = append(result.Steps, "rebase (failed)")
 		return err
@@ -1658,11 +1735,26 @@ func performRebaseStep(result *RepositoryOperationResult, repo RepositoryInfo, m
 	return nil
 }
 
-// restoreStashIfNeeded attempts to restore repository state if operation failed
-// It aborts rebase first (if rebase was attempted), then restores stash
-func restoreStashIfNeeded(result *RepositoryOperationResult, repo RepositoryInfo, noPopStash bool) {
-	// If rebase was attempted and failed, abort it first to restore pre-rebase state
+// restoreStashIfNeeded attempts to restore repository state if operation failed.
+// It may abort an in-progress rebase (depending on abortOnConflict and error type),
+// and decides whether it is safe to restore any stashed changes.
+func restoreStashIfNeeded(result *RepositoryOperationResult, repo RepositoryInfo, abortOnConflict, noPopStash bool) {
+	// Decide whether we should attempt to abort the rebase.
+	// - For conflict-driven failures, respect abortOnConflict (default is to keep conflicts).
+	// - For non-conflict failures, always try to abort to restore a clean state.
+	shouldAbort := false
 	if result.RebaseAttempted {
+		if result.RebaseHadConflicts {
+			if abortOnConflict {
+				shouldAbort = true
+			}
+		} else {
+			// Non-conflict rebase errors: best effort to restore pre-rebase state.
+			shouldAbort = true
+		}
+	}
+
+	if shouldAbort {
 		if err := abortRebase(repo); err == nil {
 			result.RebaseAborted = true
 			result.Steps = append(result.Steps, "rebase-abort")
@@ -1672,9 +1764,24 @@ func restoreStashIfNeeded(result *RepositoryOperationResult, repo RepositoryInfo
 		}
 	}
 
-	// Then restore stash if we had one
+	// Restore stash if we had one and it's safe to do so.
 	if result.HadStash && !noPopStash {
-		_ = popStash(repo) // Best effort to restore
+		// Only pop the stash if:
+		// - no rebase was attempted, or
+		// - we successfully aborted the rebase.
+		// If a conflicted rebase is still in progress, keep the stash so the user
+		// can finish the rebase first and then restore their original changes.
+		if !result.RebaseAttempted || result.RebaseAborted {
+			if err := popStash(repo); err == nil {
+				result.StashPopped = true
+				result.Steps = append(result.Steps, "stash-pop")
+			} else {
+				result.Steps = append(result.Steps, "stash-pop (failed)")
+			}
+		} else if result.RebaseHadConflicts {
+			// Stash is intentionally kept while rebase with conflicts is in progress.
+			result.Steps = append(result.Steps, "stash (kept)")
+		}
 	}
 }
 
@@ -1710,14 +1817,41 @@ func displayOperationProgress(repoName, operation string) {
 // getRecoverySteps generates recovery steps for a failed repository operation
 func getRecoverySteps(result RepositoryOperationResult) []string {
 	var recoverySteps []string
-	if result.RebaseAttempted && !result.RebaseAborted {
-		recoverySteps = append(recoverySteps, fmt.Sprintf("Run 'git rebase --abort' in %s to return to pre-rebase state", result.Repo.Path))
+	// Rebase-related guidance
+	if result.RebaseAttempted {
+		switch {
+		case result.RebaseHadConflicts && !result.RebaseAborted:
+			// Default path: conflicts are kept so the user can resolve them.
+			recoverySteps = append(recoverySteps,
+				fmt.Sprintf("Resolve merge conflicts in %s, stage changes with 'git add', then either run 'git rebase --continue' or 'kira latest' again in that repository", result.Repo.Path),
+			)
+		case !result.RebaseAborted:
+			// Rebase failed and we could not or did not abort; advise the user to inspect state.
+			recoverySteps = append(recoverySteps,
+				fmt.Sprintf("Check rebase state in %s with 'git status'. If a rebase is still in progress and you do not want to keep it, run 'git rebase --abort'.", result.Repo.Path),
+			)
+		default:
+			// Rebase was aborted (e.g., due to --abort-on-conflict or non-conflict error).
+			recoverySteps = append(recoverySteps,
+				fmt.Sprintf("Rebase was aborted for %s. Inspect the error above, fix the issue, and start a new rebase or re-run 'kira latest' when ready.", result.Repo.Path),
+			)
+		}
 	}
+
+	// Stash-related guidance
 	if result.HadStash && !result.StashPopped {
-		if result.RebaseAborted {
-			recoverySteps = append(recoverySteps, fmt.Sprintf("Run 'git stash pop' in %s to restore stashed changes", result.Repo.Path))
+		if result.RebaseAborted || !result.RebaseAttempted {
+			recoverySteps = append(recoverySteps,
+				fmt.Sprintf("Run 'git stash pop' in %s to restore stashed changes", result.Repo.Path),
+			)
+		} else if result.RebaseHadConflicts && !result.RebaseAborted {
+			recoverySteps = append(recoverySteps,
+				fmt.Sprintf("Your uncommitted changes were stashed and kept while the rebase is in progress. After the rebase completes, run 'git stash pop' in %s to restore them.", result.Repo.Path),
+			)
 		} else {
-			recoverySteps = append(recoverySteps, fmt.Sprintf("Changes were stashed and not restored. Run 'git stash pop' in %s to restore", result.Repo.Path))
+			recoverySteps = append(recoverySteps,
+				fmt.Sprintf("Use 'git stash list' and 'git stash pop' in %s to restore any stashed changes once the repository is in a clean state.", result.Repo.Path),
+			)
 		}
 	}
 	return recoverySteps
@@ -1761,13 +1895,13 @@ func displayFailedReposGuidance(failedRepos []RepositoryOperationResult) {
 	fmt.Println("Next steps for failed repositories:")
 	for _, result := range failedRepos {
 		fmt.Printf("  %s:\n", result.Repo.Name)
-		if result.RebaseAttempted {
-			fmt.Printf("    1. If rebase is still in progress, run 'git rebase --abort' in %s\n", result.Repo.Path)
+		steps := getRecoverySteps(result)
+		stepNum := 1
+		for _, step := range steps {
+			fmt.Printf("    %d. %s\n", stepNum, step)
+			stepNum++
 		}
-		if result.HadStash && !result.StashPopped {
-			fmt.Printf("    2. Restore stashed changes: 'git stash pop' in %s\n", result.Repo.Path)
-		}
-		fmt.Printf("    3. Fix the issue and run 'kira latest' again\n")
+		fmt.Printf("    %d. Fix the issue described above and run 'kira latest' again\n", stepNum)
 	}
 }
 
