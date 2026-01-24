@@ -1637,8 +1637,8 @@ func yamlFormatStringValue(s string) string {
 	return s
 }
 
-// yamlFormatArrayItem returns the YAML scalar representation of an array element for flow style.
-func yamlFormatArrayItem(item interface{}) string {
+// YAMLFormatArrayItem returns the YAML scalar representation of an array element for flow style.
+func YAMLFormatArrayItem(item interface{}) string {
 	switch v := item.(type) {
 	case string:
 		return yamlFormatStringValue(v)
@@ -1664,7 +1664,7 @@ func writeYAMLField(sb *strings.Builder, key string, value interface{}) error {
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(yamlFormatArrayItem(item))
+			sb.WriteString(YAMLFormatArrayItem(item))
 		}
 		sb.WriteString("]\n")
 	case time.Time:
