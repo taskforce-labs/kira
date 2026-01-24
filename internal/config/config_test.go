@@ -671,3 +671,73 @@ fields:
 		assert.True(t, *priorityField.CaseSensitive, "CaseSensitive should default to true when not specified")
 	})
 }
+
+func TestReviewConfigDefaults(t *testing.T) {
+	t.Run("applies default review config when not specified", func(t *testing.T) {
+		_ = os.Remove("kira.yml")
+		_ = os.Remove(".work/kira.yml")
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Review)
+		assert.NotNil(t, config.Review.UpdateTrunkStatus)
+		assert.True(t, *config.Review.UpdateTrunkStatus)
+		assert.NotNil(t, config.Review.RebaseAfterTrunkUpdate)
+		assert.True(t, *config.Review.RebaseAfterTrunkUpdate)
+		assert.NotNil(t, config.Review.DraftByDefault)
+		assert.True(t, *config.Review.DraftByDefault)
+		assert.NotNil(t, config.Review.AutoRequestReviews)
+		assert.True(t, *config.Review.AutoRequestReviews)
+		assert.Equal(t, "[{id}] {title}", config.Review.PRTitle)
+		assert.Equal(t, "View detailed work item: [{id}-{title}]({work_item_url})", config.Review.PRDescription)
+	})
+
+	t.Run("preserves custom review config", func(t *testing.T) {
+		testConfig := `version: "1.0"
+review:
+  update_trunk_status: false
+  rebase_after_trunk_update: false
+  draft_by_default: false
+  auto_request_reviews: false
+  pr_title: "Custom [{id}]"
+  pr_description: "Custom {work_item_url}"
+  github_token: "secret"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Review)
+		assert.NotNil(t, config.Review.UpdateTrunkStatus)
+		assert.False(t, *config.Review.UpdateTrunkStatus)
+		assert.NotNil(t, config.Review.RebaseAfterTrunkUpdate)
+		assert.False(t, *config.Review.RebaseAfterTrunkUpdate)
+		assert.NotNil(t, config.Review.DraftByDefault)
+		assert.False(t, *config.Review.DraftByDefault)
+		assert.NotNil(t, config.Review.AutoRequestReviews)
+		assert.False(t, *config.Review.AutoRequestReviews)
+		assert.Equal(t, "Custom [{id}]", config.Review.PRTitle)
+		assert.Equal(t, "Custom {work_item_url}", config.Review.PRDescription)
+		assert.Equal(t, "secret", config.Review.GitHubToken)
+	})
+
+	t.Run("expands environment variables in github_token", func(t *testing.T) {
+		testEnvVar := "KIRA_TEST_GITHUB_TOKEN"
+		testValue := "expanded-secret"
+		require.NoError(t, os.Setenv(testEnvVar, testValue))
+		defer func() { _ = os.Unsetenv(testEnvVar) }()
+
+		testConfig := `version: "1.0"
+review:
+  github_token: "${KIRA_TEST_GITHUB_TOKEN}"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Review)
+		assert.Equal(t, testValue, config.Review.GitHubToken)
+	})
+}

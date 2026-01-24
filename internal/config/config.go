@@ -28,6 +28,7 @@ type Config struct {
 	Workspace     *WorkspaceConfig       `yaml:"workspace"`
 	Users         UsersConfig            `yaml:"users"`
 	Fields        map[string]FieldConfig `yaml:"fields"`
+	Review        *ReviewConfig          `yaml:"review"`
 }
 
 // GitConfig contains git-related settings.
@@ -93,6 +94,17 @@ type CommitConfig struct {
 type ReleaseConfig struct {
 	ReleasesFile      string `yaml:"releases_file"`
 	ArchiveDateFormat string `yaml:"archive_date_format"`
+}
+
+// ReviewConfig contains review-related settings.
+type ReviewConfig struct {
+	UpdateTrunkStatus      *bool  `yaml:"update_trunk_status"`
+	RebaseAfterTrunkUpdate *bool  `yaml:"rebase_after_trunk_update"`
+	DraftByDefault         *bool  `yaml:"draft_by_default"`
+	AutoRequestReviews     *bool  `yaml:"auto_request_reviews"`
+	GitHubToken            string `yaml:"github_token"`
+	PRTitle                string `yaml:"pr_title"`
+	PRDescription          string `yaml:"pr_description"`
 }
 
 // SavedUser represents a user saved in configuration.
@@ -492,6 +504,7 @@ func mergeFieldDefaults(config *Config) {
 			config.Fields[fieldName] = fieldConfig
 		}
 	}
+	mergeReviewDefaults(config)
 }
 
 func mergeGitDefaults(config *Config) {
@@ -549,6 +562,47 @@ func mergeUsersDefaults(config *Config) {
 	// IgnoredEmails defaults to empty slice - already zero value
 	// IgnoredPatterns defaults to empty slice - already zero value
 	// SavedUsers defaults to empty slice - already zero value
+}
+
+func mergeReviewDefaults(config *Config) {
+	if config.Review == nil {
+		config.Review = &ReviewConfig{}
+	}
+
+	// Default values for bool fields (true if nil)
+	updateTrunkStatus := true
+	if config.Review.UpdateTrunkStatus == nil {
+		config.Review.UpdateTrunkStatus = &updateTrunkStatus
+	}
+
+	rebaseAfterTrunkUpdate := true
+	if config.Review.RebaseAfterTrunkUpdate == nil {
+		config.Review.RebaseAfterTrunkUpdate = &rebaseAfterTrunkUpdate
+	}
+
+	draftByDefault := true
+	if config.Review.DraftByDefault == nil {
+		config.Review.DraftByDefault = &draftByDefault
+	}
+
+	autoRequestReviews := true
+	if config.Review.AutoRequestReviews == nil {
+		config.Review.AutoRequestReviews = &autoRequestReviews
+	}
+
+	// Default values for string fields
+	if config.Review.PRTitle == "" {
+		config.Review.PRTitle = "[{id}] {title}"
+	}
+
+	if config.Review.PRDescription == "" {
+		config.Review.PRDescription = "View detailed work item: [{id}-{title}]({work_item_url})"
+	}
+
+	// Expand environment variables in GitHubToken if set
+	if config.Review.GitHubToken != "" {
+		config.Review.GitHubToken = os.ExpandEnv(config.Review.GitHubToken)
+	}
 }
 
 // SaveConfig saves the configuration to kira.yml in the current directory.
