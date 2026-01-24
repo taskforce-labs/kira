@@ -761,3 +761,149 @@ func TestCheckUncommittedChangesForReview(t *testing.T) {
 		assert.Contains(t, err.Error(), "uncommitted changes detected. Commit or stash changes before submitting for review")
 	})
 }
+
+func TestUpdateWorkItemStatusOnCurrentBranch(t *testing.T) {
+	t.Run("moves work item from todo to review and updates status", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+
+		// Seed a todo work item
+		const workItemID = "001"
+		const fileName = "001-test-feature.prd.md"
+		sourcePath := ".work/1_todo/" + fileName
+		require.NoError(t, os.WriteFile(sourcePath, []byte(testWorkItemContent), 0o600))
+
+		// Act
+		err := updateWorkItemStatusOnCurrentBranch(cfg, workItemID, statusReview)
+		require.NoError(t, err)
+
+		// Assert: file moved
+		targetPath := ".work/3_review/" + fileName
+		_, err = os.Stat(targetPath)
+		require.NoError(t, err)
+
+		// Old path no longer exists
+		_, err = os.Stat(sourcePath)
+		require.Error(t, err)
+		assert.True(t, os.IsNotExist(err))
+
+		// Status updated in front matter
+		content, err := os.ReadFile(targetPath)
+		require.NoError(t, err)
+		text := string(content)
+		assert.Contains(t, text, "status: review")
+		assert.NotContains(t, text, "status: todo")
+	})
+
+	t.Run("moves work item from doing to review and preserves other front matter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+
+		const workItemID = "002"
+		const fileName = "002-another-feature.prd.md"
+		sourcePath := ".work/2_doing/" + fileName
+
+		// Work item with richer front matter to verify preservation
+		workItemContent := `---
+id: 002
+title: Another Feature
+status: doing
+kind: prd
+created: 2024-01-02
+tags: [github, notifications]
+custom_field: custom-value
+---
+
+# Another Feature
+`
+		require.NoError(t, os.WriteFile(sourcePath, []byte(workItemContent), 0o600))
+
+		// Act
+		err := updateWorkItemStatusOnCurrentBranch(cfg, workItemID, statusReview)
+		require.NoError(t, err)
+
+		// Assert: file moved
+		targetPath := ".work/3_review/" + fileName
+		_, err = os.Stat(targetPath)
+		require.NoError(t, err)
+
+		// Front matter fields preserved (except status value)
+		content, err := os.ReadFile(targetPath)
+		require.NoError(t, err)
+		text := string(content)
+
+		assert.Contains(t, text, "id: 002")
+		assert.Contains(t, text, "title: Another Feature")
+		assert.Contains(t, text, "kind: prd")
+		assert.Contains(t, text, "created: 2024-01-02")
+		assert.Contains(t, text, "tags: [github, notifications]")
+		assert.Contains(t, text, "custom_field: custom-value")
+		assert.Contains(t, text, "status: review")
+		assert.NotContains(t, text, "status: doing")
+	})
+
+	t.Run("returns error when target status is not configured", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Start from default config but clear StatusFolders to simulate misconfiguration
+		cfg := config.DefaultConfig
+		cfg.StatusFolders = map[string]string{
+			"todo":  "1_todo",
+			"doing": "2_doing",
+			// intentionally omit "review"
+		}
+
+		// Minimal .work tree with a matching work item to satisfy path validation
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		const workItemID = "003"
+		const fileName = "003-missing-review-status.prd.md"
+		sourcePath := ".work/1_todo/" + fileName
+		workItemContent := `---
+id: 003
+title: Missing Review Status
+status: todo
+kind: prd
+created: 2024-01-03
+---
+
+# Missing Review Status
+`
+		require.NoError(t, os.WriteFile(sourcePath, []byte(workItemContent), 0o600))
+
+		err := updateWorkItemStatusOnCurrentBranch(&cfg, workItemID, statusReview)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid target status")
+	})
+
+	t.Run("returns error when work item does not exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+
+		// Empty .work tree without matching work item
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+
+		err := updateWorkItemStatusOnCurrentBranch(cfg, "999", statusReview)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "work item with ID 999 not found")
+	})
+}

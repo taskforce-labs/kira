@@ -4,6 +4,8 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -311,6 +313,47 @@ func checkUncommittedChangesForReview() error {
 
 	if hasUncommitted {
 		return fmt.Errorf("uncommitted changes detected. Commit or stash changes before submitting for review")
+	}
+
+	return nil
+}
+
+// updateWorkItemStatusOnCurrentBranch moves the work item for the given ID to the
+// target status on the current branch and updates its front matter status field.
+// It reuses existing work item utilities (findWorkItemFile and updateWorkItemStatus)
+// and does not perform any git commits.
+func updateWorkItemStatusOnCurrentBranch(cfg *config.Config, workItemID, targetStatus string) error {
+	if cfg == nil {
+		return fmt.Errorf("configuration cannot be nil")
+	}
+	if strings.TrimSpace(workItemID) == "" {
+		return fmt.Errorf("work item ID cannot be empty")
+	}
+
+	// Find the work item file on the current branch
+	workItemPath, err := findWorkItemFile(workItemID)
+	if err != nil {
+		return err
+	}
+
+	// Validate target status is configured
+	if _, exists := cfg.StatusFolders[targetStatus]; !exists {
+		return fmt.Errorf("invalid target status: %s", targetStatus)
+	}
+
+	// Build target path using existing status folder conventions
+	targetFolder := filepath.Join(".work", cfg.StatusFolders[targetStatus])
+	filename := filepath.Base(workItemPath)
+	targetPath := filepath.Join(targetFolder, filename)
+
+	// Move the file to the new status folder
+	if err := os.Rename(workItemPath, targetPath); err != nil {
+		return fmt.Errorf("failed to move work item: %w", err)
+	}
+
+	// Update the status field in front matter while preserving all other fields
+	if err := updateWorkItemStatus(targetPath, targetStatus); err != nil {
+		return fmt.Errorf("failed to update work item status: %w", err)
 	}
 
 	return nil
