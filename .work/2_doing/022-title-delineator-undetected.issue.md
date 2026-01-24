@@ -1,7 +1,7 @@
 ---
 id: 022
 title: title delineator undetected
-status: backlog
+status: doing
 kind: issue
 assigned:
 estimate: 0
