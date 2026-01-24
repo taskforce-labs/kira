@@ -2,12 +2,16 @@ package commands
 
 import (
 	"bytes"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"kira/internal/config"
 )
 
 func TestReviewCommandRegistration(t *testing.T) {
@@ -346,5 +350,240 @@ func TestReviewCommandWithFreshInstance(t *testing.T) {
 
 		assert.True(t, draft, "draft should default to true")
 		assert.Empty(t, reviewers, "reviewers should default to empty")
+	})
+}
+
+// TestDeriveWorkItemFromBranch tests the deriveWorkItemFromBranch function
+func TestDeriveWorkItemFromBranch(t *testing.T) {
+	t.Run("extracts ID from valid branch names", func(t *testing.T) {
+		testCases := []struct {
+			branchName string
+			expectedID string
+		}{
+			{"012-submit-for-review", "012"},
+			{"001-feature-name", "001"},
+			{"999-long-branch-name-with-many-dashes", "999"},
+			{"123-simple", "123"},
+			{"000-test", "000"},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.branchName, func(t *testing.T) {
+				id, err := deriveWorkItemFromBranch(tc.branchName)
+				require.NoError(t, err, "should extract ID from valid branch name")
+				assert.Equal(t, tc.expectedID, id, "extracted ID should match expected")
+			})
+		}
+	})
+
+	t.Run("returns error for branch without dash", func(t *testing.T) {
+		testCases := []string{
+			"012submit",
+			"012",
+			"no-dash-here-but-wait-there-is-one",
+		}
+
+		for _, branchName := range testCases {
+			// Only test cases that actually don't have a dash
+			if !strings.Contains(branchName, "-") {
+				t.Run(branchName, func(t *testing.T) {
+					_, err := deriveWorkItemFromBranch(branchName)
+					require.Error(t, err, "should return error for branch without dash")
+					assert.Contains(t, err.Error(), "does not follow kira naming convention", "error should mention naming convention")
+				})
+			}
+		}
+	})
+
+	t.Run("returns error for invalid ID formats", func(t *testing.T) {
+		testCases := []struct {
+			branchName  string
+			description string
+		}{
+			{"12-feature", "ID not 3 digits (2 digits)"},
+			{"1234-feature", "ID not 3 digits (4 digits)"},
+			{"abc-feature", "ID contains letters"},
+			{"01a-feature", "ID contains letters"},
+			{"1-feature", "ID is single digit"},
+			{"a12-feature", "ID starts with letter"},
+			{"12a-feature", "ID ends with letter"},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.description, func(t *testing.T) {
+				_, err := deriveWorkItemFromBranch(tc.branchName)
+				require.Error(t, err, "should return error for invalid ID format")
+				assert.Contains(t, err.Error(), "invalid work item ID", "error should mention invalid ID")
+			})
+		}
+	})
+
+	t.Run("returns error for empty branch name", func(t *testing.T) {
+		_, err := deriveWorkItemFromBranch("")
+		require.Error(t, err, "should return error for empty branch name")
+		assert.Contains(t, err.Error(), "cannot be empty", "error should mention empty")
+	})
+
+	t.Run("returns error when ID is missing before dash", func(t *testing.T) {
+		_, err := deriveWorkItemFromBranch("-feature-name")
+		require.Error(t, err, "should return error when ID is missing")
+		assert.Contains(t, err.Error(), "work item ID is missing", "error should mention missing ID")
+	})
+}
+
+// setupTestGitRepo creates a temporary git repository for testing
+func setupTestGitRepo(t *testing.T, branchName string) string {
+	tmpDir := t.TempDir()
+	originalDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() {
+		_ = os.Chdir(originalDir)
+	})
+
+	// Initialize git repository
+	require.NoError(t, exec.Command("git", "init").Run())
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+	// Create initial commit on default branch (main or master)
+	require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+	require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+	// Create and checkout specified branch if provided and different from current branch
+	if branchName != "" {
+		// Get current branch name
+		currentBranchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+		currentBranchOutput, err := currentBranchCmd.Output()
+		require.NoError(t, err)
+		currentBranch := strings.TrimSpace(string(currentBranchOutput))
+
+		// Only create new branch if it's different from current branch
+		if branchName != currentBranch {
+			require.NoError(t, exec.Command("git", "checkout", "-b", branchName).Run())
+		}
+	}
+
+	return tmpDir
+}
+
+// TestValidateBranchContext tests the validateBranchContext function
+func TestValidateBranchContext(t *testing.T) {
+	t.Run("rejects trunk branch (main)", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "main")
+		_ = tmpDir // Use tmpDir to avoid unused variable
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+			},
+		}
+
+		err := validateBranchContext(cfg)
+		require.Error(t, err, "should reject trunk branch")
+		assert.Contains(t, err.Error(), "cannot run 'kira review' on trunk branch", "error should mention trunk branch")
+		assert.Contains(t, err.Error(), "main", "error should mention branch name")
+	})
+
+	t.Run("rejects trunk branch (master)", func(t *testing.T) {
+		// Create repo and switch to master
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "master").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "master",
+			},
+		}
+
+		err = validateBranchContext(cfg)
+		require.Error(t, err, "should reject trunk branch")
+		assert.Contains(t, err.Error(), "cannot run 'kira review' on trunk branch", "error should mention trunk branch")
+		assert.Contains(t, err.Error(), "master", "error should mention branch name")
+	})
+
+	t.Run("accepts feature branch", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "012-test-feature")
+		_ = tmpDir // Use tmpDir to avoid unused variable
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+			},
+		}
+
+		err := validateBranchContext(cfg)
+		assert.NoError(t, err, "should accept feature branch")
+	})
+
+	t.Run("handles auto-detected trunk (main)", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "main")
+		_ = tmpDir // Use tmpDir to avoid unused variable
+
+		// Config with empty TrunkBranch should auto-detect main
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "", // Empty means auto-detect
+			},
+		}
+
+		err := validateBranchContext(cfg)
+		require.Error(t, err, "should reject trunk branch when auto-detected")
+		assert.Contains(t, err.Error(), "cannot run 'kira review' on trunk branch", "error should mention trunk branch")
+	})
+
+	t.Run("handles auto-detected trunk (master)", func(t *testing.T) {
+		// Create repo with master branch (no main)
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "master").Run())
+		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Config with empty TrunkBranch should auto-detect master
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "", // Empty means auto-detect
+			},
+		}
+
+		err = validateBranchContext(cfg)
+		require.Error(t, err, "should reject trunk branch when auto-detected")
+		assert.Contains(t, err.Error(), "cannot run 'kira review' on trunk branch", "error should mention trunk branch")
+	})
+
+	t.Run("accepts feature branch with auto-detected trunk", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "012-test-feature")
+		_ = tmpDir // Use tmpDir to avoid unused variable
+
+		// Config with empty TrunkBranch should auto-detect main
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "", // Empty means auto-detect
+			},
+		}
+
+		err := validateBranchContext(cfg)
+		assert.NoError(t, err, "should accept feature branch when trunk is auto-detected")
 	})
 }
