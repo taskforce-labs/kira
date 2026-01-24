@@ -917,6 +917,39 @@ func TestCheckRepositoryState(t *testing.T) {
 		assert.Contains(t, stateInfo.Details, "rebase")
 	})
 
+	t.Run("detects active rebase operation using rebase-apply", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Determine git dir in the same way production code does
+		gitDirOutput, err := exec.Command("git", "rev-parse", "--git-dir").Output()
+		require.NoError(t, err)
+		gitDir := strings.TrimSpace(string(gitDirOutput))
+		if !filepath.IsAbs(gitDir) {
+			gitDir = filepath.Join(tmpDir, gitDir)
+		}
+
+		// Create rebase-apply directory to simulate an active rebase driven by apply backend
+		rebaseApplyDir := filepath.Join(gitDir, "rebase-apply")
+		require.NoError(t, os.MkdirAll(rebaseApplyDir, 0o700))
+
+		repo := RepositoryInfo{
+			Name: "test-repo",
+			Path: tmpDir,
+		}
+
+		stateInfo, err := checkRepositoryState(repo)
+		require.NoError(t, err)
+		assert.Equal(t, StateInRebase, stateInfo.State)
+		assert.Contains(t, stateInfo.Details, "rebase")
+	})
+
 	t.Run("detects active merge operation", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
