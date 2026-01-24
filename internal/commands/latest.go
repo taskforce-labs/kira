@@ -641,9 +641,33 @@ func checkActiveOperations(repo RepositoryInfo) *RepositoryStateInfo {
 	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer cancel()
 
+	// Determine the actual git directory for this repository. This supports
+	// standard repos, worktrees, and other non-standard layouts where .git
+	// may be a file pointing to the real git directory.
+	gitDir := filepath.Join(repo.Path, ".git")
+	if gitDirOutput, err := executeCommand(ctx, "git", []string{"rev-parse", "--git-dir"}, repo.Path, false); err == nil {
+		dir := strings.TrimSpace(gitDirOutput)
+		if dir != "" {
+			if filepath.IsAbs(dir) {
+				gitDir = dir
+			} else {
+				gitDir = filepath.Join(repo.Path, dir)
+			}
+		}
+	}
+
 	// Check for active rebase operation
-	rebaseMergePath := filepath.Join(repo.Path, ".git", "rebase-merge")
+	rebaseMergePath := filepath.Join(gitDir, "rebase-merge")
+	rebaseApplyPath := filepath.Join(gitDir, "rebase-apply")
+
+	rebaseInProgress := false
 	if _, err := os.Stat(rebaseMergePath); err == nil {
+		rebaseInProgress = true
+	} else if _, err := os.Stat(rebaseApplyPath); err == nil {
+		rebaseInProgress = true
+	}
+
+	if rebaseInProgress {
 		// Check if there are conflicts during the rebase
 		if checkForConflicts(ctx, repo) {
 			return &RepositoryStateInfo{
@@ -659,8 +683,8 @@ func checkActiveOperations(repo RepositoryInfo) *RepositoryStateInfo {
 		}
 	}
 
-	// Check for active merge operation
-	mergeHeadPath := filepath.Join(repo.Path, ".git", "MERGE_HEAD")
+	// Check for active merge operation (MERGE_HEAD in git dir)
+	mergeHeadPath := filepath.Join(gitDir, "MERGE_HEAD")
 	if _, err := os.Stat(mergeHeadPath); err == nil {
 		// Check if there are conflicts during the merge
 		if checkForConflicts(ctx, repo) {
