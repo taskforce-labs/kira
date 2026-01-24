@@ -1585,4 +1585,40 @@ func TestWriteYAMLFieldErrorPropagation(t *testing.T) {
 		require.Error(t, err, "writeYAMLField should return error for function types")
 		assert.Contains(t, err.Error(), "yaml:", "error should mention YAML marshaling")
 	})
+
+	t.Run("writeYAMLFrontMatter writes fields in deterministic order", func(t *testing.T) {
+		var sb strings.Builder
+		workItem := &WorkItem{
+			ID:      "001",
+			Title:   "Test",
+			Status:  "todo",
+			Kind:    "prd",
+			Created: "2024-01-01",
+			Fields: map[string]interface{}{
+				"priority": "high",
+				"assigned": "user@example.com",
+				"epic":     "EPIC-001",
+			},
+		}
+
+		err := writeYAMLFrontMatter(&sb, workItem)
+		require.NoError(t, err, "writeYAMLFrontMatter should succeed")
+
+		lines := strings.Split(sb.String(), "\n")
+		var fieldOrder []string
+		for _, line := range lines {
+			switch {
+			case strings.HasPrefix(line, "assigned:"):
+				fieldOrder = append(fieldOrder, "assigned")
+			case strings.HasPrefix(line, "epic:"):
+				fieldOrder = append(fieldOrder, "epic")
+			case strings.HasPrefix(line, "priority:"):
+				fieldOrder = append(fieldOrder, "priority")
+			}
+		}
+
+		// Custom fields should be written in sorted key order to ensure
+		// deterministic YAML output across runs.
+		assert.Equal(t, []string{"assigned", "epic", "priority"}, fieldOrder)
+	})
 }
