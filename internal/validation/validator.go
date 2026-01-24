@@ -1563,11 +1563,19 @@ func writeYAMLFrontMatter(sb *strings.Builder, workItem *WorkItem) error {
 	fmt.Fprintf(sb, "kind: %s\n", yamlFormatStringValue(workItem.Kind))
 	fmt.Fprintf(sb, "created: %s\n", yamlFormatStringValue(workItem.Created))
 
-	// Write other fields
-	for key, value := range workItem.Fields {
+	// Write other fields in deterministic (sorted) order so repeated runs
+	// of commands like `kira doctor` do not cause spurious diffs.
+	var fieldKeys []string
+	for key := range workItem.Fields {
 		if isHardcodedField(key) {
 			continue
 		}
+		fieldKeys = append(fieldKeys, key)
+	}
+	sort.Strings(fieldKeys)
+
+	for _, key := range fieldKeys {
+		value := workItem.Fields[key]
 		if err := writeYAMLField(sb, key, value); err != nil {
 			return fmt.Errorf("failed to write field '%s': %w", key, err)
 		}
