@@ -1,7 +1,7 @@
 ---
 id: 020
 title: make e2e
-status: doing
+status: review
 kind: task
 assigned:
 estimate: 0
