@@ -1,4 +1,4 @@
-.PHONY: build test test-coverage e2e clean clean-all install uninstall lint fmt check security build-all release-snapshot install-tools clean-tools dev-setup help demo
+.PHONY: build test test-coverage e2e clean clean-all install uninstall lint fmt check security build-all release-snapshot install-tools clean-tools dev-setup demo run
 
 PREFIX ?= /usr/local
 DESTDIR ?=
@@ -184,9 +184,13 @@ dev-setup: install-tools
 	go mod download
 	go mod tidy
 
-# Run kira with help
-help:
-	./kira --help
+# Run kira CLI command via go run
+run:
+	@go run cmd/kira/main.go $(filter-out run,$(MAKECMDGOALS))
+
+# Catch-all target to prevent Make from executing other targets when 'run' is specified
+%:
+	@:
 
 # Demo initialization
 demo:
