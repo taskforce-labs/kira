@@ -1481,6 +1481,10 @@ func tryFixEnumValue(value interface{}, fieldConfig *config.FieldConfig) (interf
 	if str, ok := value.(string); ok && !caseSensitive {
 		for _, allowed := range fieldConfig.AllowedValues {
 			if strings.EqualFold(str, allowed) {
+				// Only treat as a fix when the canonical value differs (e.g. case)
+				if str == allowed {
+					return value, false
+				}
 				return allowed, true // Return the canonical value
 			}
 		}
