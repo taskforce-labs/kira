@@ -166,6 +166,44 @@ func TestCLIIntegration(t *testing.T) {
 		assert.Contains(t, string(output), "No duplicate IDs found")
 	})
 
+	t.Run("new command splits colon-delimited title and description", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		originalDir, err := os.Getwd()
+		require.NoError(t, err)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(originalDir) }()
+
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize workspace
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		output, err := initCmd.CombinedOutput()
+		require.NoError(t, err, "init failed: %s", string(output))
+
+		// Create a new task with colon-delimited title and description
+		newCmd, err := safeExecCommand(tmpDir, kiraPath, "new", "task", "todo", "my title: my description")
+		require.NoError(t, err)
+		output, err = newCmd.CombinedOutput()
+		require.NoError(t, err, "new failed: %s", string(output))
+		assert.Contains(t, string(output), "Created work item")
+
+		// Verify work item was created in todo with split title/description
+		globPattern := filepath.Join(tmpDir, ".work", "1_todo", "*.task.md")
+		files, err := filepath.Glob(globPattern)
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+
+		content, err := safeReadTestFile(files[0], tmpDir)
+		require.NoError(t, err)
+		contentStr := string(content)
+
+		// Title should be split before colon, description after
+		assert.Contains(t, contentStr, "title: my title")
+		assert.Contains(t, contentStr, "my description")
+		assert.NotContains(t, contentStr, "my title: my description")
+	})
+
 	t.Run("default status on new without status argument", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))

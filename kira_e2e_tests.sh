@@ -164,6 +164,32 @@ else
     exit 1
 fi
 
+# Test 6b: Create a work item via 'kira new' with colon-delimited title/description
+echo ""
+echo "📋 Test 6b: Create a work item via 'kira new' (colon-delimited title/description)"
+"$KIRA_BIN" new task todo "my title: my description"
+
+TASK_ITEM_PATH=$(find .work/1_todo -maxdepth 1 -type f -name "*.task.md" | head -n 1)
+if [ -n "$TASK_ITEM_PATH" ] && [ -f "$TASK_ITEM_PATH" ]; then
+    echo "✅ Task work item created successfully: $TASK_ITEM_PATH"
+else
+    echo "❌ Task work item creation with colon-delimited title failed"
+    exit 1
+fi
+
+# Validate colon-based splitting of title and description
+if grep -q "^title: my title$" "$TASK_ITEM_PATH" && \
+   grep -q "my description" "$TASK_ITEM_PATH" && \
+   ! grep -q "my title: my description" "$TASK_ITEM_PATH"; then
+    echo "✅ Colon-delimited title and description parsed correctly"
+else
+    echo "❌ Colon-delimited title and description not parsed as expected"
+    echo "----- File contents -----"
+    cat "$TASK_ITEM_PATH"
+    echo "-------------------------"
+    exit 1
+fi
+
 # Test 7: Lint check
 echo ""
 echo "🔍 Test 7: Lint check"

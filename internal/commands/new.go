@@ -169,6 +169,18 @@ func parseWorkItemArgs(cfg *config.Config, args []string) (workItemArgs, error) 
 		result.description = args[3]
 	}
 
+	// If the title contains a colon, use the existing idea parser to split
+	// title and description. This reuses all the edge-case handling used for
+	// ideas (whitespace, multiple colons, empty parts, etc.).
+	if result.title != "" && strings.Contains(result.title, ":") {
+		parsed := parseIdeaTitleDescription(result.title)
+		result.title = parsed.Title
+		// Only override description if it was not explicitly provided
+		if result.description == "" {
+			result.description = parsed.Description
+		}
+	}
+
 	return result, nil
 }
 
