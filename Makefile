@@ -188,9 +188,14 @@ dev-setup: install-tools
 run:
 	@go run cmd/kira/main.go $(filter-out run,$(MAKECMDGOALS))
 
-# Catch-all target to prevent Make from executing other targets when 'run' is specified
+# When 'run' is the primary goal, treat any additional goals as CLI
+# arguments by defining a no-op catch-all target. For other primary
+# goals (e.g. 'build', 'test'), let Make report unknown or misspelled
+# targets as errors as usual.
+ifeq ($(firstword $(MAKECMDGOALS)),run)
 %:
 	@:
+endif
 
 # Demo initialization
 demo:
