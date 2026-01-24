@@ -28,6 +28,7 @@ func init() {
 	rootCmd.AddCommand(newCmd)
 	rootCmd.AddCommand(moveCmd)
 	rootCmd.AddCommand(ideaCmd)
+	rootCmd.AddCommand(assignCmd)
 	rootCmd.AddCommand(lintCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(releaseCmd)
