@@ -1116,4 +1116,65 @@ created: 2024-01-16
 		idsDifferent := !strings.Contains(string(content1), "id: 001") || !strings.Contains(string(content2), "id: 001")
 		assert.True(t, idsDifferent, "At least one file should have a different ID after fixing duplicates")
 	})
+
+	t.Run("applies defaults for missing required fields without marking them unfixable", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Build the kira binary for testing
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize kira
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		err = initCmd.Run()
+		require.NoError(t, err)
+
+		// Update kira.yml to add a required field with a default value
+		kiraConfigPath := filepath.Join(tmpDir, "kira.yml")
+		// #nosec G304 - kiraConfigPath is constructed from tmpDir which is validated
+		configContent, err := os.ReadFile(kiraConfigPath)
+		require.NoError(t, err)
+
+		// Replace the empty fields map with a concrete field configuration
+		configWithFields := strings.Replace(string(configContent), "fields: {}", `fields:
+  assigned:
+    type: email
+    required: true
+    default: user@example.com
+`, 1)
+		require.NoError(t, os.WriteFile(kiraConfigPath, []byte(configWithFields), 0o600))
+
+		// Create a work item that is missing the required 'assigned' field
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		workItemContent := `---
+id: 001
+title: Feature with default
+status: todo
+kind: prd
+created: 2024-01-15
+---
+# Feature with default
+`
+
+		filePath := filepath.Join(tmpDir, ".work", "1_todo", "001-feature-with-default.prd.md")
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		// Run doctor command
+		doctorCmd, err := safeExecCommand(tmpDir, kiraPath, "doctor")
+		require.NoError(t, err)
+		output, err := doctorCmd.CombinedOutput()
+		require.NoError(t, err)
+
+		outputStr := string(output)
+
+		// Should report that field issues were fixed using defaults
+		assert.Contains(t, outputStr, "Fixed field issues")
+		assert.Contains(t, outputStr, "fixed field 'assigned': applied default value")
+
+		// Should not report the missing required field as an unfixable issue
+		assert.NotContains(t, outputStr, "Issues requiring manual attention")
+		assert.NotContains(t, outputStr, "cannot be automatically fixed")
+	})
 }
