@@ -1,4 +1,4 @@
-.PHONY: build test test-coverage clean clean-all install uninstall lint fmt check security build-all release-snapshot install-tools clean-tools dev-setup help demo
+.PHONY: build test test-coverage e2e clean clean-all install uninstall lint fmt check security build-all release-snapshot install-tools clean-tools dev-setup help demo
 
 PREFIX ?= /usr/local
 DESTDIR ?=
@@ -19,6 +19,10 @@ test:
 test-coverage:
 	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
+
+# Run end-to-end tests
+e2e:
+	bash kira_e2e_tests.sh $(ARGS)
 
 # Clean build artifacts
 clean:

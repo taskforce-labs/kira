@@ -30,6 +30,13 @@ make test-coverage
 End-to-end tests:
 
 ```bash
+make e2e                # Run e2e tests
+make e2e ARGS="--keep"  # Preserve test directory
+```
+
+Alternatively, you can run the script directly:
+
+```bash
 bash kira_e2e_tests.sh
 bash kira_e2e_tests.sh --keep   # preserve last test directory
 ```
