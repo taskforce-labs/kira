@@ -2,6 +2,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -357,4 +358,238 @@ func updateWorkItemStatusOnCurrentBranch(cfg *config.Config, workItemID, targetS
 	}
 
 	return nil
+}
+
+// validateRemoteExists checks if the configured git remote exists in the repository.
+// Returns an error if the remote is not configured.
+func validateRemoteExists(cfg *config.Config) error {
+	if cfg == nil {
+		return fmt.Errorf("configuration cannot be nil")
+	}
+
+	// Get remote name from config (defaults to "origin")
+	remoteName := resolveRemoteName(cfg, nil)
+
+	// Get repository root
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return fmt.Errorf("failed to get repository root: %w", err)
+	}
+
+	// Check if remote exists
+	exists, err := checkRemoteExists(remoteName, repoRoot, false)
+	if err != nil {
+		return fmt.Errorf("failed to check remote: %w", err)
+	}
+
+	if !exists {
+		return fmt.Errorf("GitHub remote '%s' not configured", remoteName)
+	}
+
+	return nil
+}
+
+// checkBranchOnRemote checks if a branch exists on the remote repository.
+// Returns true if the branch exists on remote, false if it doesn't.
+func checkBranchOnRemote(branchName string, cfg *config.Config) (bool, error) {
+	if strings.TrimSpace(branchName) == "" {
+		return false, fmt.Errorf("branch name cannot be empty")
+	}
+	if cfg == nil {
+		return false, fmt.Errorf("configuration cannot be nil")
+	}
+
+	// Get remote name from config
+	remoteName := resolveRemoteName(cfg, nil)
+
+	// Get repository root
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return false, fmt.Errorf("failed to get repository root: %w", err)
+	}
+
+	// Execute git ls-remote to check if branch exists
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	output, err := executeCommand(ctx, "git", []string{"ls-remote", "--heads", remoteName, branchName}, repoRoot, false)
+	if err != nil {
+		// Check for network errors
+		if strings.Contains(err.Error(), "Could not resolve host") ||
+			strings.Contains(err.Error(), "unable to access") ||
+			strings.Contains(err.Error(), "Connection refused") {
+			return false, fmt.Errorf("failed to check remote branch: network error occurred. Check network connection and try again: %w", err)
+		}
+		// Check if remote doesn't exist
+		if strings.Contains(err.Error(), "fatal: No such remote") {
+			return false, fmt.Errorf("remote '%s' does not exist", remoteName)
+		}
+		return false, fmt.Errorf("failed to check remote branch: %w", err)
+	}
+
+	// If output is non-empty, branch exists on remote
+	return strings.TrimSpace(output) != "", nil
+}
+
+// checkBranchDiverged checks if the local branch has diverged from the remote branch.
+// Returns true if branches have diverged (with error), false if not diverged.
+// A branch is considered diverged if local and remote have different commits and
+// neither is an ancestor of the other.
+func checkBranchDiverged(branchName string, cfg *config.Config) (bool, error) {
+	if strings.TrimSpace(branchName) == "" {
+		return false, fmt.Errorf("branch name cannot be empty")
+	}
+	if cfg == nil {
+		return false, fmt.Errorf("configuration cannot be nil")
+	}
+
+	// Get remote name from config
+	remoteName := resolveRemoteName(cfg, nil)
+
+	// Get repository root
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return false, fmt.Errorf("failed to get repository root: %w", err)
+	}
+
+	// First check if branch exists on remote
+	exists, err := checkBranchOnRemote(branchName, cfg)
+	if err != nil || !exists {
+		// If we can't check remote or branch doesn't exist, assume not diverged (conservative approach)
+		return false, nil
+	}
+
+	// Get local and remote commits
+	localCommit, remoteCommit, err := getLocalAndRemoteCommits(branchName, remoteName, repoRoot)
+	if err != nil || localCommit == "" || remoteCommit == "" {
+		// Can't get commits, assume not diverged
+		return false, nil
+	}
+
+	// If commits match, branches are in sync (not diverged)
+	if localCommit == remoteCommit {
+		return false, nil
+	}
+
+	// Check divergence using merge-base
+	return checkDivergenceWithMergeBase(localCommit, branchName, remoteName, repoRoot)
+}
+
+// getLocalAndRemoteCommits retrieves the commit hashes for local and remote branches.
+func getLocalAndRemoteCommits(branchName, remoteName, repoRoot string) (string, string, error) {
+	// Get local branch commit
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	localCommit, err := executeCommand(ctx, "git", []string{"rev-parse", branchName}, repoRoot, false)
+	if err != nil {
+		return "", "", err
+	}
+	localCommit = strings.TrimSpace(localCommit)
+
+	// Get remote branch commit
+	remoteCtx, remoteCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer remoteCancel()
+
+	remoteOutput, err := executeCommand(remoteCtx, "git", []string{"ls-remote", remoteName, branchName}, repoRoot, false)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Parse remote commit hash from ls-remote output
+	remoteLines := strings.Split(strings.TrimSpace(remoteOutput), "\n")
+	if len(remoteLines) == 0 || remoteLines[0] == "" {
+		return "", "", fmt.Errorf("no remote commit found")
+	}
+
+	// Extract commit hash (first field before tab)
+	remoteCommit := strings.Fields(remoteLines[0])[0]
+	if remoteCommit == "" {
+		return "", "", fmt.Errorf("failed to parse remote commit")
+	}
+
+	return localCommit, remoteCommit, nil
+}
+
+// checkDivergenceWithMergeBase uses git merge-base to determine if branches have diverged.
+func checkDivergenceWithMergeBase(localCommit, branchName, remoteName, repoRoot string) (bool, error) {
+	// Fetch the remote commit into a temporary ref so merge-base can work with it
+	tempRef := "refs/temp-merge-base-check"
+	if err := fetchRemoteCommitToTempRef(branchName, remoteName, tempRef, repoRoot); err != nil {
+		// If fetch fails, can't determine divergence - assume not diverged
+		return false, nil
+	}
+
+	// Clean up temp ref when done
+	defer cleanupTempRef(tempRef, repoRoot)
+
+	// Get the fetched remote commit
+	fetchedRemoteCommit, err := getTempRefCommit(tempRef, repoRoot)
+	if err != nil {
+		return false, nil
+	}
+
+	// Find common ancestor
+	commonAncestor, err := findCommonAncestor(localCommit, tempRef, repoRoot)
+	if err != nil {
+		// Can't determine divergence - assume not diverged
+		return false, nil
+	}
+
+	// If common ancestor is neither local nor remote commit, branches have diverged
+	if commonAncestor != localCommit && commonAncestor != fetchedRemoteCommit {
+		return true, fmt.Errorf("branch has diverged from remote. Pull latest changes or resolve conflicts before submitting for review")
+	}
+
+	// Branches are not diverged (one is ahead/behind the other)
+	return false, nil
+}
+
+// fetchRemoteCommitToTempRef fetches the remote branch commit into a temporary ref.
+func fetchRemoteCommitToTempRef(branchName, remoteName, tempRef, repoRoot string) error {
+	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer fetchCancel()
+
+	_, err := executeCommand(fetchCtx, "git", []string{"fetch", remoteName, "refs/heads/" + branchName + ":+" + tempRef}, repoRoot, false)
+	if err != nil {
+		return err
+	}
+
+	// Verify temp ref exists after fetch
+	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer verifyCancel()
+
+	_, err = executeCommand(verifyCtx, "git", []string{"rev-parse", "--verify", tempRef}, repoRoot, false)
+	return err
+}
+
+// getTempRefCommit gets the commit hash from the temporary ref.
+func getTempRefCommit(tempRef, repoRoot string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	commit, err := executeCommand(ctx, "git", []string{"rev-parse", tempRef}, repoRoot, false)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(commit), nil
+}
+
+// findCommonAncestor finds the common ancestor of two commits using git merge-base.
+func findCommonAncestor(commit1, commit2, repoRoot string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	ancestor, err := executeCommand(ctx, "git", []string{"merge-base", commit1, commit2}, repoRoot, false)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(ancestor), nil
+}
+
+// cleanupTempRef removes the temporary ref.
+func cleanupTempRef(tempRef, repoRoot string) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+	_, _ = executeCommand(ctx, "git", []string{"update-ref", "-d", tempRef}, repoRoot, false)
 }
