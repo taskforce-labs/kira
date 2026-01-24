@@ -1,4 +1,3 @@
-// Package commands implements the CLI commands for the kira tool.
 package commands
 
 import (
@@ -12,6 +11,7 @@ import (
 )
 
 const (
+	// Error categories used for grouping validation results
 	errorCategoryWorkflow     = "workflow"
 	errorCategoryDuplicate    = "duplicate"
 	errorCategoryParse        = "parse"
@@ -47,6 +47,8 @@ func init() {
 	doctorCmd.Flags().Bool("strict", false, "Enable strict mode: flag fields not defined in configuration")
 }
 
+// runDoctor validates work items, applies automatic fixes, then reports what
+// was fixed and what still needs manual attention.
 func runDoctor(cfg *config.Config) error {
 	validationResult, err := validateWorkItems(cfg)
 	if err != nil {
@@ -62,13 +64,15 @@ func runDoctor(cfg *config.Config) error {
 	printCategorizedErrors(validationResult.Errors)
 
 	fixedCount := runAutoFixes(cfg)
-	// Re-validate after applying automatic fixes so that any issues which
-	// were successfully fixed (for example by applying default field values)
-	// are no longer reported as requiring manual attention.
+
+	// Re-validate after applying automatic fixes so that any issues which were
+	// successfully fixed (for example by applying default field values) are no
+	// longer reported as requiring manual attention.
 	postFixResult, err := validateWorkItems(cfg)
 	if err != nil {
 		return err
 	}
+
 	unfixableErrors := getUnfixableErrors(postFixResult.Errors)
 	reportResults(fixedCount, unfixableErrors)
 
@@ -197,7 +201,8 @@ func printUnfixableErrors(errors []validation.ValidationError) {
 		return
 	}
 
-	// Categorize errors
+	// Categorize errors using shared helpers from lint.go so both commands
+	// present errors consistently.
 	fieldErrors := []validation.ValidationError{}
 	unknownFieldErrors := []validation.ValidationError{}
 	workflowErrors := []validation.ValidationError{}
@@ -223,7 +228,6 @@ func printUnfixableErrors(errors []validation.ValidationError) {
 		}
 	}
 
-	// Print categories without the total count header
 	printErrorCategory("Field Validation Errors", fieldErrors, true)
 	printErrorCategory("Unknown Fields", unknownFieldErrors, true)
 	printErrorCategory("Workflow Errors", workflowErrors, false)
@@ -232,49 +236,18 @@ func printUnfixableErrors(errors []validation.ValidationError) {
 	printErrorCategory("Other Errors", otherErrors, true)
 }
 
-// getUnfixableErrors filters out errors that can be automatically fixed.
+// getUnfixableErrors returns the set of validation errors that remain after all
+// automatic fixes have been applied.
+//
+// The doctor command runs validation, then attempts to automatically fix any
+// issues it knows how to handle (duplicate IDs, hardcoded date formats, and
+// certain field-level problems such as applying defaults or normalising enum
+// case / email format). After those fixers run, we validate again.
+//
+// At that point, any remaining validation errors are, by definition, issues
+// that the doctor command cannot fix automatically and therefore require
+// manual attention. Returning all remaining errors here ensures we never claim
+// that "All issues have been resolved!" while validation failures still exist.
 func getUnfixableErrors(errors []validation.ValidationError) []validation.ValidationError {
-	var unfixable []validation.ValidationError
-
-	for _, err := range errors {
-		// These can be fixed automatically:
-		// - Duplicate IDs (handled by FixDuplicateIDs)
-		// - Invalid created date format (handled by FixHardcodedDateFormats)
-		// - Field validation issues (handled by FixFieldIssues)
-
-		// These cannot be fixed automatically:
-		// - Workflow violations (user needs to decide which item to move)
-		// - Invalid status values (user needs to choose correct status)
-		// - Invalid ID format (user needs to fix the ID)
-		// - Missing required fields without defaults (user needs to provide values).
-		//   After automatic fixes run, any remaining "missing required field" errors
-		//   correspond to fields that do not have defaults configured.
-		// - Unknown fields in strict mode (user needs to add to config or remove field)
-		// - Parse errors (file corruption, user needs to fix)
-
-		if err.File == workflowErrorFile {
-			// Workflow errors can't be auto-fixed
-			unfixable = append(unfixable, err)
-		} else if strings.Contains(err.Message, "invalid status") {
-			// Invalid status needs user decision
-			unfixable = append(unfixable, err)
-		} else if strings.Contains(err.Message, "invalid ID format") {
-			// Invalid ID format needs user to fix
-			unfixable = append(unfixable, err)
-		} else if strings.Contains(err.Message, "missing required field") {
-			// Remaining missing required field errors do not have defaults and
-			// therefore cannot be fixed automatically.
-			unfixable = append(unfixable, err)
-		} else if strings.Contains(err.Message, "unknown fields found") {
-			// Unknown fields in strict mode
-			unfixable = append(unfixable, err)
-		} else if strings.HasPrefix(err.Message, "failed to parse") {
-			// Parse errors
-			unfixable = append(unfixable, err)
-		}
-		// Note: duplicate IDs, date formats, and field validation issues are fixable
-		// so we don't include them in unfixable
-	}
-
-	return unfixable
+	return errors
 }

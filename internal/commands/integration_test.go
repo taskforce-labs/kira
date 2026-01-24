@@ -1177,4 +1177,65 @@ created: 2024-01-15
 		assert.NotContains(t, outputStr, "Issues requiring manual attention")
 		assert.NotContains(t, outputStr, "cannot be automatically fixed")
 	})
+
+	t.Run("reports unfixable field validation errors for invalid enum values", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Build the kira binary for testing
+		kiraPath := buildKiraBinary(t, tmpDir)
+
+		// Initialize kira
+		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
+		require.NoError(t, err)
+		err = initCmd.Run()
+		require.NoError(t, err)
+
+		// Update kira.yml to add an enum field
+		kiraConfigPath := filepath.Join(tmpDir, "kira.yml")
+		// #nosec G304 - kiraConfigPath is constructed from tmpDir which is validated
+		configContent, err := os.ReadFile(kiraConfigPath)
+		require.NoError(t, err)
+
+		configWithFields := strings.Replace(string(configContent), "fields: {}", `fields:
+  priority:
+    type: enum
+    allowed_values: [low, medium, high]
+`, 1)
+		require.NoError(t, os.WriteFile(kiraConfigPath, []byte(configWithFields), 0o600))
+
+		// Create a work item with an invalid enum value that cannot be auto-fixed
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		workItemContent := `---
+id: 001
+title: Feature with invalid priority
+status: todo
+kind: prd
+created: 2024-01-15
+priority: invalid
+---
+# Feature with invalid priority
+`
+
+		filePath := filepath.Join(tmpDir, ".work", "1_todo", "001-feature-with-invalid-priority.prd.md")
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		// Run doctor command
+		doctorCmd, err := safeExecCommand(tmpDir, kiraPath, "doctor")
+		require.NoError(t, err)
+		output, err := doctorCmd.CombinedOutput()
+		require.NoError(t, err)
+
+		outputStr := string(output)
+
+		// Should report validation errors and that they require manual attention
+		assert.Contains(t, outputStr, "Validation errors found")
+		assert.Contains(t, outputStr, "Field Validation Errors")
+		assert.Contains(t, outputStr, "priority")
+		assert.Contains(t, outputStr, "not in allowed values")
+		assert.Contains(t, outputStr, "Issues requiring manual attention")
+		// Must not falsely claim that all issues have been resolved
+		assert.NotContains(t, outputStr, "All issues have been resolved!")
+	})
 }
