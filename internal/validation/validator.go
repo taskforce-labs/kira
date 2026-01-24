@@ -652,12 +652,18 @@ func validateDateRangeValue(value interface{}, fieldConfig *config.FieldConfig) 
 		if dateFormat == "" {
 			dateFormat = dateFormatDefault
 		}
-		date, err = time.Parse(dateFormat, str)
+		// Parse string dates in a canonical timezone (UTC) so that all range
+		// checks operate on a consistent representation regardless of the
+		// environment's local timezone.
+		date, err = time.ParseInLocation(dateFormat, str, time.UTC)
 		if err != nil {
 			return nil // Format validation will catch this
 		}
+		date = normalizeToUTCDate(date)
 	} else if t, ok := value.(time.Time); ok {
-		date = t
+		// Normalize time.Time values to UTC calendar dates as well so that
+		// range checks are consistent for both string and time.Time sources.
+		date = normalizeToUTCDate(t)
 	} else {
 		return nil // Type validation will catch this
 	}
@@ -780,10 +786,24 @@ func validateArrayItem(item interface{}, fieldConfig *config.FieldConfig) error 
 	return nil
 }
 
-// validateDateRange validates a date against min/max date constraints.
+// normalizeToUTCDate returns a time representing the same calendar date in UTC at midnight.
+// This ensures that date comparisons are done purely on calendar dates, independent of timezone.
+func normalizeToUTCDate(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// validateDateRange validates a date against min/max date constraints using calendar-date
+// comparisons in a consistent timezone (UTC). This avoids issues where dates parsed in UTC
+// are compared against "today" based on the local timezone.
 func validateDateRange(date time.Time, minDate, maxDate string) error {
+	// Normalize input date to a UTC calendar date.
+	date = normalizeToUTCDate(date)
+
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	// Determine today's date in the user's local calendar, then normalize to UTC
+	// so all comparisons are done in a single timezone.
+	todayLocal := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := normalizeToUTCDate(todayLocal)
 
 	if minDate != "" {
 		var minTime time.Time
@@ -792,17 +812,18 @@ func validateDateRange(date time.Time, minDate, maxDate string) error {
 		case dateValueToday:
 			minTime = today
 		case "future":
-			minTime = today.AddDate(0, 0, 1) // Tomorrow
+			// "future" means strictly after today, so tomorrow is the minimum.
+			minTime = today.AddDate(0, 0, 1)
 		default:
-			// Try to parse as absolute date
-			minTime, err = time.Parse(dateFormatDefault, minDate)
+			// Try to parse as absolute date in the canonical comparison timezone (UTC).
+			minTime, err = time.ParseInLocation(dateFormatDefault, minDate, time.UTC)
 			if err != nil {
-				// If parsing fails, try relative date parsing
 				return fmt.Errorf("invalid min_date format: %s", minDate)
 			}
+			minTime = normalizeToUTCDate(minTime)
 		}
 		if date.Before(minTime) {
-			return fmt.Errorf("date %s is before min_date %s", date.Format("2006-01-02"), minDate)
+			return fmt.Errorf("date %s is before min_date %s", date.Format(dateFormatDefault), minDate)
 		}
 	}
 
@@ -813,17 +834,18 @@ func validateDateRange(date time.Time, minDate, maxDate string) error {
 		case dateValueToday:
 			maxTime = today
 		case "future":
-			// No upper bound for "future"
+			// No upper bound for "future".
 			return nil
 		default:
-			// Try to parse as absolute date
-			maxTime, err = time.Parse(dateFormatDefault, maxDate)
+			// Try to parse as absolute date in the canonical comparison timezone (UTC).
+			maxTime, err = time.ParseInLocation(dateFormatDefault, maxDate, time.UTC)
 			if err != nil {
 				return fmt.Errorf("invalid max_date format: %s", maxDate)
 			}
+			maxTime = normalizeToUTCDate(maxTime)
 		}
 		if date.After(maxTime) {
-			return fmt.Errorf("date %s is after max_date %s", date.Format("2006-01-02"), maxDate)
+			return fmt.Errorf("date %s is after max_date %s", date.Format(dateFormatDefault), maxDate)
 		}
 	}
 
