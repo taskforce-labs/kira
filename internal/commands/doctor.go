@@ -62,7 +62,14 @@ func runDoctor(cfg *config.Config) error {
 	printCategorizedErrors(validationResult.Errors)
 
 	fixedCount := runAutoFixes(cfg)
-	unfixableErrors := getUnfixableErrors(validationResult.Errors)
+	// Re-validate after applying automatic fixes so that any issues which
+	// were successfully fixed (for example by applying default field values)
+	// are no longer reported as requiring manual attention.
+	postFixResult, err := validateWorkItems(cfg)
+	if err != nil {
+		return err
+	}
+	unfixableErrors := getUnfixableErrors(postFixResult.Errors)
 	reportResults(fixedCount, unfixableErrors)
 
 	return nil
@@ -218,7 +225,9 @@ func getUnfixableErrors(errors []validation.ValidationError) []validation.Valida
 		// - Workflow violations (user needs to decide which item to move)
 		// - Invalid status values (user needs to choose correct status)
 		// - Invalid ID format (user needs to fix the ID)
-		// - Missing required fields without defaults (user needs to provide values)
+		// - Missing required fields without defaults (user needs to provide values).
+		//   After automatic fixes run, any remaining "missing required field" errors
+		//   correspond to fields that do not have defaults configured.
 		// - Unknown fields in strict mode (user needs to add to config or remove field)
 		// - Parse errors (file corruption, user needs to fix)
 
@@ -231,8 +240,9 @@ func getUnfixableErrors(errors []validation.ValidationError) []validation.Valida
 		} else if strings.Contains(err.Message, "invalid ID format") {
 			// Invalid ID format needs user to fix
 			unfixable = append(unfixable, err)
-		} else if strings.Contains(err.Message, "missing required field") && !strings.Contains(err.Message, "default") {
-			// Missing required fields without defaults
+		} else if strings.Contains(err.Message, "missing required field") {
+			// Remaining missing required field errors do not have defaults and
+			// therefore cannot be fixed automatically.
 			unfixable = append(unfixable, err)
 		} else if strings.Contains(err.Message, "unknown fields found") {
 			// Unknown fields in strict mode
