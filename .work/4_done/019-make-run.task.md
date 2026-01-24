@@ -1,7 +1,7 @@
 ---
 id: 019
 title: make run
-status: review
+status: done
 kind: task
 assigned:
 estimate: 0
