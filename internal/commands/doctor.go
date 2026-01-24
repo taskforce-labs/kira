@@ -170,12 +170,35 @@ func fixFieldIssues(cfg *config.Config) int {
 		return 0
 	}
 	if fieldResult.HasErrors() {
-		count := len(fieldResult.Errors)
-		fmt.Println("\n✅ Fixed field issues:")
+		successCount := 0
+		var failed []validation.ValidationError
+
 		for _, err := range fieldResult.Errors {
-			fmt.Printf("  %s: %s\n", err.File, err.Message)
+			switch {
+			case strings.HasPrefix(err.Message, "fixed field"):
+				successCount++
+			case strings.HasPrefix(err.Message, "failed to fix fields"):
+				failed = append(failed, err)
+			}
 		}
-		return count
+
+		if successCount > 0 {
+			fmt.Println("\n✅ Fixed field issues:")
+			for _, err := range fieldResult.Errors {
+				if strings.HasPrefix(err.Message, "fixed field") {
+					fmt.Printf("  %s: %s\n", err.File, err.Message)
+				}
+			}
+		}
+
+		if len(failed) > 0 {
+			fmt.Println("\n⚠️  Failed to fix some field issues:")
+			for _, err := range failed {
+				fmt.Printf("  %s: %s\n", err.File, err.Message)
+			}
+		}
+
+		return successCount
 	}
 	return 0
 }
