@@ -68,8 +68,13 @@ uninstall:
 	@echo "kira uninstalled"
 
 # Run linter
+# When 'run' is the primary goal (e.g. `make run lint`), skip defining the
+# Make 'lint' target so that 'lint' is treated purely as a kira CLI command
+# and we don't also invoke golangci-lint.
+ifneq ($(firstword $(MAKECMDGOALS)),run)
 lint:
 	@PATH="$$(go env GOPATH)/bin:$$PATH" golangci-lint run
+endif
 
 # Format code (writes changes) via golangci-lint config
 fmt:
