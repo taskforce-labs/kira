@@ -1519,18 +1519,18 @@ fi
 rm -f dirty.txt
 
 ###############################################
-# Test 25: Field Configuration System
+# Test 32: Field Configuration System
 ###############################################
 echo ""
-echo "📝 Test 25: Field Configuration System"
+echo "📝 Test 32: Field Configuration System"
 
 # Reset to clean state
 rm -rf .git > /dev/null 2>&1
 "$KIRA_BIN" init --force > /dev/null
 
-# Test 25a: Field configuration loading and validation
+# Test 32a: Field configuration loading and validation
 echo ""
-echo "  🔧 Test 25a: Field configuration loading"
+echo "  🔧 Test 32a: Field configuration loading"
 
 # Create kira.yml with field configuration
 cat > kira.yml << 'EOF'
@@ -1614,9 +1614,9 @@ else
   exit 1
 fi
 
-# Test 25b: Reject hardcoded field configuration
+# Test 32b: Reject hardcoded field configuration
 echo ""
-echo "  🚫 Test 25b: Reject hardcoded field configuration"
+echo "  🚫 Test 32b: Reject hardcoded field configuration"
 
 cat > kira.yml << 'EOF'
 version: "1.0"
@@ -1687,9 +1687,9 @@ fields:
     max: 100
 EOF
 
-# Test 25c: Field defaults application
+# Test 32c: Field defaults application
 echo ""
-echo "  📋 Test 25c: Field defaults application"
+echo "  📋 Test 32c: Field defaults application"
 
 # Update config to have default for assigned field (which is in template)
 cat > kira.yml << 'EOF'
@@ -1743,9 +1743,9 @@ else
   fi
 fi
 
-# Test 25d: Field validation - valid values
+# Test 32d: Field validation - valid values
 echo ""
-echo "  ✅ Test 25d: Field validation - valid values"
+echo "  ✅ Test 32d: Field validation - valid values"
 
 # Restore full field config
 cat > kira.yml << 'EOF'
@@ -1815,9 +1815,9 @@ else
   exit 1
 fi
 
-# Test 25e: Field validation - invalid email
+# Test 32e: Field validation - invalid email
 echo ""
-echo "  🧪 Test 25e: Field validation - invalid email"
+echo "  🧪 Test 32e: Field validation - invalid email"
 
 cat > .work/1_todo/010-invalid-email.prd.md << 'EOF'
 ---
@@ -1839,9 +1839,9 @@ else
   exit 1
 fi
 
-# Test 25f: Field validation - invalid enum (using a field we'll add manually)
+# Test 32f: Field validation - invalid enum (using a field we'll add manually)
 echo ""
-echo "  🧪 Test 25f: Field validation - invalid enum"
+echo "  🧪 Test 32f: Field validation - invalid enum"
 
 # Add enum field to config
 cat > kira.yml << 'EOF'
@@ -1903,9 +1903,9 @@ else
   exit 1
 fi
 
-# Test 25g: Field validation - invalid date
+# Test 32g: Field validation - invalid date
 echo ""
-echo "  🧪 Test 25g: Field validation - invalid date"
+echo "  🧪 Test 32g: Field validation - invalid date"
 
 # Update config to include due field with min_date
 cat > kira.yml << 'EOF'
@@ -1969,9 +1969,9 @@ else
   exit 1
 fi
 
-# Test 25h: Field validation - invalid number range
+# Test 32h: Field validation - invalid number range
 echo ""
-echo "  🧪 Test 25h: Field validation - invalid number range"
+echo "  🧪 Test 32h: Field validation - invalid number range"
 
 # Update config to include estimate field with max
 cat > kira.yml << 'EOF'
@@ -2035,9 +2035,9 @@ else
   exit 1
 fi
 
-# Test 25i: Field validation - invalid string format
+# Test 32i: Field validation - invalid string format
 echo ""
-echo "  🧪 Test 25i: Field validation - invalid string format"
+echo "  🧪 Test 32i: Field validation - invalid string format"
 
 # Add epic field to config
 cat > kira.yml << 'EOF'
@@ -2099,9 +2099,9 @@ else
   exit 1
 fi
 
-# Test 25j: Required field validation
+# Test 32j: Required field validation
 echo ""
-echo "  🧪 Test 25j: Required field validation"
+echo "  🧪 Test 32j: Required field validation"
 
 # Update config to require assigned field
 cat > kira.yml << 'EOF'
@@ -2161,9 +2161,9 @@ else
   exit 1
 fi
 
-# Test 25k: Doctor command fixes field issues
+# Test 32k: Doctor command fixes field issues
 echo ""
-echo "  🩺 Test 25k: Doctor command fixes field issues"
+echo "  🩺 Test 32k: Doctor command fixes field issues"
 
 # Update config with priority and assigned fields
 cat > kira.yml << 'EOF'
@@ -2241,9 +2241,9 @@ else
   echo "  ⚠️  Doctor command may not have fixed issues (this is acceptable if no issues found)"
 fi
 
-# Test 25l: Doctor command adds missing required fields
+# Test 32l: Doctor command adds missing required fields
 echo ""
-echo "  🩺 Test 25l: Doctor command adds missing required fields"
+echo "  🩺 Test 32l: Doctor command adds missing required fields"
 
 # Remove assigned field
 sed -i.bak '/^assigned:/d' .work/1_todo/016-fixable-issues.prd.md
@@ -2297,9 +2297,9 @@ else
   echo "  ⚠️  Doctor command behavior may vary (acceptable)"
 fi
 
-# Test 25m: Backward compatibility - work items without field config
+# Test 32m: Backward compatibility - work items without field config
 echo ""
-echo "  🔄 Test 25m: Backward compatibility"
+echo "  🔄 Test 32m: Backward compatibility"
 
 # Remove field config
 cat > kira.yml << 'EOF'
@@ -2358,9 +2358,9 @@ else
   exit 1
 fi
 
-# Test 25n: Array field validation
+# Test 32n: Array field validation
 echo ""
-echo "  📋 Test 25n: Array field validation"
+echo "  📋 Test 32n: Array field validation"
 
 # Update config with array field
 cat > kira.yml << 'EOF'

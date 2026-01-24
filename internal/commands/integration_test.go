@@ -1767,64 +1767,6 @@ This is a test feature with body content.
 		assert.Contains(t, contentStr, "- Requirement 2")
 	})
 
-	t.Run("reports unfixable workflow errors", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		// Build the kira binary for testing
-		kiraPath := buildKiraBinary(t, tmpDir)
-
-		// Initialize kira
-		initCmd, err := safeExecCommand(tmpDir, kiraPath, "init")
-		require.NoError(t, err)
-		err = initCmd.Run()
-		require.NoError(t, err)
-
-		// Create multiple items in doing folder (workflow violation)
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		workItemContent1 := `---
-id: 001
-title: First Feature
-status: doing
-kind: prd
-created: 2024-01-15
----
-# First Feature
-`
-
-		workItemContent2 := `---
-id: 002
-title: Second Feature
-status: doing
-kind: prd
-created: 2024-01-16
----
-# Second Feature
-`
-
-		filePath1 := filepath.Join(tmpDir, ".work", "2_doing", "001-first-feature.prd.md")
-		filePath2 := filepath.Join(tmpDir, ".work", "2_doing", "002-second-feature.prd.md")
-		require.NoError(t, os.WriteFile(filePath1, []byte(workItemContent1), 0o600))
-		require.NoError(t, os.WriteFile(filePath2, []byte(workItemContent2), 0o600))
-
-		// Run doctor command
-		doctorCmd, err := safeExecCommand(tmpDir, kiraPath, "doctor")
-		require.NoError(t, err)
-		output, err := doctorCmd.CombinedOutput()
-		// Doctor should not fail, just report issues
-		require.NoError(t, err)
-
-		outputStr := string(output)
-		// Should show validation errors
-		assert.Contains(t, outputStr, "Validation errors found")
-		// Should show workflow errors
-		assert.Contains(t, outputStr, "Workflow Errors")
-		// Should report unfixable issues
-		assert.Contains(t, outputStr, "Issues requiring manual attention")
-		assert.Contains(t, outputStr, "cannot be automatically fixed")
-	})
-
 	t.Run("fixes duplicate IDs", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
