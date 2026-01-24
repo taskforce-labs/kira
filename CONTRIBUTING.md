@@ -126,6 +126,17 @@ After building, test the binary:
 ./kira --help
 ```
 
+During development, you can run kira commands directly via `make run` without building the binary first:
+
+```bash
+make run version
+make run new prd todo Test
+make run move 001 doing
+make run --help
+```
+
+This is useful for testing commands during development without needing to rebuild the binary each time.
+
 ## Contribution Workflow
 
 1. Fork the repository
