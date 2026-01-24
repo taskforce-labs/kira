@@ -1,7 +1,7 @@
 ---
 id: 021
 title: ignore work in ci
-status: backlog
+status: doing
 kind: task
 assigned:
 estimate: 0
