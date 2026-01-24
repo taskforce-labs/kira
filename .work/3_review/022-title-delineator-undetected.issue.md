@@ -1,7 +1,7 @@
 ---
 id: 022
 title: title delineator undetected
-status: doing
+status: review
 kind: issue
 assigned:
 estimate: 0
