@@ -69,15 +69,15 @@ func printCategorizedErrors(errors []validation.ValidationError) {
 	for _, err := range errors {
 		category := categorizeError(err)
 		switch category {
-		case "workflow":
+		case errorCategoryWorkflow:
 			workflowErrors = append(workflowErrors, err)
-		case "duplicate":
+		case errorCategoryDuplicate:
 			duplicateErrors = append(duplicateErrors, err)
-		case "parse":
+		case errorCategoryParse:
 			parseErrors = append(parseErrors, err)
-		case "unknown_field":
+		case errorCategoryUnknownField:
 			unknownFieldErrors = append(unknownFieldErrors, err)
-		case "field":
+		case errorCategoryField:
 			fieldErrors = append(fieldErrors, err)
 		default:
 			otherErrors = append(otherErrors, err)
