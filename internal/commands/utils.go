@@ -279,3 +279,37 @@ func executeCommandCombinedOutput(ctx context.Context, name string, args []strin
 
 	return string(output), nil
 }
+
+// executeCommandCombinedOutputWithEnv executes a command with additional environment variables
+// and returns combined stdout+stderr. It is useful for commands (like git rebase) that may
+// otherwise try to open an editor in non-interactive environments.
+// If dryRun is true, it prints what would be executed and returns empty string and nil.
+func executeCommandCombinedOutputWithEnv(ctx context.Context, name string, args []string, dir string, env []string, dryRun bool) (string, error) {
+	if dryRun {
+		preview := formatCommandPreview(name, args)
+		if dir != "" {
+			preview = fmt.Sprintf("%s (in %s)", preview, dir)
+		}
+		fmt.Println(preview)
+		return "", nil
+	}
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outputStr := strings.TrimSpace(string(output))
+		if outputStr != "" {
+			return "", fmt.Errorf("%w: %s", err, outputStr)
+		}
+		return "", err
+	}
+
+	return string(output), nil
+}

@@ -1719,7 +1719,7 @@ func TestPerformFetchAndRebaseForAllRepos(t *testing.T) {
 			},
 		}
 
-		results := performFetchAndRebaseForAllRepos(repos, false)
+		results := performFetchAndRebaseForAllRepos(repos, false, false)
 		require.Len(t, results, 1)
 		// May have errors if remote doesn't exist, which is expected
 		// The important thing is the function completes
@@ -1763,10 +1763,183 @@ func TestPerformFetchAndRebaseForAllRepos(t *testing.T) {
 			},
 		}
 
-		results := performFetchAndRebaseForAllRepos(repos, false)
+		results := performFetchAndRebaseForAllRepos(repos, false, false)
 		require.Len(t, results, 2)
 		// Both should be processed (may have errors if remotes don't exist)
 	})
+}
+
+func TestPerformFetchAndRebaseForAllRepos_RebaseConflictsAbortFlag(t *testing.T) {
+	setupRepoWithRebaseConflict := func(t *testing.T) (string, RepositoryInfo) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create initial commit on main
+		require.NoError(t, os.WriteFile("conflict.txt", []byte("line1\nline2\nline3\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "conflict.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+
+		// Create feature branch and change same line
+		require.NoError(t, exec.Command("git", "checkout", "-b", "feature").Run())
+		require.NoError(t, os.WriteFile("conflict.txt", []byte("line1\nfeature change\nline3\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "conflict.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Feature").Run())
+
+		// Create remote and push main
+		remoteDir := t.TempDir()
+		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+		require.NoError(t, exec.Command("git", "checkout", "main").Run())
+		require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+
+		// Modify same line on main and push to create future rebase conflict
+		require.NoError(t, os.WriteFile("conflict.txt", []byte("line1\nmain change\nline3\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "conflict.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Main change").Run())
+		require.NoError(t, exec.Command("git", "push", "origin", "main").Run())
+
+		// Switch back to feature branch (which now diverges from origin/main)
+		require.NoError(t, exec.Command("git", "checkout", "feature").Run())
+
+		repo := RepositoryInfo{
+			Name:        "test-repo",
+			Path:        tmpDir,
+			TrunkBranch: "main",
+			Remote:      "origin",
+		}
+
+		return tmpDir, repo
+	}
+
+	t.Run("default keeps conflicts in rebase state", func(t *testing.T) {
+		tmpDir, repo := setupRepoWithRebaseConflict(t)
+		defer func() { _ = os.Chdir("/") }()
+
+		results := performFetchAndRebaseForAllRepos([]RepositoryInfo{repo}, false, false)
+		require.Len(t, results, 1)
+		result := results[0]
+
+		// Rebase should have been attempted and failed due to conflicts
+		assert.Error(t, result.Error)
+		assert.True(t, result.RebaseAttempted)
+		assert.True(t, result.RebaseHadConflicts)
+		assert.False(t, result.RebaseAborted)
+		assert.Contains(t, strings.Join(result.Steps, ", "), "rebase (failed)")
+		assert.NotContains(t, strings.Join(result.Steps, ", "), "rebase-abort")
+
+		// Repository should still be in an in-progress rebase with conflicts
+		_, err := os.Stat(filepath.Join(tmpDir, ".git", "rebase-merge"))
+		assert.NoError(t, err, "expected rebase-merge directory to exist")
+
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		statusOutput, _ := exec.Command("git", "-C", tmpDir, "status").CombinedOutput()
+		assert.True(t, strings.Contains(string(statusOutput), "Unmerged paths") ||
+			strings.Contains(string(statusOutput), "both modified") ||
+			strings.Contains(string(statusOutput), "conflict"))
+	})
+
+	t.Run("abort-on-conflict flag aborts rebase", func(t *testing.T) {
+		tmpDir, repo := setupRepoWithRebaseConflict(t)
+		defer func() { _ = os.Chdir("/") }()
+
+		results := performFetchAndRebaseForAllRepos([]RepositoryInfo{repo}, true, false)
+		require.Len(t, results, 1)
+		result := results[0]
+
+		// Rebase should have been attempted and failed due to conflicts
+		assert.Error(t, result.Error)
+		assert.True(t, result.RebaseAttempted)
+		assert.True(t, result.RebaseHadConflicts)
+		assert.True(t, result.RebaseAborted)
+		assert.Contains(t, strings.Join(result.Steps, ", "), "rebase (failed)")
+		assert.Contains(t, strings.Join(result.Steps, ", "), "rebase-abort")
+
+		// Repository should have no in-progress rebase directory after abort
+		_, err := os.Stat(filepath.Join(tmpDir, ".git", "rebase-merge"))
+		assert.Error(t, err, "expected rebase-merge directory not to exist after abort")
+	})
+}
+
+func TestHandleInProgressRebases_ContinuesRebase(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(originalDir) }()
+
+	// Initialize git repo
+	require.NoError(t, exec.Command("git", "init").Run())
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+	// Create initial commit on main
+	require.NoError(t, os.WriteFile("iterative.txt", []byte("line1\nline2\n"), 0o600))
+	require.NoError(t, exec.Command("git", "add", "iterative.txt").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+
+	// Create feature branch and modify same line
+	require.NoError(t, exec.Command("git", "checkout", "-b", "feature").Run())
+	require.NoError(t, os.WriteFile("iterative.txt", []byte("line1\nfeature\n"), 0o600))
+	require.NoError(t, exec.Command("git", "add", "iterative.txt").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "Feature").Run())
+
+	// Create remote and push main
+	remoteDir := t.TempDir()
+	// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+	// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+	require.NoError(t, exec.Command("git", "checkout", "main").Run())
+	require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+
+	// Modify same line on main and push to create conflict on rebase
+	require.NoError(t, os.WriteFile("iterative.txt", []byte("line1\nmain\n"), 0o600))
+	require.NoError(t, exec.Command("git", "add", "iterative.txt").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "Main").Run())
+	require.NoError(t, exec.Command("git", "push", "origin", "main").Run())
+
+	// Switch back to feature and start rebase to create conflict
+	require.NoError(t, exec.Command("git", "checkout", "feature").Run())
+	require.NoError(t, exec.Command("git", "fetch", "origin", "main").Run())
+	_ = exec.Command("git", "rebase", "origin/main").Run() // This may create conflict
+
+	// Resolve conflict but do not run `git rebase --continue`
+	require.NoError(t, os.WriteFile("iterative.txt", []byte("line1\nresolved\n"), 0o600))
+	require.NoError(t, exec.Command("git", "add", "iterative.txt").Run())
+
+	repo := RepositoryInfo{
+		Name:        "test-repo",
+		Path:        tmpDir,
+		TrunkBranch: "main",
+		Remote:      "origin",
+	}
+
+	stateInfos := []RepositoryStateInfo{
+		{
+			Repo:  repo,
+			State: StateInRebase,
+		},
+	}
+
+	// handleInProgressRebases should run `git rebase --continue` and complete the rebase
+	err = handleInProgressRebases(stateInfos)
+	require.NoError(t, err)
+
+	// After continue, there should be no in-progress rebase directory
+	_, statErr := os.Stat(filepath.Join(tmpDir, ".git", "rebase-merge"))
+	assert.Error(t, statErr)
+
+	// And the working tree should be clean
+	// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+	statusOutput, _ := exec.Command("git", "-C", tmpDir, "status", "--porcelain").CombinedOutput()
+	assert.Equal(t, "", strings.TrimSpace(string(statusOutput)))
 }
 
 func TestDisplayOperationProgress(t *testing.T) {
@@ -2130,8 +2303,8 @@ func TestRestoreStashIfNeeded(t *testing.T) {
 			RebaseAttempted: true,
 		}
 
-		// Restore should abort rebase and pop stash
-		restoreStashIfNeeded(&result, repo, false)
+		// Restore should abort rebase (or detect no rebase in progress) and pop stash
+		restoreStashIfNeeded(&result, repo, true, false)
 
 		// Verify rebase was aborted (no rebase in progress)
 		err := abortRebase(repo)
@@ -2275,7 +2448,7 @@ func TestDisplayOperationResults_PartialFailure(t *testing.T) {
 		assert.Contains(t, output, "SUCCESS")
 		assert.Contains(t, output, "FAILED")
 		assert.Contains(t, output, "Recovery steps")
-		assert.Contains(t, output, "git rebase --abort")
+		assert.Contains(t, output, "Rebase was aborted for")
 		assert.Contains(t, output, "git stash pop")
 		assert.Contains(t, output, "Next steps for failed repositories")
 	})
