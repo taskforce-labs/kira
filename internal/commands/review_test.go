@@ -1174,6 +1174,12 @@ func TestCheckBranchDiverged(t *testing.T) {
 		cloneDir := t.TempDir()
 		// #nosec G204 - cloneDir and remoteDir are from t.TempDir() which is safe
 		require.NoError(t, exec.Command("git", "clone", remoteDir, cloneDir).Run())
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.name", "Test User").Run())
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "checkout", "012-test-branch").Run())
 		require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "remotefile.txt"), []byte("remote content"), 0o600))
 		// #nosec G204 - cloneDir is from t.TempDir() which is safe
 		require.NoError(t, exec.Command("git", "-C", cloneDir, "add", "remotefile.txt").Run())
@@ -1216,6 +1222,12 @@ func TestCheckBranchDiverged(t *testing.T) {
 		cloneDir := t.TempDir()
 		// #nosec G204 - cloneDir and remoteDir are from t.TempDir() which is safe
 		require.NoError(t, exec.Command("git", "clone", remoteDir, cloneDir).Run())
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.name", "Test User").Run())
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "checkout", "012-test-branch").Run())
 		require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "remotefile.txt"), []byte("remote content"), 0o600))
 		// #nosec G204 - cloneDir is from t.TempDir() which is safe
 		require.NoError(t, exec.Command("git", "-C", cloneDir, "add", "remotefile.txt").Run())
@@ -1233,7 +1245,7 @@ func TestCheckBranchDiverged(t *testing.T) {
 		diverged, err := checkBranchDiverged("012-test-branch", cfg)
 		require.Error(t, err, "should return error when branch has diverged")
 		assert.True(t, diverged, "diverged should be true")
-		assert.Contains(t, err.Error(), "Branch has diverged from remote")
+		assert.Contains(t, err.Error(), "branch has diverged from remote")
 		assert.Contains(t, err.Error(), "Pull latest changes or resolve conflicts")
 	})
 
@@ -1251,6 +1263,104 @@ func TestCheckBranchDiverged(t *testing.T) {
 
 	t.Run("returns error for nil config", func(t *testing.T) {
 		_, err := checkBranchDiverged("012-test-branch", nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "configuration cannot be nil")
+	})
+}
+
+func TestPushBranchIfNeeded(t *testing.T) {
+	t.Run("pushes branch when not on remote", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "012-test-branch")
+		_ = tmpDir // avoid unused variable warning
+
+		remoteDir := t.TempDir()
+		// #nosec G204 - remoteDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+		// #nosec G204 - remoteDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{Remote: "origin"},
+		}
+
+		err := pushBranchIfNeeded("012-test-branch", cfg)
+		require.NoError(t, err)
+
+		exists, err := checkBranchOnRemote("012-test-branch", cfg)
+		require.NoError(t, err)
+		assert.True(t, exists, "branch should exist on remote after push")
+	})
+
+	t.Run("skips push when already on remote and up-to-date", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "012-test-branch")
+		_ = tmpDir // avoid unused variable warning
+
+		remoteDir := t.TempDir()
+		// #nosec G204 - remoteDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+		// #nosec G204 - remoteDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+		require.NoError(t, exec.Command("git", "push", "-u", "origin", "012-test-branch").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{Remote: "origin"},
+		}
+
+		err := pushBranchIfNeeded("012-test-branch", cfg)
+		require.NoError(t, err)
+	})
+
+	t.Run("errors when branch diverged", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "012-test-branch")
+		_ = tmpDir // avoid unused variable warning
+
+		remoteDir := t.TempDir()
+		// #nosec G204 - remoteDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+		// #nosec G204 - remoteDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+		require.NoError(t, exec.Command("git", "push", "-u", "origin", "012-test-branch").Run())
+
+		require.NoError(t, os.WriteFile("localfile.txt", []byte("local content"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "localfile.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Local commit").Run())
+
+		cloneDir := t.TempDir()
+		// #nosec G204 - cloneDir and remoteDir are from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "clone", remoteDir, cloneDir).Run())
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.name", "Test User").Run())
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "checkout", "012-test-branch").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "remotefile.txt"), []byte("remote content"), 0o600))
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "add", "remotefile.txt").Run())
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "commit", "-m", "Remote commit").Run())
+		// #nosec G204 - cloneDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "push", "origin", "012-test-branch").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{Remote: "origin"},
+		}
+
+		err := pushBranchIfNeeded("012-test-branch", cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "branch has diverged from remote")
+		assert.Contains(t, err.Error(), "Pull latest changes or resolve conflicts")
+	})
+
+	t.Run("returns error for empty branch name", func(t *testing.T) {
+		cfg := &config.Config{Git: &config.GitConfig{Remote: "origin"}}
+		err := pushBranchIfNeeded("", cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "branch name cannot be empty")
+	})
+
+	t.Run("returns error for nil config", func(t *testing.T) {
+		err := pushBranchIfNeeded("012-test-branch", nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "configuration cannot be nil")
 	})

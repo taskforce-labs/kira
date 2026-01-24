@@ -550,7 +550,7 @@ func fetchRemoteCommitToTempRef(branchName, remoteName, tempRef, repoRoot string
 	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer fetchCancel()
 
-	_, err := executeCommand(fetchCtx, "git", []string{"fetch", remoteName, "refs/heads/" + branchName + ":+" + tempRef}, repoRoot, false)
+	_, err := executeCommand(fetchCtx, "git", []string{"fetch", remoteName, "+refs/heads/" + branchName + ":" + tempRef}, repoRoot, false)
 	if err != nil {
 		return err
 	}
@@ -592,4 +592,45 @@ func cleanupTempRef(tempRef, repoRoot string) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer cancel()
 	_, _ = executeCommand(ctx, "git", []string{"update-ref", "-d", tempRef}, repoRoot, false)
+}
+
+// pushBranchIfNeeded pushes the branch to the remote if it is not already there.
+// If the branch exists on remote and is up-to-date, it skips the push.
+// If the branch has diverged from remote, it returns an error (never force-pushes).
+func pushBranchIfNeeded(branchName string, cfg *config.Config) error {
+	if strings.TrimSpace(branchName) == "" {
+		return fmt.Errorf("branch name cannot be empty")
+	}
+	if cfg == nil {
+		return fmt.Errorf("configuration cannot be nil")
+	}
+
+	exists, err := checkBranchOnRemote(branchName, cfg)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		remoteName := resolveRemoteName(cfg, nil)
+		repoRoot, err := getRepoRoot()
+		if err != nil {
+			return fmt.Errorf("failed to get repository root: %w", err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+		defer cancel()
+
+		_, err = executeCommand(ctx, "git", []string{"push", "-u", remoteName, branchName}, repoRoot, false)
+		if err != nil {
+			return fmt.Errorf("failed to push branch to remote: %w", err)
+		}
+		return nil
+	}
+
+	_, err = checkBranchDiverged(branchName, cfg)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
