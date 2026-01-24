@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kira/internal/config"
+	"kira/internal/validation"
 )
 
 func TestReviewCommandRegistration(t *testing.T) {
@@ -585,5 +587,155 @@ func TestValidateBranchContext(t *testing.T) {
 
 		err := validateBranchContext(cfg)
 		assert.NoError(t, err, "should accept feature branch when trunk is auto-detected")
+	})
+}
+
+func TestLoadWorkItem(t *testing.T) {
+	t.Run("loads work item successfully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+
+		// Create .work directory structure and a test work item
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+
+		workItem, path, err := loadWorkItem(cfg, "001")
+		require.NoError(t, err)
+		require.NotNil(t, workItem)
+		assert.Equal(t, testFilePath, path)
+		assert.Equal(t, "001", workItem.ID)
+		assert.Equal(t, "Test Feature", workItem.Title)
+		assert.Equal(t, "todo", workItem.Status)
+		assert.Equal(t, "prd", workItem.Kind)
+		assert.Equal(t, "2024-01-01", workItem.Created)
+	})
+
+	t.Run("returns not found error when work item does not exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+
+		// Create empty .work tree without any matching work items
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		_, _, err := loadWorkItem(cfg, "001")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "work item 001 not found")
+	})
+}
+
+func TestValidateWorkItemStatusForReview(t *testing.T) {
+	cfg := &config.DefaultConfig
+
+	t.Run("accepts todo and doing statuses", func(t *testing.T) {
+		for _, status := range []string{"todo", "doing"} {
+			workItem := &validation.WorkItem{Status: status}
+			err := validateWorkItemStatusForReview(workItem, cfg)
+			assert.NoError(t, err, "status %s should be accepted", status)
+		}
+	})
+
+	t.Run("treats review status as already in review", func(t *testing.T) {
+		workItem := &validation.WorkItem{Status: "review"}
+		err := validateWorkItemStatusForReview(workItem, cfg)
+		require.Error(t, err)
+
+		var alreadyErr *alreadyInReviewError
+		assert.True(t, errors.As(err, &alreadyErr), "error should be of type alreadyInReviewError")
+		assert.Equal(t, "Work item is already in review status.", alreadyErr.Error())
+	})
+
+	t.Run("rejects non-reviewable statuses", func(t *testing.T) {
+		testCases := []string{"backlog", "done", "archived"}
+		for _, status := range testCases {
+			workItem := &validation.WorkItem{Status: status}
+			err := validateWorkItemStatusForReview(workItem, cfg)
+			require.Error(t, err, "status %s should be rejected", status)
+			assert.Contains(t, err.Error(), "cannot submit for review")
+			assert.Contains(t, err.Error(), status)
+		}
+	})
+
+	t.Run("rejects empty status", func(t *testing.T) {
+		workItem := &validation.WorkItem{Status: ""}
+		err := validateWorkItemStatusForReview(workItem, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "work item has empty status")
+	})
+}
+
+func TestValidateRequiredFieldsForReview(t *testing.T) {
+	t.Run("passes when all required fields are present", func(t *testing.T) {
+		cfg := config.DefaultConfig
+		workItem := &validation.WorkItem{
+			ID:      "001",
+			Title:   "Test Feature",
+			Status:  "doing",
+			Kind:    "prd",
+			Created: "2024-01-01",
+			Fields:  map[string]interface{}{},
+		}
+
+		err := validateRequiredFieldsForReview(workItem, &cfg)
+		assert.NoError(t, err)
+	})
+
+	t.Run("reports missing core fields", func(t *testing.T) {
+		cfg := config.DefaultConfig
+		workItem := &validation.WorkItem{
+			ID:      "001",
+			Title:   "",
+			Status:  "",
+			Kind:    "prd",
+			Created: "2024-01-01",
+			Fields:  map[string]interface{}{},
+		}
+
+		err := validateRequiredFieldsForReview(workItem, &cfg)
+		require.Error(t, err)
+		msg := err.Error()
+		assert.Contains(t, msg, "work item missing required fields:")
+		assert.Contains(t, msg, "title")
+		assert.Contains(t, msg, "status")
+		assert.Contains(t, msg, "Update work item and try again")
+	})
+
+	t.Run("honors additional required custom fields", func(t *testing.T) {
+		cfg := config.DefaultConfig
+		cfg.Validation.RequiredFields = append(cfg.Validation.RequiredFields, "review_pr_url")
+
+		workItem := &validation.WorkItem{
+			ID:      "001",
+			Title:   "Test Feature",
+			Status:  "doing",
+			Kind:    "prd",
+			Created: "2024-01-01",
+			Fields: map[string]interface{}{
+				"review_pr_url": "https://example.com/pr/1",
+			},
+		}
+
+		err := validateRequiredFieldsForReview(workItem, &cfg)
+		assert.NoError(t, err)
+
+		// Now test missing custom field
+		workItemMissing := &validation.WorkItem{
+			ID:      "001",
+			Title:   "Test Feature",
+			Status:  "doing",
+			Kind:    "prd",
+			Created: "2024-01-01",
+			Fields:  map[string]interface{}{},
+		}
+
+		err = validateRequiredFieldsForReview(workItemMissing, &cfg)
+		require.Error(t, err)
+		msg := err.Error()
+		assert.Contains(t, msg, "review_pr_url")
 	})
 }
