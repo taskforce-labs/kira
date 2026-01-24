@@ -1013,6 +1013,107 @@ priority: MEDIUM
 		assert.Contains(t, string(content), "priority: medium")
 		assert.NotContains(t, string(content), "priority: MEDIUM")
 	})
+
+	t.Run("fixes valid email with whitespace but does not report invalid email as fixed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		// Test case 1: Valid email with whitespace - should be fixed
+		// Use quoted YAML to preserve whitespace
+		workItemContent1 := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: "  user@example.com  "
+---
+# Test Feature
+`
+
+		filePath1 := ".work/1_todo/001-test-feature.md"
+		require.NoError(t, os.WriteFile(filePath1, []byte(workItemContent1), 0o600))
+
+		originalInfo1, err := os.Stat(filePath1)
+		require.NoError(t, err)
+		originalModTime1 := originalInfo1.ModTime()
+
+		cfg := &config.Config{
+			Fields: map[string]config.FieldConfig{
+				"assigned": {
+					Type: "email",
+				},
+			},
+		}
+
+		time.Sleep(10 * time.Millisecond)
+
+		result1, err := FixFieldIssues(cfg)
+		require.NoError(t, err)
+
+		// File should have been modified (valid email with whitespace was fixed)
+		newInfo1, err := os.Stat(filePath1)
+		require.NoError(t, err)
+		assert.True(t, newInfo1.ModTime().After(originalModTime1), "File should have been modified when valid email with whitespace was fixed")
+
+		content1, err := os.ReadFile(filePath1)
+		require.NoError(t, err)
+		assert.Contains(t, string(content1), "assigned: user@example.com")
+		assert.NotContains(t, string(content1), "assigned:  user@example.com  ")
+
+		// Verify the fix is reported
+		foundValidFix := false
+		for _, validationErr := range result1.Errors {
+			if validationErr.File == filePath1 && strings.Contains(validationErr.Message, "fixed field 'assigned'") {
+				foundValidFix = true
+				break
+			}
+		}
+		assert.True(t, foundValidFix, "Should report that valid email with whitespace was fixed")
+
+		// Test case 2: Invalid email with whitespace - should NOT be reported as fixed
+		// Use quoted YAML to preserve whitespace
+		workItemContent2 := `---
+id: 002
+title: Test Feature 2
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: "  not-an-email  "
+---
+# Test Feature 2
+`
+
+		filePath2 := ".work/1_todo/002-test-feature-2.md"
+		require.NoError(t, os.WriteFile(filePath2, []byte(workItemContent2), 0o600))
+
+		originalInfo2, err := os.Stat(filePath2)
+		require.NoError(t, err)
+		originalModTime2 := originalInfo2.ModTime()
+
+		time.Sleep(10 * time.Millisecond)
+
+		result2, err := FixFieldIssues(cfg)
+		require.NoError(t, err)
+
+		// File should NOT have been modified (invalid email should not be reported as fixed)
+		newInfo2, err := os.Stat(filePath2)
+		require.NoError(t, err)
+		assert.Equal(t, originalModTime2, newInfo2.ModTime(), "File should NOT have been modified when invalid email with whitespace cannot be fixed")
+
+		// Verify no "fixed" message for the invalid email
+		foundInvalidFix := false
+		for _, validationErr := range result2.Errors {
+			if validationErr.File == filePath2 && strings.Contains(validationErr.Message, "fixed field 'assigned'") {
+				foundInvalidFix = true
+				break
+			}
+		}
+		assert.False(t, foundInvalidFix, "Should NOT report invalid email as fixed")
+	})
 }
 
 func TestFixHardcodedDateFormats(t *testing.T) {

@@ -1497,7 +1497,8 @@ func tryFixEmailValue(value interface{}) (interface{}, bool) {
 	if str, ok := value.(string); ok {
 		trimmed := strings.TrimSpace(str)
 		lower := strings.ToLower(trimmed)
-		if trimmed != str || (lower != trimmed && isValidEmail(lower)) {
+		// Only report success if we made a change AND the result is valid
+		if (trimmed != str || lower != trimmed) && isValidEmail(lower) {
 			return lower, true
 		}
 	}
