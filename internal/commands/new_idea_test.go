@@ -76,6 +76,64 @@ func TestParseWorkItemArgsWithIdea(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "idea number required")
 	})
+
+	t.Run("parses colon-delimited title and description with explicit status", func(t *testing.T) {
+		args := []string{"task", "todo", "my title: my description"}
+
+		result, err := parseWorkItemArgs(cfg, args)
+		require.NoError(t, err)
+
+		assert.Equal(t, "task", result.template)
+		assert.Equal(t, "todo", result.status)
+		assert.Equal(t, "my title", result.title)
+		assert.Equal(t, "my description", result.description)
+		assert.Equal(t, 0, result.ideaNumber)
+	})
+
+	t.Run("parses colon-delimited title and description without explicit status", func(t *testing.T) {
+		args := []string{"task", "my title: my description"}
+
+		result, err := parseWorkItemArgs(cfg, args)
+		require.NoError(t, err)
+
+		assert.Equal(t, "task", result.template)
+		assert.Equal(t, "", result.status)
+		assert.Equal(t, "my title", result.title)
+		assert.Equal(t, "my description", result.description)
+		assert.Equal(t, 0, result.ideaNumber)
+	})
+
+	t.Run("explicit description argument overrides colon-derived description", func(t *testing.T) {
+		args := []string{"task", "todo", "my title: my description", "explicit desc"}
+
+		result, err := parseWorkItemArgs(cfg, args)
+		require.NoError(t, err)
+
+		assert.Equal(t, "task", result.template)
+		assert.Equal(t, "todo", result.status)
+		assert.Equal(t, "my title", result.title)
+		assert.Equal(t, "explicit desc", result.description)
+	})
+
+	t.Run("handles multiple colons using first as delimiter", func(t *testing.T) {
+		args := []string{"task", "todo", "title: desc: more"}
+
+		result, err := parseWorkItemArgs(cfg, args)
+		require.NoError(t, err)
+
+		assert.Equal(t, "title", result.title)
+		assert.Equal(t, "desc: more", result.description)
+	})
+
+	t.Run("handles leading colon with empty title segment", func(t *testing.T) {
+		args := []string{"task", "todo", ": description only"}
+
+		result, err := parseWorkItemArgs(cfg, args)
+		require.NoError(t, err)
+
+		assert.NotEmpty(t, result.title)
+		assert.Contains(t, result.description, "description only")
+	})
 }
 
 func TestConvertIdeaToWorkItem(t *testing.T) {
