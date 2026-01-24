@@ -39,3 +39,4 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 30. [2026-01-23] ralph elaboration: a ralph loop that help elaborate items in the backlog
 31. [2026-01-23] ralph build: a ralph loop that builds all the items in todo
 32. [2026-01-23] kira cursor plugin: a plugin that allows kira to control agents in the ide
+33. [2026-01-23] show templates on err: when kira new fails it should list the available templates also
