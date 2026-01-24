@@ -1193,6 +1193,70 @@ Some important notes here.
 	})
 }
 
+func TestValidateDateRange(t *testing.T) {
+	t.Run("allows date equal to today when min_date is today", func(t *testing.T) {
+		// Use the current local calendar date as the work item value.
+		now := time.Now()
+		dateStr := now.Format("2006-01-02")
+
+		// Parse using the same logic as validateDateRangeValue for string dates.
+		date, err := time.Parse("2006-01-02", dateStr)
+		require.NoError(t, err)
+
+		err = validateDateRange(date, "today", "")
+		assert.NoError(t, err, "date equal to today should satisfy min_date: today regardless of timezone")
+	})
+
+	t.Run("rejects date before today when min_date is today", func(t *testing.T) {
+		now := time.Now()
+		yesterday := now.AddDate(0, 0, -1)
+		dateStr := yesterday.Format("2006-01-02")
+
+		date, err := time.Parse("2006-01-02", dateStr)
+		require.NoError(t, err)
+
+		err = validateDateRange(date, "today", "")
+		assert.Error(t, err, "date before today should not satisfy min_date: today")
+	})
+
+	t.Run("requires date after today when min_date is future", func(t *testing.T) {
+		now := time.Now()
+		todayStr := now.Format("2006-01-02")
+		tomorrowStr := now.AddDate(0, 0, 1).Format("2006-01-02")
+
+		todayDate, err := time.Parse("2006-01-02", todayStr)
+		require.NoError(t, err)
+
+		tomorrowDate, err := time.Parse("2006-01-02", tomorrowStr)
+		require.NoError(t, err)
+
+		// "future" should reject today
+		err = validateDateRange(todayDate, "future", "")
+		assert.Error(t, err, "today should not satisfy min_date: future")
+
+		// "future" should allow tomorrow
+		err = validateDateRange(tomorrowDate, "future", "")
+		assert.NoError(t, err, "tomorrow should satisfy min_date: future")
+	})
+
+	t.Run("enforces max_date correctly for absolute dates", func(t *testing.T) {
+		maxDateStr := "2030-01-01"
+
+		beforeMax, err := time.Parse("2006-01-02", "2029-12-31")
+		require.NoError(t, err)
+
+		onMax, err := time.Parse("2006-01-02", maxDateStr)
+		require.NoError(t, err)
+
+		afterMax, err := time.Parse("2006-01-02", "2030-01-02")
+		require.NoError(t, err)
+
+		assert.NoError(t, validateDateRange(beforeMax, "", maxDateStr))
+		assert.NoError(t, validateDateRange(onMax, "", maxDateStr))
+		assert.Error(t, validateDateRange(afterMax, "", maxDateStr))
+	})
+}
+
 func TestIsNumeric(t *testing.T) {
 	t.Run("returns true for all integer types", func(t *testing.T) {
 		assert.True(t, IsNumeric(int(42)))
