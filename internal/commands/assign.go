@@ -3,6 +3,8 @@ package commands
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -72,7 +74,16 @@ func runAssign(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Phase 1: command stops after validation.
+	// Phase 2: Resolve and validate work items exist.
+	workItemPaths, err := resolveWorkItems(workItems)
+	if err != nil {
+		return err
+	}
+
+	// Store resolved paths for use in later phases (not used yet in Phase 2).
+	_ = workItemPaths
+
+	// Phase 2: command stops after discovery and validation.
 	return nil
 }
 
@@ -219,4 +230,89 @@ func validateAssignUserIdentifierRequired(userIdentifier string, flags AssignFla
 
 func isWorkItemPath(token string) bool {
 	return strings.Contains(token, "/") || strings.Contains(token, "\\") || strings.HasSuffix(token, ".md")
+}
+
+// resolveWorkItemPath resolves a work item identifier (ID or path) to an absolute file path.
+// If identifier is a path, it validates and returns the absolute path.
+// If identifier is an ID, it uses findWorkItemFile to locate the file.
+func resolveWorkItemPath(identifier string) (string, error) {
+	// If identifier is a path, validate and return it.
+	if isWorkItemPath(identifier) {
+		if err := validateWorkPath(identifier); err != nil {
+			return "", fmt.Errorf("invalid work item path '%s': %w", identifier, err)
+		}
+
+		// Get absolute path for consistency.
+		absPath, err := filepath.Abs(identifier)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve work item path '%s': %w", identifier, err)
+		}
+
+		return absPath, nil
+	}
+
+	// Treat as work item ID and find the file.
+	workItemPath, err := findWorkItemFile(identifier)
+	if err != nil {
+		return "", fmt.Errorf("work item %s not found", identifier)
+	}
+
+	// Get absolute path for consistency.
+	absPath, err := filepath.Abs(workItemPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve work item path for ID '%s': %w", identifier, err)
+	}
+
+	return absPath, nil
+}
+
+// validateWorkItemFile validates that a work item file exists and is readable.
+func validateWorkItemFile(path string) error {
+	// Check if file exists.
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return fmt.Errorf("work item file does not exist: %s", path)
+	} else if err != nil {
+		return fmt.Errorf("failed to access work item file: %w", err)
+	}
+
+	// Try to read the file to ensure it's readable.
+	// Use safeReadFile which validates the path is within .work.
+	if _, err := safeReadFile(path); err != nil {
+		return fmt.Errorf("failed to read work item file: %w", err)
+	}
+
+	return nil
+}
+
+// resolveWorkItems resolves multiple work item identifiers to file paths and validates them.
+// Returns an error if any work item cannot be resolved or validated.
+func resolveWorkItems(identifiers []string) ([]string, error) {
+	if len(identifiers) == 0 {
+		return nil, fmt.Errorf("no work items to resolve")
+	}
+
+	var resolvedPaths []string
+	var errors []string
+
+	for _, identifier := range identifiers {
+		path, err := resolveWorkItemPath(identifier)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("  %s: %v", identifier, err))
+			continue
+		}
+
+		if err := validateWorkItemFile(path); err != nil {
+			errors = append(errors, fmt.Sprintf("  %s: %v", identifier, err))
+			continue
+		}
+
+		resolvedPaths = append(resolvedPaths, path)
+	}
+
+	if len(errors) > 0 {
+		errorMsg := "failed to resolve or validate work items:\n" + strings.Join(errors, "\n")
+		return nil, fmt.Errorf("%s", errorMsg)
+	}
+
+	return resolvedPaths, nil
 }
