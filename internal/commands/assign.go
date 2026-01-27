@@ -25,6 +25,15 @@ type AssignFlags struct {
 	DryRun      bool
 }
 
+// WorkItemUpdateResult tracks the result of updating a single work item.
+type WorkItemUpdateResult struct {
+	WorkItemPath string
+	WorkItemID   string // Display identifier (ID or path)
+	Success      bool
+	Error        error
+	Operation    string // "assign", "unassign", "append"
+}
+
 var assignCmd = &cobra.Command{
 	Use:   "assign <work-item-id...> [user-identifier]",
 	Short: "Assign work items to users",
@@ -98,64 +107,287 @@ func runAssign(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 5: Update work item fields (switch mode)
-	return processWorkItemUpdates(workItemPaths, resolvedUser, flags)
-}
+	// Phase 8: Process work item updates with batch processing and progress
+	results := processWorkItemUpdates(workItemPaths, resolvedUser, flags)
 
-// processWorkItemUpdates processes work item updates based on flags.
-// This function is separated to reduce cyclomatic complexity of runAssign.
-func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flags AssignFlags) error {
-	// Skip if dry-run mode
-	if flags.DryRun {
-		// In dry-run mode, just validate that we can parse the files
-		for _, path := range workItemPaths {
-			_, _, err := parseWorkItemFrontMatter(path)
-			if err != nil {
-				return fmt.Errorf("dry-run: failed to parse work item %s: %w", path, err)
-			}
-		}
-		return nil
+	// Display summary for batch operations or if there were failures
+	if len(workItemPaths) > 1 || flags.DryRun {
+		displayBatchSummary(results)
+	} else if len(results) > 0 && !results[0].Success {
+		// For single item failures, show summary
+		displayBatchSummary(results)
 	}
 
-	// Process each work item
-	for _, workItemPath := range workItemPaths {
-		// For unassign mode, remove the field
-		if flags.Unassign {
-			if err := updateWorkItemFieldUnassign(workItemPath, flags.Field); err != nil {
-				return fmt.Errorf("failed to unassign work item %s: %w", workItemPath, err)
-			}
-			continue
-		}
-
-		// For interactive mode, we'll handle in Phase 9
-		if flags.Interactive {
-			// Phase 9 will handle this
-			continue
-		}
-
-		// For append mode, handle in Phase 6
-		if flags.Append {
-			if resolvedUser == nil {
-				return fmt.Errorf("user identifier is required for assignment")
-			}
-
-			if err := updateWorkItemFieldAppend(workItemPath, flags.Field, resolvedUser.Email); err != nil {
-				return fmt.Errorf("failed to update work item %s: %w", workItemPath, err)
-			}
-			continue
-		}
-
-		// Switch mode: update field with user email
-		if resolvedUser == nil {
-			return fmt.Errorf("user identifier is required for assignment")
-		}
-
-		if err := updateWorkItemField(workItemPath, flags.Field, resolvedUser.Email); err != nil {
-			return fmt.Errorf("failed to update work item %s: %w", workItemPath, err)
+	// Return error if any operations failed
+	for _, result := range results {
+		if !result.Success {
+			return fmt.Errorf("one or more work items failed to update")
 		}
 	}
 
 	return nil
+}
+
+// getWorkItemDisplayID extracts a display identifier from a work item file path.
+// Returns the work item ID if available, otherwise returns a shortened path.
+func getWorkItemDisplayID(workItemPath string) string {
+	// Try to extract ID from front matter
+	frontMatter, _, err := parseWorkItemFrontMatter(workItemPath)
+	if err == nil {
+		if idValue, exists := frontMatter["id"]; exists {
+			if idStr, ok := idValue.(string); ok && idStr != "" {
+				return idStr
+			}
+			// Handle numeric IDs
+			if idNum, ok := idValue.(int); ok {
+				return fmt.Sprintf("%03d", idNum)
+			}
+		}
+	}
+
+	// Fallback to shortened path
+	base := filepath.Base(workItemPath)
+	if strings.HasSuffix(base, ".md") {
+		return base[:len(base)-3] // Remove .md extension
+	}
+	return base
+}
+
+// processWorkItemInDryRun validates a work item in dry-run mode.
+func processWorkItemInDryRun(path string) WorkItemUpdateResult {
+	displayID := getWorkItemDisplayID(path)
+	_, _, err := parseWorkItemFrontMatter(path)
+	if err != nil {
+		return WorkItemUpdateResult{
+			WorkItemPath: path,
+			WorkItemID:   displayID,
+			Success:      false,
+			Error:        fmt.Errorf("dry-run: failed to parse work item: %w", err),
+			Operation:    "validate",
+		}
+	}
+	return WorkItemUpdateResult{
+		WorkItemPath: path,
+		WorkItemID:   displayID,
+		Success:      true,
+		Operation:    "validate",
+	}
+}
+
+// processUnassignWorkItem handles unassign operation for a work item.
+func processUnassignWorkItem(
+	workItemPath string,
+	displayID string,
+	field string,
+	showProgress bool,
+) WorkItemUpdateResult {
+	result := WorkItemUpdateResult{
+		WorkItemPath: workItemPath,
+		WorkItemID:   displayID,
+		Success:      false,
+		Operation:    "unassign",
+	}
+
+	if err := updateWorkItemFieldUnassign(workItemPath, field); err != nil {
+		result.Error = fmt.Errorf("failed to unassign: %w", err)
+		if showProgress {
+			displayWorkItemProgress(result)
+		}
+		return result
+	}
+	result.Success = true
+	if showProgress {
+		displayWorkItemProgress(result)
+	}
+	return result
+}
+
+// processAppendWorkItem handles append operation for a work item.
+func processAppendWorkItem(
+	workItemPath string,
+	displayID string,
+	field string,
+	resolvedUser *UserInfo,
+	showProgress bool,
+) WorkItemUpdateResult {
+	result := WorkItemUpdateResult{
+		WorkItemPath: workItemPath,
+		WorkItemID:   displayID,
+		Success:      false,
+		Operation:    "append",
+	}
+
+	if resolvedUser == nil {
+		result.Error = fmt.Errorf("user identifier is required for assignment")
+		if showProgress {
+			displayWorkItemProgress(result)
+		}
+		return result
+	}
+
+	if err := updateWorkItemFieldAppend(workItemPath, field, resolvedUser.Email); err != nil {
+		result.Error = fmt.Errorf("failed to append: %w", err)
+		if showProgress {
+			displayWorkItemProgress(result)
+		}
+		return result
+	}
+	result.Success = true
+	if showProgress {
+		displayWorkItemProgress(result)
+	}
+	return result
+}
+
+// processAssignWorkItem handles assign operation for a work item.
+func processAssignWorkItem(
+	workItemPath string,
+	displayID string,
+	field string,
+	resolvedUser *UserInfo,
+	showProgress bool,
+) WorkItemUpdateResult {
+	result := WorkItemUpdateResult{
+		WorkItemPath: workItemPath,
+		WorkItemID:   displayID,
+		Success:      false,
+		Operation:    "assign",
+	}
+
+	if resolvedUser == nil {
+		result.Error = fmt.Errorf("user identifier is required for assignment")
+		if showProgress {
+			displayWorkItemProgress(result)
+		}
+		return result
+	}
+
+	if err := updateWorkItemField(workItemPath, field, resolvedUser.Email); err != nil {
+		result.Error = fmt.Errorf("failed to assign: %w", err)
+		if showProgress {
+			displayWorkItemProgress(result)
+		}
+		return result
+	}
+	result.Success = true
+	if showProgress {
+		displayWorkItemProgress(result)
+	}
+	return result
+}
+
+// processSingleWorkItem processes a single work item update.
+func processSingleWorkItem(
+	workItemPath string,
+	displayID string,
+	resolvedUser *UserInfo,
+	flags AssignFlags,
+	showProgress bool,
+) WorkItemUpdateResult {
+	if showProgress {
+		fmt.Printf("Processing work item %s...\n", displayID)
+	}
+
+	// For unassign mode, remove the field
+	if flags.Unassign {
+		return processUnassignWorkItem(workItemPath, displayID, flags.Field, showProgress)
+	}
+
+	// For interactive mode, we'll handle in Phase 9
+	if flags.Interactive {
+		result := WorkItemUpdateResult{
+			WorkItemPath: workItemPath,
+			WorkItemID:   displayID,
+			Success:      false,
+			Operation:    "interactive",
+			Error:        fmt.Errorf("interactive mode not yet implemented"),
+		}
+		if showProgress {
+			displayWorkItemProgress(result)
+		}
+		return result
+	}
+
+	// For append mode, handle in Phase 6
+	if flags.Append {
+		return processAppendWorkItem(workItemPath, displayID, flags.Field, resolvedUser, showProgress)
+	}
+
+	// Switch mode: update field with user email
+	return processAssignWorkItem(workItemPath, displayID, flags.Field, resolvedUser, showProgress)
+}
+
+// processWorkItemUpdates processes work item updates based on flags.
+// Returns a slice of results for each work item processed.
+func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flags AssignFlags) []WorkItemUpdateResult {
+	var results []WorkItemUpdateResult
+	showProgress := len(workItemPaths) > 1
+
+	// Skip if dry-run mode
+	if flags.DryRun {
+		// In dry-run mode, just validate that we can parse the files
+		for _, path := range workItemPaths {
+			results = append(results, processWorkItemInDryRun(path))
+		}
+		return results
+	}
+
+	// Process each work item
+	for _, workItemPath := range workItemPaths {
+		displayID := getWorkItemDisplayID(workItemPath)
+		result := processSingleWorkItem(workItemPath, displayID, resolvedUser, flags, showProgress)
+		results = append(results, result)
+	}
+
+	return results
+}
+
+// displayWorkItemProgress shows progress for processing a single work item.
+func displayWorkItemProgress(result WorkItemUpdateResult) {
+	if result.Success {
+		operation := result.Operation
+		if operation == "validate" {
+			operation = "validated"
+		}
+		fmt.Printf("  ✓ Work item %s: %s successfully\n", result.WorkItemID, operation)
+	} else {
+		fmt.Printf("  ✗ Work item %s: failed - %v\n", result.WorkItemID, result.Error)
+	}
+}
+
+// displayBatchSummary displays a summary of batch operation results.
+func displayBatchSummary(results []WorkItemUpdateResult) {
+	if len(results) == 0 {
+		return
+	}
+
+	fmt.Println("\nOperation Results:")
+	fmt.Println("───────────────────────────────────────────────────────────────")
+
+	successCount := 0
+	failureCount := 0
+	var failedItems []WorkItemUpdateResult
+
+	for _, result := range results {
+		if result.Success {
+			successCount++
+			displayWorkItemProgress(result)
+		} else {
+			failureCount++
+			failedItems = append(failedItems, result)
+			displayWorkItemProgress(result)
+		}
+	}
+
+	fmt.Println("───────────────────────────────────────────────────────────────")
+	fmt.Printf("Summary: %d succeeded, %d failed\n", successCount, failureCount)
+
+	if len(failedItems) > 0 {
+		fmt.Println("\nFailed work items:")
+		for _, result := range failedItems {
+			fmt.Printf("  - %s: %v\n", result.WorkItemID, result.Error)
+		}
+	}
 }
 
 func parseAssignFlags(cmd *cobra.Command) (AssignFlags, error) {

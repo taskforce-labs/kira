@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1334,6 +1336,15 @@ kind: prd
 created: 2024-01-01
 ---
 # Test Feature
+`
+	testWorkItemContentPhase5Feature1 = `---
+id: 001
+title: Test Feature 1
+status: todo
+kind: prd
+created: 2024-01-01
+---
+# Test Feature 1
 `
 	testWorkItemContentWithAssigned = `---
 id: 001
@@ -2720,16 +2731,7 @@ reviewer: reviewer@example.com
 
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
-		content := `---
-id: 001
-title: Test Feature
-status: todo
-kind: prd
-created: 2024-01-01
----
-# Test Feature
-`
-		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContentPhase5), 0o600))
 
 		// Should not error even if field doesn't exist
 		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
@@ -2923,8 +2925,9 @@ func TestProcessWorkItemUpdatesUnassign(t *testing.T) {
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		err = processWorkItemUpdates([]string{absPath}, nil, flags)
-		require.NoError(t, err)
+		results := processWorkItemUpdates([]string{absPath}, nil, flags)
+		require.Len(t, results, 1)
+		assert.True(t, results[0].Success)
 
 		updatedContent, err := os.ReadFile(testFilePath)
 		require.NoError(t, err)
@@ -2962,8 +2965,9 @@ reviewer: reviewer@example.com
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		err = processWorkItemUpdates([]string{absPath}, nil, flags)
-		require.NoError(t, err)
+		results := processWorkItemUpdates([]string{absPath}, nil, flags)
+		require.Len(t, results, 1)
+		assert.True(t, results[0].Success)
 
 		updatedContent, err := os.ReadFile(testFilePath)
 		require.NoError(t, err)
@@ -3017,8 +3021,10 @@ assigned: user2@example.com
 		absPath2, err := filepath.Abs(filePath2)
 		require.NoError(t, err)
 
-		err = processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags)
-		require.NoError(t, err)
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags)
+		require.Len(t, results, 2)
+		assert.True(t, results[0].Success)
+		assert.True(t, results[1].Success)
 
 		// Verify both files were updated
 		updatedContent1, err := os.ReadFile(filePath1)
@@ -3050,8 +3056,9 @@ assigned: user2@example.com
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		err = processWorkItemUpdates([]string{absPath}, nil, flags)
-		require.NoError(t, err)
+		results := processWorkItemUpdates([]string{absPath}, nil, flags)
+		require.Len(t, results, 1)
+		assert.True(t, results[0].Success)
 
 		// In dry-run mode, file should not be modified
 		updatedContent, err := os.ReadFile(testFilePath)
@@ -3071,16 +3078,7 @@ assigned: user2@example.com
 
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
-		content := `---
-id: 001
-title: Test Feature
-status: todo
-kind: prd
-created: 2024-01-01
----
-# Test Feature
-`
-		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContentPhase5), 0o600))
 
 		flags := AssignFlags{
 			Unassign: true,
@@ -3091,8 +3089,9 @@ created: 2024-01-01
 		require.NoError(t, err)
 
 		// Should not error even if field doesn't exist
-		err = processWorkItemUpdates([]string{absPath}, nil, flags)
-		require.NoError(t, err)
+		results := processWorkItemUpdates([]string{absPath}, nil, flags)
+		require.Len(t, results, 1)
+		assert.True(t, results[0].Success)
 
 		// Timestamp should still be updated
 		updatedContent, err := os.ReadFile(testFilePath)
@@ -3100,5 +3099,461 @@ created: 2024-01-01
 		updatedStr := string(updatedContent)
 
 		assert.Contains(t, updatedStr, "updated:")
+	})
+}
+
+// Phase 8: Batch Processing & Progress Tests
+
+func TestProcessWorkItemUpdatesBatch(t *testing.T) {
+	testFilePath1 := ".work/1_todo/001-test-feature-1.prd.md"
+	testFilePath2 := ".work/1_todo/002-test-feature-2.prd.md"
+	testFilePath3 := ".work/2_doing/003-test-feature-3.prd.md"
+
+	t.Run("processes multiple work items successfully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+
+		content1 := testWorkItemContentPhase5Feature1
+		content2 := `---
+id: 002
+title: Test Feature 2
+status: todo
+kind: prd
+created: 2024-01-01
+---
+# Test Feature 2
+`
+		content3 := `---
+id: 003
+title: Test Feature 3
+status: doing
+kind: prd
+created: 2024-01-01
+---
+# Test Feature 3
+`
+
+		require.NoError(t, os.WriteFile(testFilePath1, []byte(content1), 0o600))
+		require.NoError(t, os.WriteFile(testFilePath2, []byte(content2), 0o600))
+		require.NoError(t, os.WriteFile(testFilePath3, []byte(content3), 0o600))
+
+		absPath1, err := filepath.Abs(testFilePath1)
+		require.NoError(t, err)
+		absPath2, err := filepath.Abs(testFilePath2)
+		require.NoError(t, err)
+		absPath3, err := filepath.Abs(testFilePath3)
+		require.NoError(t, err)
+
+		user := &UserInfo{
+			Email:  "user@example.com",
+			Name:   "Test User",
+			Number: 1,
+		}
+
+		flags := AssignFlags{
+			Field:  "assigned",
+			Append: false,
+		}
+
+		results := processWorkItemUpdates([]string{absPath1, absPath2, absPath3}, user, flags)
+
+		require.Len(t, results, 3)
+		assert.True(t, results[0].Success)
+		assert.True(t, results[1].Success)
+		assert.True(t, results[2].Success)
+		assert.Equal(t, "assign", results[0].Operation)
+		assert.Equal(t, "assign", results[1].Operation)
+		assert.Equal(t, "assign", results[2].Operation)
+
+		// Verify files were updated
+		updatedContent1, err := os.ReadFile(testFilePath1)
+		require.NoError(t, err)
+		assert.Contains(t, string(updatedContent1), "assigned: user@example.com")
+
+		updatedContent2, err := os.ReadFile(testFilePath2)
+		require.NoError(t, err)
+		assert.Contains(t, string(updatedContent2), "assigned: user@example.com")
+
+		updatedContent3, err := os.ReadFile(testFilePath3)
+		require.NoError(t, err)
+		assert.Contains(t, string(updatedContent3), "assigned: user@example.com")
+	})
+
+	t.Run("handles partial failures gracefully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content1 := testWorkItemContentPhase5Feature1
+		require.NoError(t, os.WriteFile(testFilePath1, []byte(content1), 0o600))
+
+		// Create a file with malformed YAML
+		malformedContent := `---
+id: 002
+title: Test Feature 2
+invalid: [unclosed bracket
+---
+# Test Feature 2
+`
+		require.NoError(t, os.WriteFile(testFilePath2, []byte(malformedContent), 0o600))
+
+		absPath1, err := filepath.Abs(testFilePath1)
+		require.NoError(t, err)
+		absPath2, err := filepath.Abs(testFilePath2)
+		require.NoError(t, err)
+
+		user := &UserInfo{
+			Email:  "user@example.com",
+			Name:   "Test User",
+			Number: 1,
+		}
+
+		flags := AssignFlags{
+			Field:  "assigned",
+			Append: false,
+		}
+
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, user, flags)
+
+		require.Len(t, results, 2)
+		assert.True(t, results[0].Success, "first work item should succeed")
+		assert.False(t, results[1].Success, "second work item should fail")
+		assert.NotNil(t, results[1].Error)
+		assert.Contains(t, results[1].Error.Error(), "failed to assign")
+
+		// Verify first file was updated
+		updatedContent1, err := os.ReadFile(testFilePath1)
+		require.NoError(t, err)
+		assert.Contains(t, string(updatedContent1), "assigned: user@example.com")
+	})
+
+	t.Run("validates all work items before processing in dry-run mode", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content1 := testWorkItemContentPhase5Feature1
+		require.NoError(t, os.WriteFile(testFilePath1, []byte(content1), 0o600))
+
+		// Create a file with malformed YAML
+		malformedContent := `---
+id: 002
+title: Test Feature 2
+invalid: [unclosed bracket
+---
+# Test Feature 2
+`
+		require.NoError(t, os.WriteFile(testFilePath2, []byte(malformedContent), 0o600))
+
+		absPath1, err := filepath.Abs(testFilePath1)
+		require.NoError(t, err)
+		absPath2, err := filepath.Abs(testFilePath2)
+		require.NoError(t, err)
+
+		flags := AssignFlags{
+			Field:  "assigned",
+			DryRun: true,
+		}
+
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags)
+
+		require.Len(t, results, 2)
+		assert.True(t, results[0].Success, "first work item should validate")
+		assert.False(t, results[1].Success, "second work item should fail validation")
+		assert.Equal(t, "validate", results[0].Operation)
+		assert.Equal(t, "validate", results[1].Operation)
+		assert.Contains(t, results[1].Error.Error(), "dry-run")
+
+		// Verify files were not modified
+		content1Bytes, err2 := os.ReadFile(testFilePath1)
+		require.NoError(t, err2)
+		assert.NotContains(t, string(content1Bytes), "assigned:")
+	})
+
+	t.Run("handles unassign for multiple work items", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content1 := `---
+id: 001
+title: Test Feature 1
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: user1@example.com
+---
+# Test Feature 1
+`
+		content2 := `---
+id: 002
+title: Test Feature 2
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: user2@example.com
+---
+# Test Feature 2
+`
+
+		require.NoError(t, os.WriteFile(testFilePath1, []byte(content1), 0o600))
+		require.NoError(t, os.WriteFile(testFilePath2, []byte(content2), 0o600))
+
+		absPath1, err := filepath.Abs(testFilePath1)
+		require.NoError(t, err)
+		absPath2, err := filepath.Abs(testFilePath2)
+		require.NoError(t, err)
+
+		flags := AssignFlags{
+			Field:    "assigned",
+			Unassign: true,
+		}
+
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags)
+
+		require.Len(t, results, 2)
+		assert.True(t, results[0].Success)
+		assert.True(t, results[1].Success)
+		assert.Equal(t, "unassign", results[0].Operation)
+		assert.Equal(t, "unassign", results[1].Operation)
+
+		// Verify fields were removed
+		updatedContent1, err := os.ReadFile(testFilePath1)
+		require.NoError(t, err)
+		assert.NotContains(t, string(updatedContent1), "assigned:")
+
+		updatedContent2, err := os.ReadFile(testFilePath2)
+		require.NoError(t, err)
+		assert.NotContains(t, string(updatedContent2), "assigned:")
+	})
+
+	t.Run("handles append mode for multiple work items", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content1 := `---
+id: 001
+title: Test Feature 1
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: alice@example.com
+---
+# Test Feature 1
+`
+		content2 := `---
+id: 002
+title: Test Feature 2
+status: todo
+kind: prd
+created: 2024-01-01
+---
+# Test Feature 2
+`
+
+		require.NoError(t, os.WriteFile(testFilePath1, []byte(content1), 0o600))
+		require.NoError(t, os.WriteFile(testFilePath2, []byte(content2), 0o600))
+
+		absPath1, err := filepath.Abs(testFilePath1)
+		require.NoError(t, err)
+		absPath2, err := filepath.Abs(testFilePath2)
+		require.NoError(t, err)
+
+		user := &UserInfo{
+			Email:  "bob@example.com",
+			Name:   "Bob",
+			Number: 1,
+		}
+
+		flags := AssignFlags{
+			Field:  "assigned",
+			Append: true,
+		}
+
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, user, flags)
+
+		require.Len(t, results, 2)
+		assert.True(t, results[0].Success)
+		assert.True(t, results[1].Success)
+		assert.Equal(t, "append", results[0].Operation)
+		assert.Equal(t, "append", results[1].Operation)
+
+		// Verify first file was converted to array
+		updatedContent1, err := os.ReadFile(testFilePath1)
+		require.NoError(t, err)
+		assert.Contains(t, string(updatedContent1), "assigned: [")
+		assert.Contains(t, string(updatedContent1), "alice@example.com")
+		assert.Contains(t, string(updatedContent1), "bob@example.com")
+
+		// Verify second file was assigned
+		updatedContent2, err := os.ReadFile(testFilePath2)
+		require.NoError(t, err)
+		assert.Contains(t, string(updatedContent2), "assigned: bob@example.com")
+	})
+}
+
+func TestGetWorkItemDisplayID(t *testing.T) {
+	t.Run("extracts ID from work item file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+---
+# Test Feature
+`
+		testFilePath := testFilePathPhase5
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		absPath, err := filepath.Abs(testFilePath)
+		require.NoError(t, err)
+
+		displayID := getWorkItemDisplayID(absPath)
+		assert.Equal(t, "001", displayID)
+	})
+
+	t.Run("falls back to filename if ID not found", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+title: Test Feature
+status: todo
+---
+# Test Feature
+`
+		testFilePath := testFilePathPhase5
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		absPath, err := filepath.Abs(testFilePath)
+		require.NoError(t, err)
+
+		displayID := getWorkItemDisplayID(absPath)
+		assert.Equal(t, "001-test-feature.prd", displayID)
+	})
+}
+
+func TestDisplayBatchSummary(t *testing.T) {
+	t.Run("displays summary for successful operations", func(t *testing.T) {
+		// Capture output
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		results := []WorkItemUpdateResult{
+			{
+				WorkItemPath: "/path/to/001",
+				WorkItemID:   "001",
+				Success:      true,
+				Operation:    "assign",
+			},
+			{
+				WorkItemPath: "/path/to/002",
+				WorkItemID:   "002",
+				Success:      true,
+				Operation:    "assign",
+			},
+		}
+
+		displayBatchSummary(results)
+
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		assert.Contains(t, output, "Operation Results:")
+		assert.Contains(t, output, "001")
+		assert.Contains(t, output, "002")
+		assert.Contains(t, output, "Summary: 2 succeeded, 0 failed")
+	})
+
+	t.Run("displays summary with failures", func(t *testing.T) {
+		// Capture output
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		results := []WorkItemUpdateResult{
+			{
+				WorkItemPath: "/path/to/001",
+				WorkItemID:   "001",
+				Success:      true,
+				Operation:    "assign",
+			},
+			{
+				WorkItemPath: "/path/to/002",
+				WorkItemID:   "002",
+				Success:      false,
+				Error:        fmt.Errorf("test error"),
+				Operation:    "assign",
+			},
+		}
+
+		displayBatchSummary(results)
+
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		assert.Contains(t, output, "Operation Results:")
+		assert.Contains(t, output, "Summary: 1 succeeded, 1 failed")
+		assert.Contains(t, output, "Failed work items:")
+		assert.Contains(t, output, "002")
+		assert.Contains(t, output, "test error")
+	})
+
+	t.Run("handles empty results", func(t *testing.T) {
+		// Capture output
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		displayBatchSummary([]WorkItemUpdateResult{})
+
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		// Should not output anything for empty results
+		assert.Empty(t, output)
 	})
 }
