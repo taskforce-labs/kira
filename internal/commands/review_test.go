@@ -2557,3 +2557,199 @@ func TestResolveReviewers(t *testing.T) {
 		assert.Equal(t, "user123@example.com", reviewers[0])
 	})
 }
+
+// TestRequestPRReviews tests the requestPRReviews function
+// Note: These tests verify function structure, parameter validation, and config respect.
+// Actual API calls with real GitHub tokens should be tested in integration tests.
+func TestRequestPRReviews(t *testing.T) {
+	t.Run("returns error for nil client", func(t *testing.T) {
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: func() *bool { b := true; return &b }(),
+			},
+		}
+		err := requestPRReviews(nil, "owner", "repo", 1, []string{"reviewer1"}, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "GitHub client cannot be nil")
+	})
+
+	t.Run("returns error for empty owner", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: func() *bool { b := true; return &b }(),
+			},
+		}
+		err := requestPRReviews(client, "", "repo", 1, []string{"reviewer1"}, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "owner cannot be empty")
+	})
+
+	t.Run("returns error for empty repo", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: func() *bool { b := true; return &b }(),
+			},
+		}
+		err := requestPRReviews(client, "owner", "", 1, []string{"reviewer1"}, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "repo cannot be empty")
+	})
+
+	t.Run("returns error for invalid prNumber", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: func() *bool { b := true; return &b }(),
+			},
+		}
+		err := requestPRReviews(client, "owner", "repo", 0, []string{"reviewer1"}, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "PR number must be greater than 0")
+	})
+
+	t.Run("returns error for negative prNumber", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: func() *bool { b := true; return &b }(),
+			},
+		}
+		err := requestPRReviews(client, "owner", "repo", -1, []string{"reviewer1"}, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "PR number must be greater than 0")
+	})
+
+	t.Run("returns error for nil reviewers", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: func() *bool { b := true; return &b }(),
+			},
+		}
+		err := requestPRReviews(client, "owner", "repo", 1, nil, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "reviewers cannot be nil")
+	})
+
+	t.Run("returns error for nil config", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		err := requestPRReviews(client, "owner", "repo", 1, []string{"reviewer1"}, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "configuration cannot be nil")
+	})
+
+	t.Run("returns error for whitespace-only owner", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: func() *bool { b := true; return &b }(),
+			},
+		}
+		err := requestPRReviews(client, "   ", "repo", 1, []string{"reviewer1"}, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "owner cannot be empty")
+	})
+
+	t.Run("returns error for whitespace-only repo", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: func() *bool { b := true; return &b }(),
+			},
+		}
+		err := requestPRReviews(client, "owner", "   ", 1, []string{"reviewer1"}, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "repo cannot be empty")
+	})
+
+	t.Run("returns early for empty reviewers list", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: func() *bool { b := true; return &b }(),
+			},
+		}
+		// Should return nil (no error) when reviewers list is empty
+		err := requestPRReviews(client, "owner", "repo", 1, []string{}, cfg)
+		require.NoError(t, err)
+	})
+
+	t.Run("skips requesting reviews when AutoRequestReviews is false", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: func() *bool { b := false; return &b }(),
+			},
+		}
+		// Should return nil (no error) when auto-request is disabled
+		err := requestPRReviews(client, "owner", "repo", 1, []string{"reviewer1"}, cfg)
+		require.NoError(t, err)
+	})
+
+	t.Run("requests reviews when AutoRequestReviews is true", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: func() *bool { b := true; return &b }(),
+			},
+		}
+		// This will fail at API call (no real token), but validation should pass
+		err := requestPRReviews(client, "owner", "repo", 1, []string{"reviewer1"}, cfg)
+		// Error should be from API call, not validation
+		require.Error(t, err)
+		// Should not be a validation error
+		assert.NotContains(t, err.Error(), "cannot be nil")
+		assert.NotContains(t, err.Error(), "cannot be empty")
+		assert.NotContains(t, err.Error(), "must be greater than 0")
+	})
+
+	t.Run("defaults to true when config.Review is nil", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: nil, // No review config
+		}
+		// Should default to true and attempt to request reviews
+		// This will fail at API call (no real token), but validation should pass
+		err := requestPRReviews(client, "owner", "repo", 1, []string{"reviewer1"}, cfg)
+		// Error should be from API call, not validation
+		require.Error(t, err)
+		// Should not be a validation error
+		assert.NotContains(t, err.Error(), "cannot be nil")
+		assert.NotContains(t, err.Error(), "cannot be empty")
+	})
+
+	t.Run("defaults to true when AutoRequestReviews is nil", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				AutoRequestReviews: nil, // Not set
+			},
+		}
+		// Should default to true and attempt to request reviews
+		// This will fail at API call (no real token), but validation should pass
+		err := requestPRReviews(client, "owner", "repo", 1, []string{"reviewer1"}, cfg)
+		// Error should be from API call, not validation
+		require.Error(t, err)
+		// Should not be a validation error
+		assert.NotContains(t, err.Error(), "cannot be nil")
+		assert.NotContains(t, err.Error(), "cannot be empty")
+	})
+
+	// Note: Tests for actual API calls (requesting reviews, handling API errors, etc.)
+	// should be done in integration tests with a real GitHub token and test repository.
+	// The unit tests above verify:
+	// 1. Input validation (nil client, empty parameters, invalid prNumber, nil reviewers, nil config)
+	// 2. Config respect (AutoRequestReviews true/false/nil/default)
+	// 3. Early return for empty reviewers list
+	// 4. Error handling structure
+	// 5. Function signature and return types
+	//
+	// Integration tests should verify:
+	// - Requesting reviews successfully
+	// - Handling API errors (401 Unauthorized, 403 Forbidden, 404 Not Found, 422 Unprocessable Entity)
+	// - Handling invalid reviewers (422 errors)
+	// - Handling network errors
+	// - Handling context timeout
+}

@@ -1153,3 +1153,89 @@ func resolveReviewers(reviewerSpecs []string, cfg *config.Config) ([]string, err
 
 	return reviewers, nil
 }
+
+// requestPRReviews requests reviews from specified reviewers on a GitHub pull request.
+// It only requests reviews if cfg.Review.AutoRequestReviews is true (default).
+// Returns an error if the API call fails or if validation fails.
+func requestPRReviews(client *github.Client, owner, repo string, prNumber int, reviewers []string, cfg *config.Config) error {
+	if err := validateRequestPRReviewsParams(client, owner, repo, prNumber, reviewers, cfg); err != nil {
+		return err
+	}
+
+	// Check if auto-request reviews is enabled
+	// Default to true if config.Review is nil or AutoRequestReviews is nil
+	autoRequestReviews := true
+	if cfg.Review != nil && cfg.Review.AutoRequestReviews != nil {
+		autoRequestReviews = *cfg.Review.AutoRequestReviews
+	}
+
+	// If auto-request reviews is disabled, skip requesting reviews
+	if !autoRequestReviews {
+		return nil
+	}
+
+	// If no reviewers specified, nothing to do
+	if len(reviewers) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Request reviews using GitHub API
+	reviewersRequest := github.ReviewersRequest{
+		Reviewers: reviewers,
+	}
+
+	_, resp, err := client.PullRequests.RequestReviewers(ctx, owner, repo, prNumber, reviewersRequest)
+	if err != nil {
+		return handleRequestReviewersError(err, resp, owner, repo, prNumber)
+	}
+
+	return nil
+}
+
+// validateRequestPRReviewsParams validates all input parameters for requestPRReviews.
+func validateRequestPRReviewsParams(client *github.Client, owner, repo string, prNumber int, reviewers []string, cfg *config.Config) error {
+	if client == nil {
+		return fmt.Errorf("GitHub client cannot be nil")
+	}
+	if strings.TrimSpace(owner) == "" {
+		return fmt.Errorf("owner cannot be empty")
+	}
+	if strings.TrimSpace(repo) == "" {
+		return fmt.Errorf("repo cannot be empty")
+	}
+	if prNumber <= 0 {
+		return fmt.Errorf("PR number must be greater than 0")
+	}
+	if reviewers == nil {
+		return fmt.Errorf("reviewers cannot be nil")
+	}
+	if cfg == nil {
+		return fmt.Errorf("configuration cannot be nil")
+	}
+	return nil
+}
+
+// handleRequestReviewersError processes errors from the GitHub API review request call.
+// It provides user-friendly error messages based on HTTP status codes.
+func handleRequestReviewersError(err error, resp *github.Response, owner, repo string, prNumber int) error {
+	if resp == nil {
+		return fmt.Errorf("failed to request reviews: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("failed to request reviews: authentication failed. Verify GitHub token has 'repo' scope")
+	case http.StatusForbidden:
+		return fmt.Errorf("failed to request reviews: access forbidden. Verify GitHub token has 'repo' scope")
+	case http.StatusNotFound:
+		return fmt.Errorf("failed to request reviews: pull request #%d not found in repository '%s/%s'", prNumber, owner, repo)
+	case http.StatusUnprocessableEntity:
+		// 422 can mean various validation errors (invalid reviewers, etc.)
+		return fmt.Errorf("failed to request reviews: validation error. Check that reviewers are valid GitHub usernames")
+	default:
+		return fmt.Errorf("failed to request reviews: %w", err)
+	}
+}
