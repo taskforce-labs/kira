@@ -1335,6 +1335,23 @@ created: 2024-01-01
 ---
 # Test Feature
 `
+	testWorkItemContentWithAssigned = `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: user@example.com
+---
+# Test Feature
+`
+	testWorkItemContentMalformedYAML = `---
+id: 001
+title: Test Feature
+invalid: [unclosed bracket
+---
+# Test Feature
+`
 	testFilePathPhase5 = ".work/1_todo/001-test-feature.prd.md"
 )
 
@@ -1907,13 +1924,7 @@ More content here.
 
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
-		content := `---
-id: 001
-title: Test Feature
-invalid: [unclosed bracket
----
-# Test Feature
-`
+		content := testWorkItemContentMalformedYAML
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
 		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
@@ -2083,6 +2094,111 @@ func TestAppendToField(t *testing.T) {
 		assert.Len(t, arr, 2)
 		assert.Equal(t, "alice@example.com", arr[0])
 		assert.Equal(t, "bob@example.com", arr[1])
+	})
+}
+
+// Phase 7: Unassign Logic Tests
+
+func TestClearField(t *testing.T) {
+	t.Run("clears existing field from map", func(t *testing.T) {
+		frontMatter := map[string]interface{}{
+			"assigned": "user@example.com",
+			"reviewer": "reviewer@example.com",
+		}
+
+		existed := clearField(frontMatter, "assigned")
+
+		assert.True(t, existed)
+		_, exists := frontMatter["assigned"]
+		assert.False(t, exists, "field should be removed")
+		_, exists = frontMatter["reviewer"]
+		assert.True(t, exists, "other fields should be preserved")
+	})
+
+	t.Run("returns true when field existed", func(t *testing.T) {
+		frontMatter := map[string]interface{}{
+			"assigned": "user@example.com",
+		}
+
+		existed := clearField(frontMatter, "assigned")
+
+		assert.True(t, existed)
+	})
+
+	t.Run("returns false when field didn't exist", func(t *testing.T) {
+		frontMatter := map[string]interface{}{
+			"reviewer": "reviewer@example.com",
+		}
+
+		existed := clearField(frontMatter, "assigned")
+
+		assert.False(t, existed)
+	})
+
+	t.Run("handles nil front matter map", func(t *testing.T) {
+		var frontMatter map[string]interface{}
+
+		existed := clearField(frontMatter, "assigned")
+
+		assert.False(t, existed)
+	})
+
+	t.Run("works with custom field names", func(t *testing.T) {
+		frontMatter := map[string]interface{}{
+			"reviewer": "reviewer@example.com",
+			"owner":    "owner@example.com",
+		}
+
+		existed := clearField(frontMatter, "reviewer")
+
+		assert.True(t, existed)
+		_, exists := frontMatter["reviewer"]
+		assert.False(t, exists, "reviewer field should be removed")
+		_, exists = frontMatter["owner"]
+		assert.True(t, exists, "owner field should be preserved")
+	})
+
+	t.Run("doesn't affect other fields in the map", func(t *testing.T) {
+		frontMatter := map[string]interface{}{
+			"assigned": "user@example.com",
+			"reviewer": "reviewer@example.com",
+			"estimate": 5,
+			"tags":     []string{"frontend", "backend"},
+		}
+
+		clearField(frontMatter, "assigned")
+
+		assert.Len(t, frontMatter, 3, "should have 3 fields remaining")
+		_, exists := frontMatter["reviewer"]
+		assert.True(t, exists)
+		_, exists = frontMatter["estimate"]
+		assert.True(t, exists)
+		_, exists = frontMatter["tags"]
+		assert.True(t, exists)
+	})
+
+	t.Run("handles empty string field value", func(t *testing.T) {
+		frontMatter := map[string]interface{}{
+			"assigned": "",
+		}
+
+		existed := clearField(frontMatter, "assigned")
+
+		assert.True(t, existed)
+		_, exists := frontMatter["assigned"]
+		assert.False(t, exists)
+	})
+
+	t.Run("handles array field value", func(t *testing.T) {
+		frontMatter := map[string]interface{}{
+			"assigned": []string{"user1@example.com", "user2@example.com"},
+		}
+
+		existed := clearField(frontMatter, "assigned")
+
+		assert.True(t, existed)
+		_, exists := frontMatter["assigned"]
+		assert.False(t, exists)
 	})
 }
 
@@ -2464,17 +2580,525 @@ assigned: alice@example.com
 
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
-		content := `---
-id: 001
-title: Test Feature
-invalid: [unclosed bracket
----
-# Test Feature
-`
+		content := testWorkItemContentMalformedYAML
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
 		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse front matter")
+	})
+}
+
+func TestUpdateWorkItemFieldUnassign(t *testing.T) {
+	testFilePath := testFilePathPhase5
+
+	t.Run("removes field from work item file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := testWorkItemContentWithAssigned
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		require.NoError(t, err)
+
+		// Verify field was removed
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.NotContains(t, updatedStr, "assigned:")
+		// YAML may parse "001" as integer 1, so check for either format
+		assert.True(t, strings.Contains(updatedStr, "id: 001") || strings.Contains(updatedStr, "id: 1"), "should contain id field")
+		assert.Contains(t, updatedStr, "title: Test Feature")
+	})
+
+	t.Run("updates timestamp when field is removed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := testWorkItemContentWithAssigned
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		require.NoError(t, err)
+
+		// Verify timestamp was added/updated
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		lines := strings.Split(updatedStr, "\n")
+		var updatedLine string
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "updated:") {
+				updatedLine = line
+				break
+			}
+		}
+		require.NotEmpty(t, updatedLine)
+
+		// Extract timestamp value
+		colonIdx := strings.Index(updatedLine, ":")
+		require.Greater(t, colonIdx, 0)
+		timestampStr := strings.TrimSpace(updatedLine[colonIdx+1:])
+		timestampStr = strings.Trim(timestampStr, `"`)
+
+		updatedTime, err := time.Parse("2006-01-02T15:04:05Z", timestampStr)
+		require.NoError(t, err)
+
+		// Verify it's a recent timestamp
+		now := time.Now().UTC()
+		assert.True(t, updatedTime.After(now.Add(-time.Hour)), "updatedTime %v should be recent (after %v)", updatedTime, now.Add(-time.Hour))
+		assert.True(t, updatedTime.Before(now.Add(time.Hour)), "updatedTime %v should be recent (before %v)", updatedTime, now.Add(time.Hour))
+	})
+
+	t.Run("works with default assigned field", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := testWorkItemContentWithAssigned
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		require.NoError(t, err)
+
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.NotContains(t, updatedStr, "assigned:")
+	})
+
+	t.Run("works with custom fields", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+reviewer: reviewer@example.com
+---
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemFieldUnassign(testFilePath, "reviewer")
+		require.NoError(t, err)
+
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.NotContains(t, updatedStr, "reviewer:")
+	})
+
+	t.Run("handles non-existent fields gracefully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+---
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		// Should not error even if field doesn't exist
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		require.NoError(t, err)
+
+		// Timestamp should still be updated
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.Contains(t, updatedStr, "updated:")
+	})
+
+	t.Run("preserves other front matter fields", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: user@example.com
+reviewer: reviewer@example.com
+estimate: 5
+tags: [frontend, backend]
+---
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		require.NoError(t, err)
+
+		// Verify other fields are preserved
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.NotContains(t, updatedStr, "assigned:")
+		assert.Contains(t, updatedStr, "reviewer: reviewer@example.com")
+		assert.Contains(t, updatedStr, "estimate: 5")
+		assert.Contains(t, updatedStr, "tags: [frontend, backend]")
+	})
+
+	t.Run("preserves body content", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: user@example.com
+---
+# Test Feature
+
+This is the body content.
+
+## Section
+
+More content here.
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		require.NoError(t, err)
+
+		// Verify body is preserved
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.Contains(t, updatedStr, "# Test Feature")
+		assert.Contains(t, updatedStr, "This is the body content.")
+		assert.Contains(t, updatedStr, "## Section")
+		assert.Contains(t, updatedStr, "More content here.")
+	})
+
+	t.Run("returns error for file not found", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read work item file")
+	})
+
+	t.Run("returns error for malformed YAML", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := testWorkItemContentMalformedYAML
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse front matter")
+	})
+
+	t.Run("works with array fields", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: [user1@example.com, user2@example.com]
+---
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		require.NoError(t, err)
+
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.NotContains(t, updatedStr, "assigned:")
+	})
+
+	t.Run("works with single string fields", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := testWorkItemContentWithAssigned
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		require.NoError(t, err)
+
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.NotContains(t, updatedStr, "assigned:")
+	})
+}
+
+func TestProcessWorkItemUpdatesUnassign(t *testing.T) {
+	testFilePath := testFilePathPhase5
+
+	t.Run("unassign clears assigned field", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := testWorkItemContentWithAssigned
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		flags := AssignFlags{
+			Unassign: true,
+			Field:    "assigned",
+		}
+
+		absPath, err := filepath.Abs(testFilePath)
+		require.NoError(t, err)
+
+		err = processWorkItemUpdates([]string{absPath}, nil, flags)
+		require.NoError(t, err)
+
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.NotContains(t, updatedStr, "assigned:")
+		assert.Contains(t, updatedStr, "updated:")
+	})
+
+	t.Run("unassign clears custom field", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+reviewer: reviewer@example.com
+---
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		flags := AssignFlags{
+			Unassign: true,
+			Field:    "reviewer",
+		}
+
+		absPath, err := filepath.Abs(testFilePath)
+		require.NoError(t, err)
+
+		err = processWorkItemUpdates([]string{absPath}, nil, flags)
+		require.NoError(t, err)
+
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.NotContains(t, updatedStr, "reviewer:")
+		assert.Contains(t, updatedStr, "updated:")
+	})
+
+	t.Run("unassign handles multiple work items", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content1 := `---
+id: 001
+title: Test Feature 1
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: user1@example.com
+---
+# Test Feature 1
+`
+		content2 := `---
+id: 002
+title: Test Feature 2
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: user2@example.com
+---
+# Test Feature 2
+`
+		filePath1 := ".work/1_todo/001-test-feature-1.prd.md"
+		filePath2 := ".work/1_todo/002-test-feature-2.prd.md"
+
+		require.NoError(t, os.WriteFile(filePath1, []byte(content1), 0o600))
+		require.NoError(t, os.WriteFile(filePath2, []byte(content2), 0o600))
+
+		flags := AssignFlags{
+			Unassign: true,
+			Field:    "assigned",
+		}
+
+		absPath1, err := filepath.Abs(filePath1)
+		require.NoError(t, err)
+		absPath2, err := filepath.Abs(filePath2)
+		require.NoError(t, err)
+
+		err = processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags)
+		require.NoError(t, err)
+
+		// Verify both files were updated
+		updatedContent1, err := os.ReadFile(filePath1)
+		require.NoError(t, err)
+		assert.NotContains(t, string(updatedContent1), "assigned:")
+
+		updatedContent2, err := os.ReadFile(filePath2)
+		require.NoError(t, err)
+		assert.NotContains(t, string(updatedContent2), "assigned:")
+	})
+
+	t.Run("unassign with dry-run validates files", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := testWorkItemContentWithAssigned
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		flags := AssignFlags{
+			Unassign: true,
+			Field:    "assigned",
+			DryRun:   true,
+		}
+
+		absPath, err := filepath.Abs(testFilePath)
+		require.NoError(t, err)
+
+		err = processWorkItemUpdates([]string{absPath}, nil, flags)
+		require.NoError(t, err)
+
+		// In dry-run mode, file should not be modified
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		// File should still have assigned field (dry-run doesn't modify)
+		assert.Contains(t, updatedStr, "assigned: user@example.com")
+		assert.NotContains(t, updatedStr, "updated:")
+	})
+
+	t.Run("unassign handles non-existent field gracefully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+---
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		flags := AssignFlags{
+			Unassign: true,
+			Field:    "assigned",
+		}
+
+		absPath, err := filepath.Abs(testFilePath)
+		require.NoError(t, err)
+
+		// Should not error even if field doesn't exist
+		err = processWorkItemUpdates([]string{absPath}, nil, flags)
+		require.NoError(t, err)
+
+		// Timestamp should still be updated
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.Contains(t, updatedStr, "updated:")
 	})
 }
