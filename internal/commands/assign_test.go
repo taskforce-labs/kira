@@ -3,6 +3,7 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -803,5 +804,520 @@ func TestFormatMultipleMatchesError(t *testing.T) {
 		err := formatMultipleMatchesError("test", []*UserInfo{})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no users match 'test'")
+	})
+}
+
+// Phase 4: Front Matter Parsing & Field Access Tests
+
+func TestParseWorkItemFrontMatter(t *testing.T) {
+	t.Run("parses valid front matter with all fields", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: "001"
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: user@example.com
+---
+# Test Feature
+
+This is the body content.
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		require.NoError(t, err)
+		assert.NotNil(t, frontMatter)
+		// YAML may parse numeric IDs as int or string, handle both
+		idValue := frontMatter["id"]
+		assert.True(t, idValue == "001" || idValue == 1)
+		assert.Equal(t, "Test Feature", frontMatter["title"])
+		assert.Equal(t, "todo", frontMatter["status"])
+		assert.Equal(t, "user@example.com", frontMatter["assigned"])
+		assert.Contains(t, body, "# Test Feature")
+		assert.Contains(t, body, "This is the body content.")
+	})
+
+	t.Run("parses valid front matter with missing fields", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: "001"
+title: Test Feature
+---
+# Body
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		require.NoError(t, err)
+		assert.NotNil(t, frontMatter)
+		// YAML may parse numeric IDs as int or string, handle both
+		idValue := frontMatter["id"]
+		assert.True(t, idValue == "001" || idValue == 1)
+		assert.Equal(t, "Test Feature", frontMatter["title"])
+		// status, kind, created should not be in map
+		_, exists := frontMatter["status"]
+		assert.False(t, exists)
+		assert.Contains(t, body, "# Body")
+	})
+
+	t.Run("parses valid front matter with empty fields", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: "001"
+title: Test Feature
+assigned: ""
+reviewer: 
+---
+# Body
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath)
+		require.NoError(t, err)
+		assert.NotNil(t, frontMatter)
+		// YAML may parse numeric IDs as int or string, handle both
+		idValue := frontMatter["id"]
+		assert.True(t, idValue == "001" || idValue == 1)
+		assert.Equal(t, "", frontMatter["assigned"])
+		// reviewer with no value should be nil or empty
+		reviewer, exists := frontMatter["reviewer"]
+		if exists {
+			assert.Nil(t, reviewer)
+		}
+	})
+
+	t.Run("parses front matter with array values", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: "001"
+title: Test Feature
+reviewers:
+  - alice@example.com
+  - bob@example.com
+tags:
+  - frontend
+  - backend
+---
+# Body
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath)
+		require.NoError(t, err)
+		assert.NotNil(t, frontMatter)
+		// YAML may parse numeric IDs as int or string, handle both
+		idValue := frontMatter["id"]
+		assert.True(t, idValue == "001" || idValue == 1)
+		reviewers, ok := frontMatter["reviewers"].([]interface{})
+		require.True(t, ok)
+		assert.Len(t, reviewers, 2)
+		tags, ok := frontMatter["tags"].([]interface{})
+		require.True(t, ok)
+		assert.Len(t, tags, 2)
+	})
+
+	t.Run("handles missing front matter delimiters gracefully", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `# Test Feature
+
+This is just markdown without front matter.
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		require.NoError(t, err) // Should not error, just return empty map
+		assert.NotNil(t, frontMatter)
+		assert.Empty(t, frontMatter)
+		bodyStr := strings.Join(body, "\n")
+		assert.Contains(t, bodyStr, "# Test Feature")
+	})
+
+	t.Run("returns error for malformed YAML", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+invalid: [unclosed bracket
+---
+# Body
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		_, _, err := parseWorkItemFrontMatter(testFilePath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse front matter")
+	})
+
+	t.Run("returns error for file not found", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure but don't create file
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		_, _, err := parseWorkItemFrontMatter(testFilePath)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read work item file")
+	})
+
+	t.Run("extracts body content correctly", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+---
+# Test Feature
+
+This is the body.
+
+It has multiple paragraphs.
+
+- List item 1
+- List item 2
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		require.NoError(t, err)
+		assert.NotNil(t, frontMatter)
+		bodyStr := strings.Join(body, "\n")
+		assert.Contains(t, bodyStr, "# Test Feature")
+		assert.Contains(t, bodyStr, "This is the body.")
+		assert.Contains(t, bodyStr, "List item 1")
+		assert.Contains(t, bodyStr, "List item 2")
+	})
+
+	t.Run("handles front matter with only opening delimiter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: "001"
+title: Test Feature
+# Body without closing delimiter
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		require.NoError(t, err)
+		assert.NotNil(t, frontMatter)
+		// YAML may parse numeric IDs as int or string, handle both
+		idValue := frontMatter["id"]
+		assert.True(t, idValue == "001" || idValue == 1)
+		// Everything after first --- should be in yamlLines, body should be empty
+		assert.Empty(t, body)
+	})
+}
+
+func TestGetFieldValue(t *testing.T) {
+	frontMatter := map[string]interface{}{
+		"id":       "001",
+		"title":    "Test Feature",
+		"assigned": "user@example.com",
+		"reviewers": []interface{}{
+			"alice@example.com",
+			"bob@example.com",
+		},
+		"empty": "",
+		"nil":   nil,
+	}
+
+	t.Run("returns field value when field exists with string value", func(t *testing.T) {
+		value, exists := getFieldValue(frontMatter, "assigned")
+		require.True(t, exists)
+		assert.Equal(t, "user@example.com", value)
+	})
+
+	t.Run("returns field value when field exists with array value", func(t *testing.T) {
+		value, exists := getFieldValue(frontMatter, "reviewers")
+		require.True(t, exists)
+		reviewers, ok := value.([]interface{})
+		require.True(t, ok)
+		assert.Len(t, reviewers, 2)
+		assert.Equal(t, "alice@example.com", reviewers[0])
+	})
+
+	t.Run("returns true when field exists but is empty string", func(t *testing.T) {
+		value, exists := getFieldValue(frontMatter, "empty")
+		require.True(t, exists)
+		assert.Equal(t, "", value)
+	})
+
+	t.Run("returns false when field doesn't exist", func(t *testing.T) {
+		value, exists := getFieldValue(frontMatter, "nonexistent")
+		require.False(t, exists)
+		assert.Nil(t, value)
+	})
+
+	t.Run("returns true when field exists but is nil", func(t *testing.T) {
+		value, exists := getFieldValue(frontMatter, "nil")
+		require.True(t, exists)
+		assert.Nil(t, value)
+	})
+
+	t.Run("returns false when frontMatter is nil", func(t *testing.T) {
+		value, exists := getFieldValue(nil, "assigned")
+		require.False(t, exists)
+		assert.Nil(t, value)
+	})
+
+	t.Run("returns false when frontMatter is empty map", func(t *testing.T) {
+		emptyMap := make(map[string]interface{})
+		value, exists := getFieldValue(emptyMap, "assigned")
+		require.False(t, exists)
+		assert.Nil(t, value)
+	})
+}
+
+func TestGetFieldValueAsString(t *testing.T) {
+	frontMatter := map[string]interface{}{
+		"id":       "001",
+		"title":    "Test Feature",
+		"assigned": "user@example.com",
+		"reviewers": []interface{}{
+			"alice@example.com",
+			"bob@example.com",
+		},
+		"reviewers_string": []string{
+			"alice@example.com",
+			"bob@example.com",
+		},
+		"empty":   "",
+		"number":  42,
+		"boolean": true,
+		"nil":     nil,
+		"tags":    []interface{}{"frontend", "backend"},
+	}
+
+	t.Run("returns string field value", func(t *testing.T) {
+		value, exists := getFieldValueAsString(frontMatter, "assigned")
+		require.True(t, exists)
+		assert.Equal(t, "user@example.com", value)
+	})
+
+	t.Run("returns formatted array value for []interface{}", func(t *testing.T) {
+		value, exists := getFieldValueAsString(frontMatter, "reviewers")
+		require.True(t, exists)
+		assert.Contains(t, value, "alice@example.com")
+		assert.Contains(t, value, "bob@example.com")
+		assert.Contains(t, value, ",") // Should be comma-separated
+	})
+
+	t.Run("returns formatted array value for []string", func(t *testing.T) {
+		value, exists := getFieldValueAsString(frontMatter, "reviewers_string")
+		require.True(t, exists)
+		assert.Equal(t, "alice@example.com, bob@example.com", value)
+	})
+
+	t.Run("returns empty string when field exists but is empty", func(t *testing.T) {
+		value, exists := getFieldValueAsString(frontMatter, "empty")
+		require.True(t, exists)
+		assert.Equal(t, "", value)
+	})
+
+	t.Run("returns false when field doesn't exist", func(t *testing.T) {
+		value, exists := getFieldValueAsString(frontMatter, "nonexistent")
+		require.False(t, exists)
+		assert.Equal(t, "", value)
+	})
+
+	t.Run("converts number to string", func(t *testing.T) {
+		value, exists := getFieldValueAsString(frontMatter, "number")
+		require.True(t, exists)
+		assert.Equal(t, "42", value)
+	})
+
+	t.Run("converts boolean to string", func(t *testing.T) {
+		value, exists := getFieldValueAsString(frontMatter, "boolean")
+		require.True(t, exists)
+		assert.Equal(t, "true", value)
+	})
+
+	t.Run("returns empty string when field exists but is nil", func(t *testing.T) {
+		value, exists := getFieldValueAsString(frontMatter, "nil")
+		require.True(t, exists)
+		assert.Equal(t, "", value)
+	})
+
+	t.Run("formats mixed array types", func(t *testing.T) {
+		value, exists := getFieldValueAsString(frontMatter, "tags")
+		require.True(t, exists)
+		assert.Contains(t, value, "frontend")
+		assert.Contains(t, value, "backend")
+	})
+}
+
+// Integration tests for Phase 4
+func TestParseWorkItemFrontMatterIntegration(t *testing.T) {
+	t.Run("parses real work item file structure", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: "001"
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: user@example.com
+reviewer: reviewer@example.com
+tags:
+  - frontend
+  - backend
+---
+# Test Feature
+
+This is a test feature description.
+
+## Details
+
+Some details here.
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		require.NoError(t, err)
+		assert.NotNil(t, frontMatter)
+
+		// Test accessing default assigned field
+		value, exists := getFieldValue(frontMatter, "assigned")
+		require.True(t, exists)
+		assert.Equal(t, "user@example.com", value)
+
+		// Test accessing custom field
+		value, exists = getFieldValue(frontMatter, "reviewer")
+		require.True(t, exists)
+		assert.Equal(t, "reviewer@example.com", value)
+
+		// Test getFieldValueAsString for display
+		assignedStr, exists := getFieldValueAsString(frontMatter, "assigned")
+		require.True(t, exists)
+		assert.Equal(t, "user@example.com", assignedStr)
+
+		// Test body extraction
+		bodyStr := strings.Join(body, "\n")
+		assert.Contains(t, bodyStr, "# Test Feature")
+		assert.Contains(t, bodyStr, "This is a test feature description")
+	})
+
+	t.Run("handles work items with complex front matter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: "001"
+title: Complex Feature
+status: doing
+kind: prd
+created: 2024-01-01
+updated: 2024-01-15
+assigned: 
+  - alice@example.com
+  - bob@example.com
+reviewer: charlie@example.com
+metadata:
+  priority: high
+  estimate: 5
+  labels:
+    - important
+    - urgent
+---
+# Complex Feature
+
+Complex body content.
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath)
+		require.NoError(t, err)
+		assert.NotNil(t, frontMatter)
+
+		// Test accessing array field
+		assigned, exists := getFieldValue(frontMatter, "assigned")
+		require.True(t, exists)
+		assignedArray, ok := assigned.([]interface{})
+		require.True(t, ok)
+		assert.Len(t, assignedArray, 2)
+
+		// Test getFieldValueAsString with array
+		assignedStr, exists := getFieldValueAsString(frontMatter, "assigned")
+		require.True(t, exists)
+		assert.Contains(t, assignedStr, "alice@example.com")
+		assert.Contains(t, assignedStr, "bob@example.com")
+
+		// Test accessing nested structure
+		metadata, exists := getFieldValue(frontMatter, "metadata")
+		require.True(t, exists)
+		metadataMap, ok := metadata.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "high", metadataMap["priority"])
 	})
 }
