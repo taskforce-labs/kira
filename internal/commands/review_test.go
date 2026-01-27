@@ -1365,3 +1365,127 @@ func TestPushBranchIfNeeded(t *testing.T) {
 		assert.Contains(t, err.Error(), "configuration cannot be nil")
 	})
 }
+
+// TestGetGitHubToken tests the getGitHubToken function
+func TestGetGitHubToken(t *testing.T) {
+	const envKey = "KIRA_GITHUB_TOKEN"
+
+	t.Run("reads token from KIRA_GITHUB_TOKEN when set", func(t *testing.T) {
+		prev := os.Getenv(envKey)
+		t.Cleanup(func() {
+			if prev == "" {
+				_ = os.Unsetenv(envKey)
+			} else {
+				_ = os.Setenv(envKey, prev)
+			}
+		})
+		require.NoError(t, os.Setenv(envKey, "test-token-123"))
+
+		token, err := getGitHubToken(&config.Config{})
+		require.NoError(t, err)
+		assert.Equal(t, "test-token-123", token)
+	})
+
+	t.Run("trims whitespace from token", func(t *testing.T) {
+		prev := os.Getenv(envKey)
+		t.Cleanup(func() {
+			if prev == "" {
+				_ = os.Unsetenv(envKey)
+			} else {
+				_ = os.Setenv(envKey, prev)
+			}
+		})
+		require.NoError(t, os.Setenv(envKey, "  test-token-123  "))
+
+		token, err := getGitHubToken(&config.Config{})
+		require.NoError(t, err)
+		assert.Equal(t, "test-token-123", token)
+	})
+
+	t.Run("returns error when KIRA_GITHUB_TOKEN is unset", func(t *testing.T) {
+		prev := os.Getenv(envKey)
+		t.Cleanup(func() {
+			if prev == "" {
+				_ = os.Unsetenv(envKey)
+			} else {
+				_ = os.Setenv(envKey, prev)
+			}
+		})
+		require.NoError(t, os.Unsetenv(envKey))
+
+		_, err := getGitHubToken(&config.Config{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "GitHub token required for PR creation")
+		assert.Contains(t, err.Error(), "KIRA_GITHUB_TOKEN")
+	})
+
+	t.Run("returns error when KIRA_GITHUB_TOKEN is empty", func(t *testing.T) {
+		prev := os.Getenv(envKey)
+		t.Cleanup(func() {
+			if prev == "" {
+				_ = os.Unsetenv(envKey)
+			} else {
+				_ = os.Setenv(envKey, prev)
+			}
+		})
+		require.NoError(t, os.Setenv(envKey, ""))
+
+		_, err := getGitHubToken(&config.Config{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "GitHub token required for PR creation")
+		assert.Contains(t, err.Error(), "KIRA_GITHUB_TOKEN")
+	})
+
+	t.Run("returns error when KIRA_GITHUB_TOKEN is only whitespace", func(t *testing.T) {
+		prev := os.Getenv(envKey)
+		t.Cleanup(func() {
+			if prev == "" {
+				_ = os.Unsetenv(envKey)
+			} else {
+				_ = os.Setenv(envKey, prev)
+			}
+		})
+		require.NoError(t, os.Setenv(envKey, "   \n\t  "))
+
+		_, err := getGitHubToken(&config.Config{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "GitHub token required for PR creation")
+		assert.Contains(t, err.Error(), "KIRA_GITHUB_TOKEN")
+	})
+}
+
+// TestValidateGitHubToken tests the validateGitHubToken function
+// Note: These tests use real GitHub API calls, so they may fail if:
+// - Network is unavailable
+// - GitHub API is down
+// - Rate limits are exceeded
+// For production, we'd use mocks, but for now we test with real API
+func TestValidateGitHubToken(t *testing.T) {
+	t.Run("returns error for empty token", func(t *testing.T) {
+		err := validateGitHubToken("")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "GitHub token validation failed")
+		assert.Contains(t, err.Error(), "repo")
+	})
+
+	t.Run("returns error for whitespace-only token", func(t *testing.T) {
+		err := validateGitHubToken("   \n\t  ")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "GitHub token validation failed")
+		assert.Contains(t, err.Error(), "repo")
+	})
+
+	t.Run("returns error for invalid token", func(t *testing.T) {
+		// Use a clearly invalid token
+		err := validateGitHubToken("invalid-token-12345")
+		require.Error(t, err)
+		// Should get authentication error
+		assert.Contains(t, err.Error(), "GitHub token validation failed")
+	})
+
+	// Note: We don't test with a valid token here because:
+	// 1. We don't want to require a real GitHub token in tests
+	// 2. We don't want to expose tokens in test code
+	// 3. The actual validation will be tested in integration tests
+	// The unit tests verify error handling for invalid/missing tokens
+}
