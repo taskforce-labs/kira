@@ -2233,3 +2233,327 @@ func TestAddPRLabels(t *testing.T) {
 	// - Adding multiple labels in sequence
 	// - Labels are added with 1:1 mapping (tag → label)
 }
+
+// TestGetNumberedUsers tests the getNumberedUsers function
+func TestGetNumberedUsers(t *testing.T) {
+	t.Run("returns users with correct numbering from saved users", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+					{Email: "user2@example.com", Name: "User Two"},
+					{Email: "user3@example.com", Name: "User Three"},
+				},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		users, err := getNumberedUsers(cfg)
+		require.NoError(t, err)
+		require.Len(t, users, 3)
+
+		// Verify numbers are assigned correctly (1-based)
+		assert.Equal(t, 1, users[0].Number)
+		assert.Equal(t, "user1@example.com", users[0].Email)
+		assert.Equal(t, 2, users[1].Number)
+		assert.Equal(t, "user2@example.com", users[1].Email)
+		assert.Equal(t, 3, users[2].Number)
+		assert.Equal(t, "user3@example.com", users[2].Email)
+	})
+
+	t.Run("returns error for nil config", func(t *testing.T) {
+		_, err := getNumberedUsers(nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "configuration cannot be nil")
+	})
+
+	t.Run("handles empty user list", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers:    []config.SavedUser{},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		users, err := getNumberedUsers(cfg)
+		require.NoError(t, err)
+		assert.Empty(t, users)
+	})
+}
+
+// TestResolveUserByNumber tests the resolveUserByNumber function
+func TestResolveUserByNumber(t *testing.T) {
+	t.Run("resolves valid user numbers to emails", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+					{Email: "user2@example.com", Name: "User Two"},
+					{Email: "user3@example.com", Name: "User Three"},
+				},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		email, err := resolveUserByNumber("1", cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "user1@example.com", email)
+
+		email, err = resolveUserByNumber("2", cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "user2@example.com", email)
+
+		email, err = resolveUserByNumber("3", cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "user3@example.com", email)
+	})
+
+	t.Run("returns error for user number too high", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+				},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		_, err := resolveUserByNumber("2", cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "user number '2' not found")
+		assert.Contains(t, err.Error(), "Run 'kira users' to see available users")
+	})
+
+	t.Run("returns error for user number zero", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+				},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		_, err := resolveUserByNumber("0", cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must be a positive integer")
+	})
+
+	t.Run("returns error for negative user number", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+				},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		_, err := resolveUserByNumber("-1", cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must be a positive integer")
+	})
+
+	t.Run("returns error for non-numeric user number", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+				},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		_, err := resolveUserByNumber("abc", cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must be a positive integer")
+	})
+
+	t.Run("returns error for empty user list", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers:    []config.SavedUser{},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		_, err := resolveUserByNumber("1", cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no users available")
+		assert.Contains(t, err.Error(), "Run 'kira users' to see available users")
+	})
+
+	t.Run("returns error for nil config", func(t *testing.T) {
+		_, err := resolveUserByNumber("1", nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "configuration cannot be nil")
+	})
+}
+
+// TestResolveReviewers tests the resolveReviewers function
+func TestResolveReviewers(t *testing.T) {
+	t.Run("resolves user numbers to emails", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+					{Email: "user2@example.com", Name: "User Two"},
+				},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		reviewers, err := resolveReviewers([]string{"1", "2"}, cfg)
+		require.NoError(t, err)
+		require.Len(t, reviewers, 2)
+		assert.Equal(t, "user1@example.com", reviewers[0])
+		assert.Equal(t, "user2@example.com", reviewers[1])
+	})
+
+	t.Run("handles email addresses", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers:    []config.SavedUser{},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		reviewers, err := resolveReviewers([]string{"user@example.com", "reviewer@test.com"}, cfg)
+		require.NoError(t, err)
+		require.Len(t, reviewers, 2)
+		assert.Equal(t, "user@example.com", reviewers[0])
+		assert.Equal(t, "reviewer@test.com", reviewers[1])
+	})
+
+	t.Run("handles GitHub usernames", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers:    []config.SavedUser{},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		reviewers, err := resolveReviewers([]string{"octocat", "github-user"}, cfg)
+		require.NoError(t, err)
+		require.Len(t, reviewers, 2)
+		assert.Equal(t, "octocat", reviewers[0])
+		assert.Equal(t, "github-user", reviewers[1])
+	})
+
+	t.Run("handles mixed types", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+				},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		reviewers, err := resolveReviewers([]string{"1", "user@example.com", "octocat"}, cfg)
+		require.NoError(t, err)
+		require.Len(t, reviewers, 3)
+		assert.Equal(t, "user1@example.com", reviewers[0])
+		assert.Equal(t, "user@example.com", reviewers[1])
+		assert.Equal(t, "octocat", reviewers[2])
+	})
+
+	t.Run("returns error for invalid user numbers", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+				},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		_, err := resolveReviewers([]string{"1", "999"}, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "user number '999' not found")
+	})
+
+	t.Run("handles empty slice", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers:    []config.SavedUser{},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		reviewers, err := resolveReviewers([]string{}, cfg)
+		require.NoError(t, err)
+		assert.Empty(t, reviewers)
+	})
+
+	t.Run("skips empty strings in specs", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+				},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		reviewers, err := resolveReviewers([]string{"1", "", "  ", "user@example.com"}, cfg)
+		require.NoError(t, err)
+		require.Len(t, reviewers, 2)
+		assert.Equal(t, "user1@example.com", reviewers[0])
+		assert.Equal(t, "user@example.com", reviewers[1])
+	})
+
+	t.Run("trims whitespace from specs", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+				},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		reviewers, err := resolveReviewers([]string{" 1 ", " user@example.com ", " octocat "}, cfg)
+		require.NoError(t, err)
+		require.Len(t, reviewers, 3)
+		assert.Equal(t, "user1@example.com", reviewers[0])
+		assert.Equal(t, "user@example.com", reviewers[1])
+		assert.Equal(t, "octocat", reviewers[2])
+	})
+
+	t.Run("returns error for nil config", func(t *testing.T) {
+		_, err := resolveReviewers([]string{"1"}, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "configuration cannot be nil")
+	})
+
+	t.Run("handles usernames that look like numbers but contain non-digits", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers:    []config.SavedUser{},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		// "123abc" should be treated as a GitHub username, not a user number
+		reviewers, err := resolveReviewers([]string{"123abc"}, cfg)
+		require.NoError(t, err)
+		require.Len(t, reviewers, 1)
+		assert.Equal(t, "123abc", reviewers[0])
+	})
+
+	t.Run("handles email addresses with numbers", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers:    []config.SavedUser{},
+				UseGitHistory: func() *bool { b := false; return &b }(),
+			},
+		}
+
+		// "user123@example.com" should be treated as an email, not a user number
+		reviewers, err := resolveReviewers([]string{"user123@example.com"}, cfg)
+		require.NoError(t, err)
+		require.Len(t, reviewers, 1)
+		assert.Equal(t, "user123@example.com", reviewers[0])
+	})
+}

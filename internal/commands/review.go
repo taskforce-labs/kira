@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/go-github/v58/github"
@@ -1044,4 +1045,111 @@ func validateAddPRLabelsParams(client *github.Client, owner, repo string, prNumb
 		return fmt.Errorf("tags cannot be nil")
 	}
 	return nil
+}
+
+// getNumberedUsers collects and sorts users using the same logic as the `kira users` command.
+// It returns a slice of UserInfo with assigned numbers (1-based indexing).
+// This ensures consistent numbering between `kira users` and reviewer resolution.
+func getNumberedUsers(cfg *config.Config) ([]UserInfo, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("configuration cannot be nil")
+	}
+
+	useGitHistory := getUseGitHistorySetting(cfg)
+	commitLimit := getCommitLimit(0, false, cfg) // Use default limit (0 = no limit)
+
+	userMap, err := collectUsers(useGitHistory, commitLimit, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect users: %w", err)
+	}
+
+	users := processAndSortUsers(userMap, useGitHistory)
+	return users, nil
+}
+
+// resolveUserByNumber resolves a user number (from `kira users` command) to an email address.
+// User numbers are 1-based (first user is 1, not 0).
+// Returns the user's email address or an error if the user number is invalid or not found.
+func resolveUserByNumber(userNumber string, cfg *config.Config) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("configuration cannot be nil")
+	}
+
+	// Parse user number string to integer
+	num, err := strconv.Atoi(userNumber)
+	if err != nil {
+		return "", fmt.Errorf("invalid user number '%s': must be a positive integer", userNumber)
+	}
+
+	// Validate number is positive
+	if num <= 0 {
+		return "", fmt.Errorf("invalid user number '%s': must be a positive integer", userNumber)
+	}
+
+	// Get numbered users using same logic as `kira users` command
+	users, err := getNumberedUsers(cfg)
+	if err != nil {
+		return "", fmt.Errorf("failed to get users: %w", err)
+	}
+
+	// Check if any users exist
+	if len(users) == 0 {
+		return "", fmt.Errorf("no users available. Run 'kira users' to see available users")
+	}
+
+	// Look up user by number (1-based indexing)
+	if num > len(users) {
+		return "", fmt.Errorf("user number '%d' not found. Run 'kira users' to see available users (1-%d)", num, len(users))
+	}
+
+	// User numbers are 1-based, so subtract 1 for array index
+	user := users[num-1]
+	return user.Email, nil
+}
+
+// resolveReviewers resolves reviewer specifications to GitHub usernames or email addresses.
+// Reviewers can be specified as:
+//   - User numbers (digits only): Resolved via `kira users` command (e.g., "1", "2")
+//   - Email addresses (contains "@"): Used as-is (e.g., "user@example.com")
+//   - GitHub usernames (otherwise): Used as-is (e.g., "octocat")
+//
+// Returns a slice of resolved reviewer identifiers (emails or usernames).
+// Returns an error if any user number cannot be resolved.
+func resolveReviewers(reviewerSpecs []string, cfg *config.Config) ([]string, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("configuration cannot be nil")
+	}
+
+	// Handle empty slice
+	if len(reviewerSpecs) == 0 {
+		return []string{}, nil
+	}
+
+	var reviewers []string
+	userNumberRegex := regexp.MustCompile(`^\d+$`)
+
+	for _, spec := range reviewerSpecs {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue // Skip empty specs
+		}
+
+		// Check if spec is a user number (digits only)
+		if userNumberRegex.MatchString(spec) {
+			// Resolve user number to email
+			email, err := resolveUserByNumber(spec, cfg)
+			if err != nil {
+				return nil, err
+			}
+			reviewers = append(reviewers, email)
+		} else if strings.Contains(spec, "@") {
+			// Email address - use as-is
+			reviewers = append(reviewers, spec)
+		} else {
+			// Assume GitHub username - use as-is
+			reviewers = append(reviewers, spec)
+		}
+	}
+
+	return reviewers, nil
 }
