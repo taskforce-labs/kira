@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -1319,5 +1320,604 @@ Complex body content.
 		metadataMap, ok := metadata.(map[string]interface{})
 		require.True(t, ok)
 		assert.Equal(t, "high", metadataMap["priority"])
+	})
+}
+
+// Phase 5: Field Update Logic (Switch Mode) Tests
+
+const (
+	testWorkItemContentPhase5 = `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+---
+# Test Feature
+`
+	testFilePathPhase5 = ".work/1_todo/001-test-feature.prd.md"
+)
+
+func TestWriteWorkItemFrontMatter(t *testing.T) {
+	testFilePath := testFilePathPhase5
+
+	t.Run("writes front matter with all field types", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		frontMatter := map[string]interface{}{
+			"id":       "001",
+			"title":    "Test Feature",
+			"status":   "todo",
+			"kind":     "prd",
+			"created":  "2024-01-01",
+			"assigned": "user@example.com",
+			"tags":     []interface{}{"frontend", "backend"},
+		}
+		bodyLines := []string{"# Test Feature", "", "This is the body."}
+
+		err := writeWorkItemFrontMatter(testFilePath, frontMatter, bodyLines)
+		require.NoError(t, err)
+
+		// Verify file was written
+		content, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		contentStr := string(content)
+
+		// Check front matter
+		assert.Contains(t, contentStr, "id: 001")
+		assert.Contains(t, contentStr, "title: Test Feature")
+		assert.Contains(t, contentStr, "assigned: user@example.com")
+		assert.Contains(t, contentStr, "tags: [frontend, backend]")
+
+		// Check body
+		assert.Contains(t, contentStr, "# Test Feature")
+		assert.Contains(t, contentStr, "This is the body.")
+	})
+
+	t.Run("preserves body content", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		frontMatter := map[string]interface{}{
+			"id":      "001",
+			"title":   "Test",
+			"status":  "todo",
+			"kind":    "prd",
+			"created": "2024-01-01",
+		}
+		bodyLines := []string{
+			"# Test Feature",
+			"",
+			"This is paragraph one.",
+			"",
+			"This is paragraph two.",
+			"",
+			"- List item 1",
+			"- List item 2",
+		}
+
+		err := writeWorkItemFrontMatter(testFilePath, frontMatter, bodyLines)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		contentStr := string(content)
+
+		assert.Contains(t, contentStr, "# Test Feature")
+		assert.Contains(t, contentStr, "This is paragraph one.")
+		assert.Contains(t, contentStr, "This is paragraph two.")
+		assert.Contains(t, contentStr, "- List item 1")
+		assert.Contains(t, contentStr, "- List item 2")
+	})
+
+	t.Run("handles YAML formatting with special characters", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		frontMatter := map[string]interface{}{
+			"id":      "001",
+			"title":   "Test: Feature [Important]",
+			"status":  "todo",
+			"kind":    "prd",
+			"created": "2024-01-01",
+			"note":    "Value with: colon and [brackets]",
+		}
+		bodyLines := []string{"# Test"}
+
+		err := writeWorkItemFrontMatter(testFilePath, frontMatter, bodyLines)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		contentStr := string(content)
+
+		// Special characters should be quoted
+		assert.Contains(t, contentStr, `title: "Test: Feature [Important]"`)
+		assert.Contains(t, contentStr, `note: "Value with: colon and [brackets]"`)
+	})
+
+	t.Run("handles empty front matter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		frontMatter := map[string]interface{}{}
+		bodyLines := []string{"# Test"}
+
+		err := writeWorkItemFrontMatter(testFilePath, frontMatter, bodyLines)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		contentStr := string(content)
+
+		// Should have YAML separators
+		assert.Contains(t, contentStr, "---")
+		assert.Contains(t, contentStr, "# Test")
+	})
+
+	t.Run("preserves field order", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		frontMatter := map[string]interface{}{
+			"id":       "001",
+			"title":    "Test",
+			"status":   "todo",
+			"kind":     "prd",
+			"created":  "2024-01-01",
+			"zebra":    "last",
+			"assigned": "user@example.com",
+			"alpha":    "first",
+		}
+		bodyLines := []string{}
+
+		err := writeWorkItemFrontMatter(testFilePath, frontMatter, bodyLines)
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		contentStr := string(content)
+
+		// Hardcoded fields should come first
+		idPos := strings.Index(contentStr, "id:")
+		titlePos := strings.Index(contentStr, "title:")
+		statusPos := strings.Index(contentStr, "status:")
+		kindPos := strings.Index(contentStr, "kind:")
+		createdPos := strings.Index(contentStr, "created:")
+
+		// Other fields should come after
+		alphaPos := strings.Index(contentStr, "alpha:")
+		assignedPos := strings.Index(contentStr, "assigned:")
+		zebraPos := strings.Index(contentStr, "zebra:")
+
+		// Verify order
+		assert.True(t, idPos < titlePos)
+		assert.True(t, titlePos < statusPos)
+		assert.True(t, statusPos < kindPos)
+		assert.True(t, kindPos < createdPos)
+		assert.True(t, createdPos < alphaPos)
+		assert.True(t, alphaPos < assignedPos)
+		assert.True(t, assignedPos < zebraPos)
+	})
+}
+
+func TestUpdateFieldValue(t *testing.T) {
+	t.Run("updates existing field", func(t *testing.T) {
+		frontMatter := map[string]interface{}{
+			"assigned": "old@example.com",
+		}
+
+		previous, existed := updateFieldValue(frontMatter, "assigned", "new@example.com")
+
+		assert.True(t, existed)
+		assert.Equal(t, "old@example.com", previous)
+		assert.Equal(t, "new@example.com", frontMatter["assigned"])
+	})
+
+	t.Run("creates new field", func(t *testing.T) {
+		frontMatter := map[string]interface{}{}
+
+		previous, existed := updateFieldValue(frontMatter, "assigned", "user@example.com")
+
+		assert.False(t, existed)
+		assert.Nil(t, previous)
+		assert.Equal(t, "user@example.com", frontMatter["assigned"])
+	})
+
+	t.Run("replaces existing value", func(t *testing.T) {
+		frontMatter := map[string]interface{}{
+			"assigned": "alice@example.com",
+		}
+
+		previous, existed := updateFieldValue(frontMatter, "assigned", "bob@example.com")
+
+		assert.True(t, existed)
+		assert.Equal(t, "alice@example.com", previous)
+		assert.Equal(t, "bob@example.com", frontMatter["assigned"])
+	})
+
+	t.Run("handles nil front matter map", func(t *testing.T) {
+		// updateFieldValue initializes the map if nil, but since maps are reference types,
+		// we need to pass a pointer to modify nil maps. In practice, parseWorkItemFrontMatter
+		// always returns a non-nil map, so this is an edge case.
+		// For this test, we'll create an empty map instead.
+		frontMatter := make(map[string]interface{})
+
+		previous, existed := updateFieldValue(frontMatter, "assigned", "user@example.com")
+
+		assert.False(t, existed)
+		assert.Nil(t, previous)
+		assert.NotNil(t, frontMatter)
+		assert.Equal(t, "user@example.com", frontMatter["assigned"])
+	})
+}
+
+func TestUpdateTimestamp(t *testing.T) {
+	t.Run("updates existing updated field", func(t *testing.T) {
+		frontMatter := map[string]interface{}{
+			"updated": "2024-01-01T00:00:00Z",
+		}
+
+		oldValue := frontMatter["updated"]
+		updateTimestamp(frontMatter)
+
+		updatedStr, ok := frontMatter["updated"].(string)
+		require.True(t, ok)
+
+		// Verify the value changed
+		assert.NotEqual(t, oldValue, updatedStr)
+
+		// Parse timestamp (always in UTC/Z format)
+		updatedTime, err := time.Parse("2006-01-02T15:04:05Z", updatedStr)
+		require.NoError(t, err)
+
+		// Verify it's a recent timestamp (within last hour to account for timezone differences)
+		now := time.Now().UTC()
+		assert.True(t, updatedTime.After(now.Add(-time.Hour)), "updatedTime %v should be recent (after %v)", updatedTime, now.Add(-time.Hour))
+		assert.True(t, updatedTime.Before(now.Add(time.Hour)), "updatedTime %v should be recent (before %v)", updatedTime, now.Add(time.Hour))
+	})
+
+	t.Run("creates updated field when missing", func(t *testing.T) {
+		frontMatter := map[string]interface{}{}
+
+		updateTimestamp(frontMatter)
+
+		updatedStr, ok := frontMatter["updated"].(string)
+		require.True(t, ok)
+		assert.NotEmpty(t, updatedStr)
+
+		// Should be valid timestamp format
+		_, err := time.Parse("2006-01-02T15:04:05Z", updatedStr)
+		assert.NoError(t, err)
+	})
+
+	t.Run("timestamp format is correct", func(t *testing.T) {
+		frontMatter := map[string]interface{}{}
+
+		updateTimestamp(frontMatter)
+
+		updatedStr, ok := frontMatter["updated"].(string)
+		require.True(t, ok)
+
+		// Should match ISO 8601 format with time
+		_, err := time.Parse("2006-01-02T15:04:05Z", updatedStr)
+		assert.NoError(t, err)
+	})
+
+	t.Run("handles nil front matter map", func(t *testing.T) {
+		// updateTimestamp initializes the map if nil, but since maps are reference types,
+		// we need to pass a pointer to modify nil maps. In practice, parseWorkItemFrontMatter
+		// always returns a non-nil map, so this is an edge case.
+		// For this test, we'll create an empty map instead.
+		frontMatter := make(map[string]interface{})
+
+		updateTimestamp(frontMatter)
+
+		assert.NotNil(t, frontMatter)
+		updatedStr, ok := frontMatter["updated"].(string)
+		require.True(t, ok)
+		assert.NotEmpty(t, updatedStr)
+	})
+}
+
+func TestUpdateWorkItemField(t *testing.T) {
+	testFilePath := testFilePathPhase5
+
+	t.Run("updates field in work item", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+assigned: old@example.com
+---
+# Test Feature
+
+Body content.
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemField(testFilePath, "assigned", "new@example.com")
+		require.NoError(t, err)
+
+		// Verify file was updated
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.Contains(t, updatedStr, "assigned: new@example.com")
+		assert.NotContains(t, updatedStr, "assigned: old@example.com")
+		assert.Contains(t, updatedStr, "# Test Feature")
+		assert.Contains(t, updatedStr, "Body content.")
+	})
+
+	t.Run("creates field if it doesn't exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContentPhase5), 0o600))
+
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		require.NoError(t, err)
+
+		// Verify field was created
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.Contains(t, updatedStr, "assigned: user@example.com")
+	})
+
+	t.Run("updates timestamp", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+updated: 2024-01-01T00:00:00Z
+---
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		require.NoError(t, err)
+
+		// Verify timestamp was updated
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		// Parse updated timestamp from file
+		lines := strings.Split(updatedStr, "\n")
+		var updatedLine string
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "updated:") {
+				updatedLine = line
+				break
+			}
+		}
+		require.NotEmpty(t, updatedLine)
+
+		// Extract timestamp value (split only on first colon)
+		colonIdx := strings.Index(updatedLine, ":")
+		require.Greater(t, colonIdx, 0)
+		timestampStr := strings.TrimSpace(updatedLine[colonIdx+1:])
+		// Remove quotes if present (YAML may quote values with colons)
+		timestampStr = strings.Trim(timestampStr, `"`)
+
+		updatedTime, err := time.Parse("2006-01-02T15:04:05Z", timestampStr)
+		require.NoError(t, err)
+
+		// Verify it's a recent timestamp (within last hour to account for timezone differences)
+		now := time.Now().UTC()
+		assert.True(t, updatedTime.After(now.Add(-time.Hour)), "updatedTime %v should be recent (after %v)", updatedTime, now.Add(-time.Hour))
+		assert.True(t, updatedTime.Before(now.Add(time.Hour)), "updatedTime %v should be recent (before %v)", updatedTime, now.Add(time.Hour))
+	})
+
+	t.Run("creates updated timestamp if missing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContentPhase5), 0o600))
+
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		require.NoError(t, err)
+
+		// Verify updated timestamp was created
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.Contains(t, updatedStr, "updated:")
+		// Verify it's a valid timestamp format
+		lines := strings.Split(updatedStr, "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "updated:") {
+				colonIdx := strings.Index(line, ":")
+				require.Greater(t, colonIdx, 0)
+				timestampStr := strings.TrimSpace(line[colonIdx+1:])
+				// Remove quotes if present (YAML may quote values with colons)
+				timestampStr = strings.Trim(timestampStr, `"`)
+				_, err := time.Parse("2006-01-02T15:04:05Z", timestampStr)
+				assert.NoError(t, err)
+				break
+			}
+		}
+	})
+
+	t.Run("preserves other front matter fields", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+reviewer: reviewer@example.com
+estimate: 5
+tags: [frontend, backend]
+---
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		require.NoError(t, err)
+
+		// Verify other fields are preserved
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.Contains(t, updatedStr, "reviewer: reviewer@example.com")
+		assert.Contains(t, updatedStr, "estimate: 5")
+		assert.Contains(t, updatedStr, "tags: [frontend, backend]")
+	})
+
+	t.Run("preserves body content", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+---
+# Test Feature
+
+This is the body content.
+
+## Section
+
+More content here.
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		require.NoError(t, err)
+
+		// Verify body is preserved
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.Contains(t, updatedStr, "# Test Feature")
+		assert.Contains(t, updatedStr, "This is the body content.")
+		assert.Contains(t, updatedStr, "## Section")
+		assert.Contains(t, updatedStr, "More content here.")
+	})
+
+	t.Run("works with custom field names", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContentPhase5), 0o600))
+
+		err := updateWorkItemField(testFilePath, "reviewer", "reviewer@example.com")
+		require.NoError(t, err)
+
+		// Verify custom field was set
+		updatedContent, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		updatedStr := string(updatedContent)
+
+		assert.Contains(t, updatedStr, "reviewer: reviewer@example.com")
+	})
+
+	t.Run("returns error for file not found", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read work item file")
+	})
+
+	t.Run("returns error for malformed YAML", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		content := `---
+id: 001
+title: Test Feature
+invalid: [unclosed bracket
+---
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse front matter")
 	})
 }

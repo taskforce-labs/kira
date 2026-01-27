@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	yaml "gopkg.in/yaml.v3"
@@ -96,11 +98,55 @@ func runAssign(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Store resolved paths and user for use in later phases (not used yet in Phase 3).
-	_ = workItemPaths
-	_ = resolvedUser
+	// Phase 5: Update work item fields (switch mode)
+	return processWorkItemUpdates(workItemPaths, resolvedUser, flags)
+}
 
-	// Phase 3: command stops after user collection and resolution.
+// processWorkItemUpdates processes work item updates based on flags.
+// This function is separated to reduce cyclomatic complexity of runAssign.
+func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flags AssignFlags) error {
+	// Skip if dry-run mode
+	if flags.DryRun {
+		// In dry-run mode, just validate that we can parse the files
+		for _, path := range workItemPaths {
+			_, _, err := parseWorkItemFrontMatter(path)
+			if err != nil {
+				return fmt.Errorf("dry-run: failed to parse work item %s: %w", path, err)
+			}
+		}
+		return nil
+	}
+
+	// Process each work item
+	for _, workItemPath := range workItemPaths {
+		// For unassign mode, we'll handle in Phase 7
+		if flags.Unassign {
+			// Phase 7 will handle this
+			continue
+		}
+
+		// For interactive mode, we'll handle in Phase 9
+		if flags.Interactive {
+			// Phase 9 will handle this
+			continue
+		}
+
+		// For append mode, we'll handle in Phase 6
+		if flags.Append {
+			// Phase 6 will handle this
+			continue
+		}
+
+		// Switch mode: update field with user email
+		if resolvedUser == nil {
+			return fmt.Errorf("user identifier is required for assignment")
+		}
+
+		if err := updateWorkItemField(workItemPath, flags.Field, resolvedUser.Email); err != nil {
+			return fmt.Errorf("failed to update work item %s: %w", workItemPath, err)
+		}
+	}
+
 	return nil
 }
 
@@ -600,4 +646,223 @@ func getFieldValueAsString(frontMatter map[string]interface{}, fieldName string)
 		// For other types (int, bool, etc.), convert to string
 		return fmt.Sprintf("%v", v), true
 	}
+}
+
+// Phase 5: Field Update Logic (Switch Mode)
+
+// writeWorkItemFrontMatter writes the front matter and body back to a work item file.
+// It preserves field order by writing hardcoded fields first, then sorted other fields.
+func writeWorkItemFrontMatter(filePath string, frontMatter map[string]interface{}, bodyLines []string) error {
+	var sb strings.Builder
+
+	// Write YAML separator
+	sb.WriteString(yamlSeparator)
+	sb.WriteString("\n")
+
+	// Define hardcoded fields in order
+	hardcodedFields := []string{"id", "title", "status", "kind", "created"}
+	hardcodedSet := make(map[string]bool)
+	for _, field := range hardcodedFields {
+		hardcodedSet[field] = true
+	}
+
+	// Write hardcoded fields first
+	for _, field := range hardcodedFields {
+		if value, exists := frontMatter[field]; exists {
+			if err := writeYAMLFieldValue(&sb, field, value); err != nil {
+				return fmt.Errorf("failed to write field '%s': %w", field, err)
+			}
+		}
+	}
+
+	// Collect and sort other fields
+	var otherFields []string
+	for key := range frontMatter {
+		if !hardcodedSet[key] {
+			otherFields = append(otherFields, key)
+		}
+	}
+	sort.Strings(otherFields)
+
+	// Write other fields in sorted order
+	for _, key := range otherFields {
+		value := frontMatter[key]
+		if err := writeYAMLFieldValue(&sb, key, value); err != nil {
+			return fmt.Errorf("failed to write field '%s': %w", key, err)
+		}
+	}
+
+	// Write closing YAML separator
+	sb.WriteString(yamlSeparator)
+	sb.WriteString("\n")
+
+	// Write body content
+	if len(bodyLines) > 0 {
+		bodyContent := strings.Join(bodyLines, "\n")
+		sb.WriteString(bodyContent)
+		// Ensure file ends with newline if body has content
+		if !strings.HasSuffix(bodyContent, "\n") {
+			sb.WriteString("\n")
+		}
+	}
+
+	// Write to file with permissions 0o600
+	if err := os.WriteFile(filePath, []byte(sb.String()), 0o600); err != nil {
+		return fmt.Errorf("failed to write work item file: %w", err)
+	}
+
+	return nil
+}
+
+// writeYAMLFieldValue writes a single YAML field to a string builder.
+func writeYAMLFieldValue(sb *strings.Builder, key string, value interface{}) error {
+	switch v := value.(type) {
+	case string:
+		formatted := yamlFormatStringValue(v)
+		fmt.Fprintf(sb, "%s: %s\n", key, formatted)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		fmt.Fprintf(sb, "%s: %v\n", key, v)
+	case bool:
+		fmt.Fprintf(sb, "%s: %v\n", key, v)
+	case []interface{}:
+		fmt.Fprintf(sb, "%s: [", key)
+		for i, item := range v {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(yamlFormatArrayItem(item))
+		}
+		sb.WriteString("]\n")
+	case []string:
+		fmt.Fprintf(sb, "%s: [", key)
+		for i, item := range v {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(yamlFormatStringValue(item))
+		}
+		sb.WriteString("]\n")
+	case nil:
+		fmt.Fprintf(sb, "%s: null\n", key)
+	default:
+		// For complex types, use YAML marshaling
+		yamlData, err := yaml.Marshal(map[string]interface{}{key: value})
+		if err != nil {
+			return fmt.Errorf("failed to marshal field '%s': %w", key, err)
+		}
+		// Extract the line(s) for this field from the marshaled output
+		yamlStr := strings.TrimSpace(string(yamlData))
+		lines := strings.Split(yamlStr, "\n")
+		for _, line := range lines {
+			sb.WriteString(line)
+			sb.WriteString("\n")
+		}
+	}
+	return nil
+}
+
+// yamlFormatStringValue formats a string value for YAML output, adding quotes when necessary.
+func yamlFormatStringValue(s string) string {
+	if needsYAMLQuoting(s) {
+		return yamlQuotedString(s)
+	}
+	return s
+}
+
+// needsYAMLQuoting returns true if the string must be double-quoted for valid YAML output.
+func needsYAMLQuoting(s string) bool {
+	if s == "" || strings.TrimSpace(s) != s {
+		return true
+	}
+	const yamlSpecialChars = ":#[]{},\"'\\\n\r\t&*!|>%"
+	return strings.ContainsAny(s, yamlSpecialChars)
+}
+
+// yamlQuotedString returns a double-quoted YAML scalar with proper escaping.
+func yamlQuotedString(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// yamlFormatArrayItem formats an array item for YAML output.
+func yamlFormatArrayItem(item interface{}) string {
+	switch v := item.(type) {
+	case string:
+		return yamlFormatStringValue(v)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
+		return fmt.Sprintf("%v", v)
+	default:
+		return yamlFormatStringValue(fmt.Sprintf("%v", v))
+	}
+}
+
+// updateFieldValue updates or creates a field in the front matter map (switch mode).
+// Returns the previous value (if any) and whether the field existed.
+func updateFieldValue(
+	frontMatter map[string]interface{},
+	fieldName string,
+	value string,
+) (previousValue interface{}, existed bool) {
+	if frontMatter == nil {
+		frontMatter = make(map[string]interface{})
+	}
+
+	previousValue, existed = frontMatter[fieldName]
+	frontMatter[fieldName] = value
+	return previousValue, existed
+}
+
+// updateTimestamp updates the 'updated' field in the front matter with the current timestamp.
+// Creates the field if it doesn't exist.
+func updateTimestamp(frontMatter map[string]interface{}) {
+	if frontMatter == nil {
+		frontMatter = make(map[string]interface{})
+	}
+	// Use ISO 8601 format with time in UTC, consistent with save.go
+	frontMatter["updated"] = time.Now().UTC().Format("2006-01-02T15:04:05Z")
+}
+
+// updateWorkItemField updates a field in a work item's front matter (switch mode).
+// It reads the file, updates the field, updates the timestamp, and writes the file back.
+func updateWorkItemField(
+	filePath string,
+	fieldName string,
+	userEmail string,
+) error {
+	// Parse front matter and body
+	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse work item: %w", err)
+	}
+
+	// Update field value (switch mode - replaces existing)
+	updateFieldValue(frontMatter, fieldName, userEmail)
+
+	// Update timestamp
+	updateTimestamp(frontMatter)
+
+	// Write back to file
+	if err := writeWorkItemFrontMatter(filePath, frontMatter, bodyLines); err != nil {
+		return fmt.Errorf("failed to write work item: %w", err)
+	}
+
+	return nil
 }

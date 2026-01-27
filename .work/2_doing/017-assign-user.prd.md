@@ -60,12 +60,12 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/root.go` (register command)
 
 **Acceptance Criteria**:
-- [ ] `kira assign` command exists and shows help
-- [ ] Command validates work item ID format
-- [ ] Command rejects invalid flag combinations
-- [ ] Command shows clear error for missing required arguments
-- [ ] All flags are defined and accessible
-- [ ] Command structure follows existing Kira patterns
+- [x] `kira assign` command exists and shows help
+- [x] Command validates work item ID format
+- [x] Command rejects invalid flag combinations
+- [x] Command shows clear error for missing required arguments
+- [x] All flags are defined and accessible
+- [x] Command structure follows existing Kira patterns
 
 **Deliverable**: Command skeleton with input validation
 
@@ -85,12 +85,12 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add work item discovery functions)
 
 **Acceptance Criteria**:
-- [ ] Finds work item by numeric ID across all folders
-- [ ] Validates work item file exists
-- [ ] Handles multiple work item IDs
-- [ ] Returns clear error when work item not found
-- [ ] Works with work items in any status folder
-- [ ] Handles invalid work item paths gracefully
+- [x] Finds work item by numeric ID across all folders
+- [x] Validates work item file exists
+- [x] Handles multiple work item IDs
+- [x] Returns clear error when work item not found
+- [x] Works with work items in any status folder
+- [x] Handles invalid work item paths gracefully
 
 **Deliverable**: Work item lookup and validation working
 
@@ -113,13 +113,13 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - Reuse functions from `internal/commands/users.go`
 
 **Acceptance Criteria**:
-- [ ] Collects users using same logic as `kira users`
-- [ ] Resolves numeric user identifiers correctly
-- [ ] Resolves email addresses (case-insensitive)
-- [ ] Resolves names (case-insensitive)
-- [ ] Handles partial email/name matches
-- [ ] Shows clear error when user not found
-- [ ] Handles multiple matches appropriately
+- [x] Collects users using same logic as `kira users`
+- [x] Resolves numeric user identifiers correctly
+- [x] Resolves email addresses (case-insensitive)
+- [x] Resolves names (case-insensitive)
+- [x] Handles partial email/name matches
+- [x] Shows clear error when user not found
+- [x] Handles multiple matches appropriately
 
 **Deliverable**: User resolution working for all identifier types
 
@@ -142,13 +142,13 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - Reuse existing front matter utilities if available
 
 **Acceptance Criteria**:
-- [ ] Reads work item file successfully
-- [ ] Parses YAML front matter correctly
-- [ ] Accesses field values (default and custom)
-- [ ] Handles missing fields gracefully
-- [ ] Handles empty fields correctly
-- [ ] Preserves front matter structure
-- [ ] Handles malformed front matter with clear errors
+- [x] Reads work item file successfully
+- [x] Parses YAML front matter correctly
+- [x] Accesses field values (default and custom)
+- [x] Handles missing fields gracefully
+- [x] Handles empty fields correctly
+- [x] Preserves front matter structure
+- [x] Handles malformed front matter with clear errors
 
 **Deliverable**: Front matter reading and field access working
 
@@ -169,13 +169,13 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add field update functions)
 
 **Acceptance Criteria**:
-- [ ] Updates field value correctly
-- [ ] Creates field if it doesn't exist
-- [ ] Updates `updated` timestamp
-- [ ] Preserves other front matter fields
-- [ ] Writes file successfully
-- [ ] Handles write errors gracefully
-- [ ] Maintains front matter formatting
+- [x] Updates field value correctly
+- [x] Creates field if it doesn't exist
+- [x] Updates `updated` timestamp
+- [x] Preserves other front matter fields
+- [x] Writes file successfully
+- [x] Handles write errors gracefully
+- [x] Maintains front matter formatting
 
 **Deliverable**: Basic field update (switch mode) working
 
