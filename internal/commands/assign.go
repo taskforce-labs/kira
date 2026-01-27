@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	yaml "gopkg.in/yaml.v3"
 
 	"kira/internal/config"
 )
@@ -501,4 +502,102 @@ func formatMultipleMatchesError(identifier string, matches []*UserInfo) error {
 
 	// Use %s format to avoid linter warning about non-constant format string
 	return fmt.Errorf("%s", strings.Join(lines, "\n"))
+}
+
+// Phase 4: Front Matter Parsing & Field Access
+
+const yamlSeparator = "---"
+
+// parseWorkItemFrontMatter reads a work item file and parses its YAML front matter.
+// Returns the parsed front matter as a map, the body content as lines, and any error.
+// The front matter is expected to be between the first pair of --- lines.
+func parseWorkItemFrontMatter(filePath string) (map[string]interface{}, []string, error) {
+	content, err := safeReadFile(filePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read work item file: %w", err)
+	}
+
+	// Extract YAML front matter between the first pair of --- lines
+	lines := strings.Split(string(content), "\n")
+	var yamlLines []string
+	var bodyLines []string
+	inYAML := false
+	yamlEndFound := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if i == 0 && trimmed == yamlSeparator {
+			inYAML = true
+			continue
+		}
+		if inYAML {
+			if trimmed == yamlSeparator {
+				yamlEndFound = true
+				inYAML = false
+				continue
+			}
+			yamlLines = append(yamlLines, line)
+		} else if yamlEndFound {
+			// After YAML ends, collect all remaining lines as body
+			bodyLines = append(bodyLines, line)
+		} else {
+			// If no front matter delimiters found, treat all content as body
+			bodyLines = append(bodyLines, line)
+		}
+	}
+
+	// Parse YAML front matter
+	frontMatter := make(map[string]interface{})
+	if len(yamlLines) > 0 {
+		if err := yaml.Unmarshal([]byte(strings.Join(yamlLines, "\n")), frontMatter); err != nil {
+			return nil, nil, fmt.Errorf("failed to parse front matter: %w", err)
+		}
+	}
+
+	return frontMatter, bodyLines, nil
+}
+
+// getFieldValue retrieves a field value from the front matter map.
+// Returns the value and true if the field exists (even if empty), or nil and false if it doesn't exist.
+func getFieldValue(frontMatter map[string]interface{}, fieldName string) (interface{}, bool) {
+	if frontMatter == nil {
+		return nil, false
+	}
+
+	value, exists := frontMatter[fieldName]
+	if !exists {
+		return nil, false
+	}
+
+	return value, true
+}
+
+// getFieldValueAsString retrieves a field value from the front matter and converts it to a string.
+// Returns the string representation and true if the field exists, or empty string and false if it doesn't.
+// Array values are joined with commas. Other types are converted using fmt.Sprintf.
+func getFieldValueAsString(frontMatter map[string]interface{}, fieldName string) (string, bool) {
+	value, exists := getFieldValue(frontMatter, fieldName)
+	if !exists {
+		return "", false
+	}
+
+	// Handle different value types
+	switch v := value.(type) {
+	case string:
+		return v, true
+	case []string:
+		return strings.Join(v, ", "), true
+	case []interface{}:
+		// Convert []interface{} to []string for display
+		var strValues []string
+		for _, item := range v {
+			strValues = append(strValues, fmt.Sprintf("%v", item))
+		}
+		return strings.Join(strValues, ", "), true
+	case nil:
+		return "", true // Field exists but is nil, return empty string
+	default:
+		// For other types (int, bool, etc.), convert to string
+		return fmt.Sprintf("%v", v), true
+	}
 }
