@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -80,10 +81,25 @@ func runAssign(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Store resolved paths for use in later phases (not used yet in Phase 2).
-	_ = workItemPaths
+	// Phase 3: Collect users and resolve user identifier if provided.
+	users, err := collectUsersForAssignment(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to collect users: %w", err)
+	}
 
-	// Phase 2: command stops after discovery and validation.
+	var resolvedUser *UserInfo
+	if userIdentifier != "" {
+		resolvedUser, err = resolveUserIdentifier(userIdentifier, users)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Store resolved paths and user for use in later phases (not used yet in Phase 3).
+	_ = workItemPaths
+	_ = resolvedUser
+
+	// Phase 3: command stops after user collection and resolution.
 	return nil
 }
 
@@ -315,4 +331,174 @@ func resolveWorkItems(identifiers []string) ([]string, error) {
 	}
 
 	return resolvedPaths, nil
+}
+
+// collectUsersForAssignment collects users using the same logic as the kira users command.
+// This ensures consistency between the two commands.
+func collectUsersForAssignment(cfg *config.Config) ([]UserInfo, error) {
+	useGitHistory := getUseGitHistorySetting(cfg)
+	commitLimit := getCommitLimit(0, false, cfg)
+
+	userMap, err := collectUsers(useGitHistory, commitLimit, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	users := processAndSortUsers(userMap, useGitHistory)
+	return users, nil
+}
+
+// resolveUserIdentifier resolves a user identifier to a UserInfo.
+// It tries different resolution methods in priority order:
+// 1. Numeric identifier (via findUserByNumber)
+// 2. Exact email match (case-insensitive)
+// 3. Partial email match (if unique)
+// 4. Exact name match (case-insensitive)
+// 5. Partial name match (if unique)
+// Returns an error if no matches or multiple matches (with list of matches).
+func resolveUserIdentifier(identifier string, users []UserInfo) (*UserInfo, error) {
+	// Try numeric identifier first
+	if num, err := strconv.Atoi(identifier); err == nil {
+		return findUserByNumber(num, users)
+	}
+
+	// Try email matching (exact, then partial)
+	emailMatches := findUsersByEmail(identifier, users)
+	if len(emailMatches) == 1 {
+		return emailMatches[0], nil
+	} else if len(emailMatches) > 1 {
+		return nil, formatMultipleMatchesError(identifier, emailMatches)
+	}
+
+	// Try name matching (exact, then partial)
+	nameMatches := findUsersByName(identifier, users)
+	if len(nameMatches) == 1 {
+		return nameMatches[0], nil
+	} else if len(nameMatches) > 1 {
+		return nil, formatMultipleMatchesError(identifier, nameMatches)
+	}
+
+	// No matches found
+	return nil, fmt.Errorf("user '%s' not found. Run 'kira users' to see available users", identifier)
+}
+
+// findUserByNumber looks up a user by their numeric identifier (1-based).
+// Returns an error with available range if not found.
+func findUserByNumber(number int, users []UserInfo) (*UserInfo, error) {
+	if len(users) == 0 {
+		return nil, fmt.Errorf("no users available")
+	}
+
+	if number < 1 || number > len(users) {
+		return nil, fmt.Errorf("user number %d not found. Available numbers: 1-%d", number, len(users))
+	}
+
+	// Users are numbered 1-based, so index is number-1
+	return &users[number-1], nil
+}
+
+// findUsersByEmail finds users matching an email identifier (exact or partial).
+// Case-insensitive matching is used.
+// Returns all matches (empty slice if none).
+func findUsersByEmail(email string, users []UserInfo) []*UserInfo {
+	if email == "" {
+		return nil
+	}
+
+	emailLower := strings.ToLower(email)
+	var exactMatches []*UserInfo
+	var partialMatches []*UserInfo
+
+	for i := range users {
+		userEmailLower := strings.ToLower(users[i].Email)
+
+		// Try exact match first
+		if userEmailLower == emailLower {
+			exactMatches = append(exactMatches, &users[i])
+			continue
+		}
+
+		// Try partial match
+		// If identifier starts with "@", match domain
+		if strings.HasPrefix(email, "@") {
+			if strings.HasSuffix(userEmailLower, emailLower) {
+				partialMatches = append(partialMatches, &users[i])
+			}
+		} else if strings.Contains(email, "@") {
+			// If identifier contains "@" but doesn't start with it, match substring
+			if strings.Contains(userEmailLower, emailLower) {
+				partialMatches = append(partialMatches, &users[i])
+			}
+		} else {
+			// If identifier doesn't contain "@", match as substring (e.g., "alice" matches "alice@example.com")
+			if strings.Contains(userEmailLower, emailLower) {
+				partialMatches = append(partialMatches, &users[i])
+			}
+		}
+	}
+
+	// Return exact matches if any, otherwise return partial matches
+	if len(exactMatches) > 0 {
+		return exactMatches
+	}
+	return partialMatches
+}
+
+// findUsersByName finds users matching a name identifier (exact or partial).
+// Case-insensitive matching is used.
+// Returns all matches (empty slice if none).
+// Exact matches are returned separately from partial matches.
+func findUsersByName(name string, users []UserInfo) []*UserInfo {
+	if name == "" {
+		return nil
+	}
+
+	nameLower := strings.ToLower(name)
+	var exactMatches []*UserInfo
+	var partialMatches []*UserInfo
+
+	for i := range users {
+		userNameLower := strings.ToLower(users[i].Name)
+
+		// Skip users without names
+		if userNameLower == "" {
+			continue
+		}
+
+		// Try exact match first
+		if userNameLower == nameLower {
+			exactMatches = append(exactMatches, &users[i])
+			continue
+		}
+
+		// Try partial match (substring) - but only if not an exact match
+		if strings.Contains(userNameLower, nameLower) {
+			partialMatches = append(partialMatches, &users[i])
+		}
+	}
+
+	// Return exact matches if any, otherwise return partial matches
+	if len(exactMatches) > 0 {
+		return exactMatches
+	}
+	return partialMatches
+}
+
+// formatMultipleMatchesError formats an error message showing all matching users with their numbers.
+// Used when multiple users match an identifier.
+func formatMultipleMatchesError(identifier string, matches []*UserInfo) error {
+	if len(matches) == 0 {
+		return fmt.Errorf("no users match '%s'", identifier)
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("multiple users match '%s':", identifier))
+	for _, match := range matches {
+		display := formatUserDisplay(*match)
+		lines = append(lines, fmt.Sprintf("  %d. %s", match.Number, display))
+	}
+	lines = append(lines, "Use the numeric identifier to select a specific user.")
+
+	// Use %s format to avoid linter warning about non-constant format string
+	return fmt.Errorf("%s", strings.Join(lines, "\n"))
 }

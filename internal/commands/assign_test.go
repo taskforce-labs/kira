@@ -511,3 +511,297 @@ created: 2024-01-01
 		assert.Contains(t, err.Error(), "no work items to resolve")
 	})
 }
+
+// Phase 3: User Collection & Resolution Tests
+
+func TestCollectUsersForAssignment(t *testing.T) {
+	t.Run("collects users with default config", func(t *testing.T) {
+		cfg := &config.DefaultConfig
+		// Disable git history for this test to avoid git repository requirement
+		useGitHistory := false
+		cfg.Users.UseGitHistory = &useGitHistory
+		users, err := collectUsersForAssignment(cfg)
+		// May return empty if no saved users, but should not error
+		assert.NoError(t, err)
+		assert.NotNil(t, users)
+	})
+
+	t.Run("collects users with saved users from config", func(t *testing.T) {
+		cfg := &config.Config{
+			Users: config.UsersConfig{
+				SavedUsers: []config.SavedUser{
+					{Email: "user1@example.com", Name: "User One"},
+					{Email: "user2@example.com", Name: "User Two"},
+				},
+			},
+		}
+		useGitHistory := false
+		cfg.Users.UseGitHistory = &useGitHistory
+
+		users, err := collectUsersForAssignment(cfg)
+		require.NoError(t, err)
+		assert.Len(t, users, 2)
+		assert.Equal(t, "user1@example.com", users[0].Email)
+		assert.Equal(t, "User One", users[0].Name)
+		assert.Equal(t, 1, users[0].Number)
+		assert.Equal(t, "user2@example.com", users[1].Email)
+		assert.Equal(t, "User Two", users[1].Name)
+		assert.Equal(t, 2, users[1].Number)
+	})
+}
+
+func TestFindUserByNumber(t *testing.T) {
+	users := []UserInfo{
+		{Email: "user1@example.com", Name: "User One", Number: 1},
+		{Email: "user2@example.com", Name: "User Two", Number: 2},
+		{Email: "user3@example.com", Name: "User Three", Number: 3},
+	}
+
+	t.Run("finds user by valid number", func(t *testing.T) {
+		user, err := findUserByNumber(1, users)
+		require.NoError(t, err)
+		assert.Equal(t, "user1@example.com", user.Email)
+		assert.Equal(t, "User One", user.Name)
+
+		user, err = findUserByNumber(2, users)
+		require.NoError(t, err)
+		assert.Equal(t, "user2@example.com", user.Email)
+
+		user, err = findUserByNumber(3, users)
+		require.NoError(t, err)
+		assert.Equal(t, "user3@example.com", user.Email)
+	})
+
+	t.Run("returns error for number too low", func(t *testing.T) {
+		_, err := findUserByNumber(0, users)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "user number 0 not found")
+		assert.Contains(t, err.Error(), "Available numbers: 1-3")
+	})
+
+	t.Run("returns error for number too high", func(t *testing.T) {
+		_, err := findUserByNumber(4, users)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "user number 4 not found")
+		assert.Contains(t, err.Error(), "Available numbers: 1-3")
+	})
+
+	t.Run("returns error for empty users list", func(t *testing.T) {
+		_, err := findUserByNumber(1, []UserInfo{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no users available")
+	})
+}
+
+func TestFindUsersByEmail(t *testing.T) {
+	users := []UserInfo{
+		{Email: "alice@example.com", Name: "Alice", Number: 1},
+		{Email: "bob@example.com", Name: "Bob", Number: 2},
+		{Email: "charlie@test.com", Name: "Charlie", Number: 3},
+		{Email: "alice.smith@example.com", Name: "Alice Smith", Number: 4},
+	}
+
+	t.Run("finds user by exact email match (case-insensitive)", func(t *testing.T) {
+		matches := findUsersByEmail("alice@example.com", users)
+		require.Len(t, matches, 1)
+		assert.Equal(t, "alice@example.com", matches[0].Email)
+
+		matches = findUsersByEmail("ALICE@EXAMPLE.COM", users)
+		require.Len(t, matches, 1)
+		assert.Equal(t, "alice@example.com", matches[0].Email)
+	})
+
+	t.Run("finds users by partial email match (domain)", func(t *testing.T) {
+		matches := findUsersByEmail("@example.com", users)
+		require.Len(t, matches, 3) // alice, bob, and alice.smith all match
+		emails := []string{matches[0].Email, matches[1].Email, matches[2].Email}
+		assert.Contains(t, emails, "alice@example.com")
+		assert.Contains(t, emails, "bob@example.com")
+		assert.Contains(t, emails, "alice.smith@example.com")
+	})
+
+	t.Run("finds users by partial email match (substring)", func(t *testing.T) {
+		matches := findUsersByEmail("alice", users)
+		require.Len(t, matches, 2)
+		emails := []string{matches[0].Email, matches[1].Email}
+		assert.Contains(t, emails, "alice@example.com")
+		assert.Contains(t, emails, "alice.smith@example.com")
+	})
+
+	t.Run("returns empty slice for no matches", func(t *testing.T) {
+		matches := findUsersByEmail("nonexistent@example.com", users)
+		assert.Empty(t, matches)
+	})
+
+	t.Run("returns empty slice for empty identifier", func(t *testing.T) {
+		matches := findUsersByEmail("", users)
+		assert.Nil(t, matches)
+	})
+}
+
+func TestFindUsersByName(t *testing.T) {
+	users := []UserInfo{
+		{Email: "alice@example.com", Name: "Alice", Number: 1},
+		{Email: "bob@example.com", Name: "Bob", Number: 2},
+		{Email: "charlie@example.com", Name: "Charlie Brown", Number: 3},
+		{Email: "alice.smith@example.com", Name: "Alice Smith", Number: 4},
+		{Email: "no.name@example.com", Name: "", Number: 5},
+	}
+
+	t.Run("finds user by exact name match (case-insensitive)", func(t *testing.T) {
+		matches := findUsersByName("Alice", users)
+		require.Len(t, matches, 1)
+		assert.Equal(t, "Alice", matches[0].Name)
+
+		matches = findUsersByName("ALICE", users)
+		require.Len(t, matches, 1)
+		assert.Equal(t, "Alice", matches[0].Name)
+	})
+
+	t.Run("finds users by partial name match", func(t *testing.T) {
+		// Use "Smith" as a partial match that will match "Alice Smith" but not exact "Alice"
+		matches := findUsersByName("Smith", users)
+		require.Len(t, matches, 1)
+		assert.Equal(t, "Alice Smith", matches[0].Name)
+	})
+
+	t.Run("finds user by partial name match (substring)", func(t *testing.T) {
+		matches := findUsersByName("Brown", users)
+		require.Len(t, matches, 1)
+		assert.Equal(t, "Charlie Brown", matches[0].Name)
+	})
+
+	t.Run("returns empty slice for no matches", func(t *testing.T) {
+		matches := findUsersByName("Nonexistent", users)
+		assert.Empty(t, matches)
+	})
+
+	t.Run("returns empty slice for empty identifier", func(t *testing.T) {
+		matches := findUsersByName("", users)
+		assert.Nil(t, matches)
+	})
+
+	t.Run("ignores users without names", func(t *testing.T) {
+		matches := findUsersByName("no.name", users)
+		assert.Empty(t, matches)
+	})
+}
+
+func TestResolveUserIdentifier(t *testing.T) {
+	users := []UserInfo{
+		{Email: "alice@example.com", Name: "Alice", Number: 1},
+		{Email: "bob@example.com", Name: "Bob", Number: 2},
+		{Email: "charlie@test.com", Name: "Charlie", Number: 3},
+		{Email: "alice.smith@example.com", Name: "Alice Smith", Number: 4},
+	}
+
+	t.Run("resolves by numeric identifier", func(t *testing.T) {
+		user, err := resolveUserIdentifier("1", users)
+		require.NoError(t, err)
+		assert.Equal(t, "alice@example.com", user.Email)
+
+		user, err = resolveUserIdentifier("2", users)
+		require.NoError(t, err)
+		assert.Equal(t, "bob@example.com", user.Email)
+	})
+
+	t.Run("resolves by exact email", func(t *testing.T) {
+		user, err := resolveUserIdentifier("alice@example.com", users)
+		require.NoError(t, err)
+		assert.Equal(t, "alice@example.com", user.Email)
+
+		user, err = resolveUserIdentifier("ALICE@EXAMPLE.COM", users)
+		require.NoError(t, err)
+		assert.Equal(t, "alice@example.com", user.Email)
+	})
+
+	t.Run("resolves by partial email when unique", func(t *testing.T) {
+		user, err := resolveUserIdentifier("@test.com", users)
+		require.NoError(t, err)
+		assert.Equal(t, "charlie@test.com", user.Email)
+	})
+
+	t.Run("resolves by exact name", func(t *testing.T) {
+		user, err := resolveUserIdentifier("Bob", users)
+		require.NoError(t, err)
+		assert.Equal(t, "bob@example.com", user.Email)
+
+		user, err = resolveUserIdentifier("BOB", users)
+		require.NoError(t, err)
+		assert.Equal(t, "bob@example.com", user.Email)
+	})
+
+	t.Run("resolves by partial name when unique", func(t *testing.T) {
+		user, err := resolveUserIdentifier("Charlie", users)
+		require.NoError(t, err)
+		assert.Equal(t, "charlie@test.com", user.Email)
+	})
+
+	t.Run("returns error for no matches", func(t *testing.T) {
+		_, err := resolveUserIdentifier("nonexistent", users)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "user 'nonexistent' not found")
+		assert.Contains(t, err.Error(), "Run 'kira users' to see available users")
+	})
+
+	t.Run("returns error for multiple email matches", func(t *testing.T) {
+		_, err := resolveUserIdentifier("@example.com", users)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "multiple users match '@example.com'")
+		assert.Contains(t, err.Error(), "1. Alice <alice@example.com>")
+		assert.Contains(t, err.Error(), "Use the numeric identifier to select a specific user")
+	})
+
+	t.Run("returns error for multiple name matches", func(t *testing.T) {
+		_, err := resolveUserIdentifier("Alice", users)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "multiple users match 'Alice'")
+		assert.Contains(t, err.Error(), "Use the numeric identifier to select a specific user")
+	})
+
+	t.Run("prioritizes numeric over email", func(t *testing.T) {
+		// If identifier could be both numeric and email-like, numeric takes priority
+		// This is tested implicitly - if "1" is provided, it resolves as number 1, not email
+		user, err := resolveUserIdentifier("1", users)
+		require.NoError(t, err)
+		assert.Equal(t, 1, user.Number)
+	})
+
+	t.Run("prioritizes email over name", func(t *testing.T) {
+		// Create a user where name matches another user's email
+		testUsers := []UserInfo{
+			{Email: "bob@example.com", Name: "Bob", Number: 1},
+			{Email: "alice@example.com", Name: "bob@example.com", Number: 2}, // Name matches email
+		}
+		// "bob@example.com" should match as email first, not as name
+		user, err := resolveUserIdentifier("bob@example.com", testUsers)
+		require.NoError(t, err)
+		assert.Equal(t, "bob@example.com", user.Email)
+		assert.Equal(t, "Bob", user.Name) // Should match the first user by email
+	})
+}
+
+func TestFormatMultipleMatchesError(t *testing.T) {
+	users := []UserInfo{
+		{Email: "alice@example.com", Name: "Alice", Number: 1},
+		{Email: "alice.smith@example.com", Name: "Alice Smith", Number: 2},
+	}
+
+	t.Run("formats error with all matches", func(t *testing.T) {
+		matches := []*UserInfo{&users[0], &users[1]}
+		err := formatMultipleMatchesError("Alice", matches)
+		require.Error(t, err)
+
+		errMsg := err.Error()
+		assert.Contains(t, errMsg, "multiple users match 'Alice'")
+		assert.Contains(t, errMsg, "1. Alice <alice@example.com>")
+		assert.Contains(t, errMsg, "2. Alice Smith <alice.smith@example.com>")
+		assert.Contains(t, errMsg, "Use the numeric identifier to select a specific user")
+	})
+
+	t.Run("handles empty matches gracefully", func(t *testing.T) {
+		err := formatMultipleMatchesError("test", []*UserInfo{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no users match 'test'")
+	})
+}
