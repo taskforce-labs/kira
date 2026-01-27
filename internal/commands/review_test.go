@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kira/internal/config"
+	gh "kira/internal/github"
 	"kira/internal/validation"
 )
 
@@ -1872,4 +1873,71 @@ func TestGeneratePRDescription(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "configuration cannot be nil")
 	})
+}
+
+// TestFindExistingPR tests the findExistingPR function
+// Note: These tests verify function structure and error handling.
+// Actual API calls with real GitHub tokens should be tested in integration tests.
+func TestFindExistingPR(t *testing.T) {
+	t.Run("returns error for nil client", func(t *testing.T) {
+		_, err := findExistingPR(nil, "owner", "repo", "branch")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "GitHub client cannot be nil")
+	})
+
+	t.Run("returns error for empty owner", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := findExistingPR(client, "", "repo", "branch")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "owner cannot be empty")
+	})
+
+	t.Run("returns error for empty repo", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := findExistingPR(client, "owner", "", "branch")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "repo cannot be empty")
+	})
+
+	t.Run("returns error for empty branch name", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := findExistingPR(client, "owner", "repo", "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "branch name cannot be empty")
+	})
+
+	t.Run("returns error for whitespace-only owner", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := findExistingPR(client, "   ", "repo", "branch")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "owner cannot be empty")
+	})
+
+	t.Run("returns error for whitespace-only repo", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := findExistingPR(client, "owner", "   ", "branch")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "repo cannot be empty")
+	})
+
+	t.Run("returns error for whitespace-only branch name", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := findExistingPR(client, "owner", "repo", "   ")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "branch name cannot be empty")
+	})
+
+	// Note: Tests for actual API calls (finding PRs, handling API errors, etc.)
+	// should be done in integration tests with a real GitHub token and test repository.
+	// The unit tests above verify:
+	// 1. Input validation (nil client, empty parameters)
+	// 2. Error handling structure
+	// 3. Function signature and return types
+	//
+	// Integration tests should verify:
+	// - Finding existing PR by branch name
+	// - Returning nil when no PR exists (not an error)
+	// - Handling API errors (authentication, network, rate limiting)
+	// - Handling draft PRs correctly
+	// - Filtering by owner to handle forks correctly
 }

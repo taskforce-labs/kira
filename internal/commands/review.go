@@ -768,3 +768,97 @@ func generatePRDescription(workItem *validation.WorkItem, workItemPath string, c
 
 	return result, nil
 }
+
+// findExistingPR checks if a pull request already exists for the given branch.
+// It searches for open PRs where the head branch matches the specified branch name.
+// Returns the PR if found, nil if not found (not an error condition).
+// Returns an error only for API failures (network errors, authentication errors, etc.).
+func findExistingPR(client *github.Client, owner, repo, branchName string) (*github.PullRequest, error) {
+	if err := validateFindExistingPRParams(client, owner, repo, branchName); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Use Head parameter to filter PRs by branch (format: "owner:branch-name")
+	// This is more efficient than fetching all PRs and filtering client-side
+	head := fmt.Sprintf("%s:%s", owner, branchName)
+	opts := &github.PullRequestListOptions{
+		State: "open",
+		Head:  head,
+		ListOptions: github.ListOptions{
+			PerPage: 100, // GitHub API default, but explicit for clarity
+		},
+	}
+
+	prs, resp, err := client.PullRequests.List(ctx, owner, repo, opts)
+	if err != nil {
+		return nil, handlePRListError(err, resp, owner, repo)
+	}
+
+	// If no PRs found, return nil (not an error)
+	if len(prs) == 0 {
+		return nil, nil
+	}
+
+	// Find PR where head branch exactly matches (handle potential forks)
+	matchedPR := findMatchingPR(prs, owner, branchName)
+	return matchedPR, nil
+}
+
+// validateFindExistingPRParams validates the parameters for findExistingPR.
+func validateFindExistingPRParams(client *github.Client, owner, repo, branchName string) error {
+	if client == nil {
+		return fmt.Errorf("GitHub client cannot be nil")
+	}
+	if strings.TrimSpace(owner) == "" {
+		return fmt.Errorf("owner cannot be empty")
+	}
+	if strings.TrimSpace(repo) == "" {
+		return fmt.Errorf("repo cannot be empty")
+	}
+	if strings.TrimSpace(branchName) == "" {
+		return fmt.Errorf("branch name cannot be empty")
+	}
+	return nil
+}
+
+// handlePRListError processes errors from the GitHub API PR list call.
+func handlePRListError(err error, resp *github.Response, owner, repo string) error {
+	if resp == nil {
+		return fmt.Errorf("failed to check for existing pull request: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("failed to check for existing pull request: authentication failed. Verify GitHub token has 'repo' scope")
+	case http.StatusNotFound:
+		return fmt.Errorf("failed to check for existing pull request: repository '%s/%s' not found", owner, repo)
+	case http.StatusForbidden:
+		return fmt.Errorf("failed to check for existing pull request: access forbidden. Verify GitHub token has 'repo' scope")
+	default:
+		return fmt.Errorf("failed to check for existing pull request: %w", err)
+	}
+}
+
+// findMatchingPR finds a PR in the list where the head branch matches the specified branch and owner.
+func findMatchingPR(prs []*github.PullRequest, owner, branchName string) *github.PullRequest {
+	for _, pr := range prs {
+		if matchesBranchAndOwner(pr, owner, branchName) {
+			return pr
+		}
+	}
+	return nil
+}
+
+// matchesBranchAndOwner checks if a PR's head branch matches the specified branch and owner.
+func matchesBranchAndOwner(pr *github.PullRequest, owner, branchName string) bool {
+	if pr.Head == nil || pr.Head.Ref == nil || *pr.Head.Ref != branchName {
+		return false
+	}
+	if pr.Head.Repo == nil || pr.Head.Repo.Owner == nil || pr.Head.Repo.Owner.Login == nil {
+		return false
+	}
+	return *pr.Head.Repo.Owner.Login == owner
+}
