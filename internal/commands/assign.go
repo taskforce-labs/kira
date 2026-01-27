@@ -131,9 +131,15 @@ func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flag
 			continue
 		}
 
-		// For append mode, we'll handle in Phase 6
+		// For append mode, handle in Phase 6
 		if flags.Append {
-			// Phase 6 will handle this
+			if resolvedUser == nil {
+				return fmt.Errorf("user identifier is required for assignment")
+			}
+
+			if err := updateWorkItemFieldAppend(workItemPath, flags.Field, resolvedUser.Email); err != nil {
+				return fmt.Errorf("failed to update work item %s: %w", workItemPath, err)
+			}
 			continue
 		}
 
@@ -855,6 +861,112 @@ func updateWorkItemField(
 
 	// Update field value (switch mode - replaces existing)
 	updateFieldValue(frontMatter, fieldName, userEmail)
+
+	// Update timestamp
+	updateTimestamp(frontMatter)
+
+	// Write back to file
+	if err := writeWorkItemFrontMatter(filePath, frontMatter, bodyLines); err != nil {
+		return fmt.Errorf("failed to write work item: %w", err)
+	}
+
+	return nil
+}
+
+// Phase 6: Append Mode Logic
+
+// appendToField appends a user email to a field in the front matter (append mode).
+// It handles:
+// - Missing fields: creates field with the new user
+// - Empty string fields: sets to the new user
+// - Single string values: converts to array and appends
+// - Array values ([]string or []interface{}): appends if not duplicate
+func appendToField(
+	frontMatter map[string]interface{},
+	fieldName string,
+	userEmail string,
+) {
+	if frontMatter == nil {
+		frontMatter = make(map[string]interface{})
+	}
+
+	currentValue, exists := frontMatter[fieldName]
+
+	// If field doesn't exist, create it with the new user
+	if !exists {
+		frontMatter[fieldName] = userEmail
+		return
+	}
+
+	// If field is empty string, set to the new user
+	if str, ok := currentValue.(string); ok {
+		if str == "" {
+			frontMatter[fieldName] = userEmail
+			return
+		}
+		// Convert single string to array
+		frontMatter[fieldName] = []string{str, userEmail}
+		return
+	}
+
+	// If field is []string, append if not duplicate
+	if arr, ok := currentValue.([]string); ok {
+		// Check for duplicates
+		for _, existing := range arr {
+			if existing == userEmail {
+				return // Already exists, don't add duplicate
+			}
+		}
+		frontMatter[fieldName] = append(arr, userEmail)
+		return
+	}
+
+	// If field is []interface{}, convert to []string and append if not duplicate
+	if arr, ok := currentValue.([]interface{}); ok {
+		// Convert []interface{} to []string
+		strArr := make([]string, 0, len(arr))
+		for _, item := range arr {
+			// Convert each item to string
+			strItem := fmt.Sprintf("%v", item)
+			strArr = append(strArr, strItem)
+		}
+		// Check for duplicates
+		for _, existing := range strArr {
+			if existing == userEmail {
+				// Already exists, convert to []string but don't add duplicate
+				frontMatter[fieldName] = strArr
+				return
+			}
+		}
+		// Append new user (no duplicate found)
+		frontMatter[fieldName] = append(strArr, userEmail)
+		return
+	}
+
+	// For other types, convert to string and create array
+	// This handles edge cases like numeric or boolean values
+	strValue := fmt.Sprintf("%v", currentValue)
+	if strValue == userEmail {
+		return // Already matches, don't create duplicate
+	}
+	frontMatter[fieldName] = []string{strValue, userEmail}
+}
+
+// updateWorkItemFieldAppend updates a field in a work item's front matter (append mode).
+// It reads the file, appends to the field, updates the timestamp, and writes the file back.
+func updateWorkItemFieldAppend(
+	filePath string,
+	fieldName string,
+	userEmail string,
+) error {
+	// Parse front matter and body
+	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse work item: %w", err)
+	}
+
+	// Append to field value (append mode - adds to existing)
+	appendToField(frontMatter, fieldName, userEmail)
 
 	// Update timestamp
 	updateTimestamp(frontMatter)
