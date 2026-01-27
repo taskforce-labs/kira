@@ -1941,3 +1941,112 @@ func TestFindExistingPR(t *testing.T) {
 	// - Handling draft PRs correctly
 	// - Filtering by owner to handle forks correctly
 }
+
+// TestCreateGitHubPR tests the createGitHubPR function
+// Note: These tests verify function structure and error handling.
+// Actual API calls with real GitHub tokens should be tested in integration tests.
+func TestCreateGitHubPR(t *testing.T) {
+	t.Run("returns error for nil client", func(t *testing.T) {
+		_, err := createGitHubPR(nil, "owner", "repo", "branch", "main", "Title", "Description", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "GitHub client cannot be nil")
+	})
+
+	t.Run("returns error for empty owner", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := createGitHubPR(client, "", "repo", "branch", "main", "Title", "Description", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "owner cannot be empty")
+	})
+
+	t.Run("returns error for empty repo", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := createGitHubPR(client, "owner", "", "branch", "main", "Title", "Description", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "repo cannot be empty")
+	})
+
+	t.Run("returns error for empty branch name", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := createGitHubPR(client, "owner", "repo", "", "main", "Title", "Description", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "branch name cannot be empty")
+	})
+
+	t.Run("returns error for empty base branch", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := createGitHubPR(client, "owner", "repo", "branch", "", "Title", "Description", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "base branch cannot be empty")
+	})
+
+	t.Run("returns error for empty title", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := createGitHubPR(client, "owner", "repo", "branch", "main", "", "Description", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "PR title cannot be empty")
+	})
+
+	t.Run("returns error for whitespace-only owner", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := createGitHubPR(client, "   ", "repo", "branch", "main", "Title", "Description", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "owner cannot be empty")
+	})
+
+	t.Run("returns error for whitespace-only repo", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := createGitHubPR(client, "owner", "   ", "branch", "main", "Title", "Description", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "repo cannot be empty")
+	})
+
+	t.Run("returns error for whitespace-only branch name", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := createGitHubPR(client, "owner", "repo", "   ", "main", "Title", "Description", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "branch name cannot be empty")
+	})
+
+	t.Run("returns error for whitespace-only base branch", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := createGitHubPR(client, "owner", "repo", "branch", "   ", "Title", "Description", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "base branch cannot be empty")
+	})
+
+	t.Run("returns error for whitespace-only title", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		_, err := createGitHubPR(client, "owner", "repo", "branch", "main", "   ", "Description", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "PR title cannot be empty")
+	})
+
+	t.Run("accepts empty description", func(t *testing.T) {
+		// Empty description is allowed by GitHub, so validation should pass
+		// The actual API call will fail without a real token, but validation should succeed
+		client, _ := gh.CreateGitHubClient("test-token")
+		// This will fail at API call, but not at validation
+		_, err := createGitHubPR(client, "owner", "repo", "branch", "main", "Title", "", true)
+		// Error should be from API call, not validation
+		require.Error(t, err)
+		// Should not be a validation error
+		assert.NotContains(t, err.Error(), "cannot be empty")
+	})
+
+	// Note: Tests for actual API calls (creating PRs, handling API errors, etc.)
+	// should be done in integration tests with a real GitHub token and test repository.
+	// The unit tests above verify:
+	// 1. Input validation (nil client, empty parameters, whitespace-only parameters)
+	// 2. Error handling structure
+	// 3. Function signature and return types
+	// 4. Empty description is allowed (validation passes)
+	//
+	// Integration tests should verify:
+	// - Creating draft PR successfully
+	// - Creating ready PR successfully (isDraft=false)
+	// - Returning PR with correct fields (title, body, head branch, base branch, draft status, HTML URL)
+	// - Handling API errors (401 Unauthorized, 403 Forbidden, 404 Not Found, 422 Unprocessable Entity)
+	// - Handling network errors
+	// - Handling validation errors (branch doesn't exist, PR already exists)
+}

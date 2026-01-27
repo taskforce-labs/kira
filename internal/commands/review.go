@@ -862,3 +862,82 @@ func matchesBranchAndOwner(pr *github.PullRequest, owner, branchName string) boo
 	}
 	return *pr.Head.Repo.Owner.Login == owner
 }
+
+// createGitHubPR creates a new pull request on GitHub using the GitHub API.
+// It sets the head branch, base branch, title, description, and draft status.
+// Returns the created PR with URL or an error if creation fails.
+func createGitHubPR(client *github.Client, owner, repo, branchName, baseBranch, title, description string, isDraft bool) (*github.PullRequest, error) {
+	if err := validateCreatePRParams(client, owner, repo, branchName, baseBranch, title); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Create the new pull request struct
+	newPR := &github.NewPullRequest{
+		Title: &title,
+		Head:  &branchName,
+		Base:  &baseBranch,
+		Draft: &isDraft,
+	}
+
+	// Set body/description if provided (GitHub allows empty descriptions)
+	if description != "" {
+		newPR.Body = &description
+	}
+
+	// Create the PR via GitHub API
+	pr, resp, err := client.PullRequests.Create(ctx, owner, repo, newPR)
+	if err != nil {
+		return nil, handlePRCreateError(err, resp, owner, repo, branchName, baseBranch)
+	}
+
+	return pr, nil
+}
+
+// validateCreatePRParams validates all input parameters for createGitHubPR.
+func validateCreatePRParams(client *github.Client, owner, repo, branchName, baseBranch, title string) error {
+	if client == nil {
+		return fmt.Errorf("GitHub client cannot be nil")
+	}
+	if strings.TrimSpace(owner) == "" {
+		return fmt.Errorf("owner cannot be empty")
+	}
+	if strings.TrimSpace(repo) == "" {
+		return fmt.Errorf("repo cannot be empty")
+	}
+	if strings.TrimSpace(branchName) == "" {
+		return fmt.Errorf("branch name cannot be empty")
+	}
+	if strings.TrimSpace(baseBranch) == "" {
+		return fmt.Errorf("base branch cannot be empty")
+	}
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("PR title cannot be empty")
+	}
+	return nil
+}
+
+// handlePRCreateError processes errors from the GitHub API PR creation call.
+// It provides user-friendly error messages based on HTTP status codes.
+func handlePRCreateError(err error, resp *github.Response, owner, repo, branchName, baseBranch string) error {
+	if resp == nil {
+		return fmt.Errorf("failed to create pull request: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("failed to create pull request: authentication failed. Verify GitHub token has 'repo' scope")
+	case http.StatusForbidden:
+		return fmt.Errorf("failed to create pull request: access forbidden. Verify GitHub token has 'repo' scope")
+	case http.StatusNotFound:
+		return fmt.Errorf("failed to create pull request: repository '%s/%s' not found", owner, repo)
+	case http.StatusUnprocessableEntity:
+		// 422 can mean various validation errors
+		// Common cases: branch doesn't exist, PR already exists, invalid branch names
+		return fmt.Errorf("failed to create pull request: validation error. Check that branch '%s' exists and base branch '%s' is valid", branchName, baseBranch)
+	default:
+		return fmt.Errorf("failed to create pull request: %w", err)
+	}
+}
