@@ -195,12 +195,12 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add append mode logic)
 
 **Acceptance Criteria**:
-- [ ] Appends to array fields correctly
-- [ ] Converts single value to array when needed
-- [ ] Prevents duplicate entries in arrays
-- [ ] Creates field if it doesn't exist (append mode)
-- [ ] Updates timestamp correctly
-- [ ] Preserves other front matter fields
+- [x] Appends to array fields correctly
+- [x] Converts single value to array when needed
+- [x] Prevents duplicate entries in arrays
+- [x] Creates field if it doesn't exist (append mode)
+- [x] Updates timestamp correctly
+- [x] Preserves other front matter fields
 
 **Deliverable**: Append mode working
 
