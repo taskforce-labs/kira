@@ -119,9 +119,11 @@ func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flag
 
 	// Process each work item
 	for _, workItemPath := range workItemPaths {
-		// For unassign mode, we'll handle in Phase 7
+		// For unassign mode, remove the field
 		if flags.Unassign {
-			// Phase 7 will handle this
+			if err := updateWorkItemFieldUnassign(workItemPath, flags.Field); err != nil {
+				return fmt.Errorf("failed to unassign work item %s: %w", workItemPath, err)
+			}
 			continue
 		}
 
@@ -950,6 +952,48 @@ func appendToField(
 		return // Already matches, don't create duplicate
 	}
 	frontMatter[fieldName] = []string{strValue, userEmail}
+}
+
+// Phase 7: Unassign Logic
+
+// clearField removes a field from the front matter map.
+// Returns true if the field existed before deletion, false otherwise.
+func clearField(frontMatter map[string]interface{}, fieldName string) (existed bool) {
+	if frontMatter == nil {
+		return false
+	}
+
+	_, existed = frontMatter[fieldName]
+	if existed {
+		delete(frontMatter, fieldName)
+	}
+	return existed
+}
+
+// updateWorkItemFieldUnassign removes a field from a work item's front matter.
+// It reads the file, removes the field, updates the timestamp, and writes the file back.
+func updateWorkItemFieldUnassign(
+	filePath string,
+	fieldName string,
+) error {
+	// Parse front matter and body
+	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse work item: %w", err)
+	}
+
+	// Remove field (unassign mode - deletes the field)
+	clearField(frontMatter, fieldName)
+
+	// Update timestamp (always update, even if field didn't exist)
+	updateTimestamp(frontMatter)
+
+	// Write back to file
+	if err := writeWorkItemFrontMatter(filePath, frontMatter, bodyLines); err != nil {
+		return fmt.Errorf("failed to write work item: %w", err)
+	}
+
+	return nil
 }
 
 // updateWorkItemFieldAppend updates a field in a work item's front matter (append mode).

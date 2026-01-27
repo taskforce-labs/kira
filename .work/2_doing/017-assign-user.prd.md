@@ -219,11 +219,11 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add unassign logic)
 
 **Acceptance Criteria**:
-- [ ] Clears field value correctly
-- [ ] Works with default `assigned` field
-- [ ] Works with custom fields via `--field`
-- [ ] Updates timestamp
-- [ ] Handles non-existent fields gracefully
+- [x] Clears field value correctly
+- [x] Works with default `assigned` field
+- [x] Works with custom fields via `--field`
+- [x] Updates timestamp
+- [x] Handles non-existent fields gracefully
 
 **Deliverable**: Unassign functionality working
 
