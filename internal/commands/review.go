@@ -941,3 +941,107 @@ func handlePRCreateError(err error, resp *github.Response, owner, repo, branchNa
 		return fmt.Errorf("failed to create pull request: %w", err)
 	}
 }
+
+// extractTagsFromWorkItem extracts tags from a work item's Fields map.
+// It handles different tag formats (array of strings, array of interface{}, etc.)
+// and returns an empty slice if tags field doesn't exist or is invalid.
+func extractTagsFromWorkItem(workItem *validation.WorkItem) []string {
+	if workItem == nil || workItem.Fields == nil {
+		return []string{}
+	}
+
+	tagsValue, exists := workItem.Fields["tags"]
+	if !exists {
+		return []string{}
+	}
+
+	var tags []string
+
+	switch v := tagsValue.(type) {
+	case []string:
+		// Already a slice of strings
+		tags = v
+	case []interface{}:
+		// Convert []interface{} to []string (handles both []interface{} and []any)
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				tags = append(tags, str)
+			}
+		}
+	default:
+		// Unknown type, return empty slice
+		return []string{}
+	}
+
+	// Filter out empty strings and trim whitespace
+	var result []string
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+
+	return result
+}
+
+// addPRLabels adds labels to a GitHub pull request based on work item tags.
+// It uses a 1:1 mapping (tag → label). If a label doesn't exist on GitHub,
+// it logs a warning and skips it (doesn't fail the operation).
+func addPRLabels(client *github.Client, owner, repo string, prNumber int, tags []string) error {
+	if err := validateAddPRLabelsParams(client, owner, repo, prNumber, tags); err != nil {
+		return err
+	}
+
+	if len(tags) == 0 {
+		// No tags to add, nothing to do
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Add labels one by one to handle individual failures gracefully
+	for _, tag := range tags {
+		// Use the tag as the label name (1:1 mapping)
+		label := tag
+		labels := []string{label}
+
+		_, resp, err := client.Issues.AddLabelsToIssue(ctx, owner, repo, prNumber, labels)
+		if err != nil {
+			// Handle 404 errors (label doesn't exist) by logging warning and continuing
+			if resp != nil && resp.StatusCode == http.StatusNotFound {
+				// Label doesn't exist on GitHub - log warning and skip
+				_, _ = fmt.Fprintf(os.Stderr, "Warning: label '%s' does not exist on GitHub repository '%s/%s'. Skipping label.\n", label, owner, repo)
+				continue
+			}
+
+			// For other errors, log but don't fail the entire operation
+			// This allows other labels to be added even if one fails
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: failed to add label '%s' to PR #%d: %v. Continuing with other labels.\n", label, prNumber, err)
+			continue
+		}
+	}
+
+	return nil
+}
+
+// validateAddPRLabelsParams validates all input parameters for addPRLabels.
+func validateAddPRLabelsParams(client *github.Client, owner, repo string, prNumber int, tags []string) error {
+	if client == nil {
+		return fmt.Errorf("GitHub client cannot be nil")
+	}
+	if strings.TrimSpace(owner) == "" {
+		return fmt.Errorf("owner cannot be empty")
+	}
+	if strings.TrimSpace(repo) == "" {
+		return fmt.Errorf("repo cannot be empty")
+	}
+	if prNumber <= 0 {
+		return fmt.Errorf("PR number must be greater than 0")
+	}
+	if tags == nil {
+		return fmt.Errorf("tags cannot be nil")
+	}
+	return nil
+}

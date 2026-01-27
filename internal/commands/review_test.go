@@ -2050,3 +2050,186 @@ func TestCreateGitHubPR(t *testing.T) {
 	// - Handling network errors
 	// - Handling validation errors (branch doesn't exist, PR already exists)
 }
+
+// TestExtractTagsFromWorkItem tests the extractTagsFromWorkItem function
+func TestExtractTagsFromWorkItem(t *testing.T) {
+	t.Run("extracts tags from []string format", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			Fields: map[string]interface{}{
+				"tags": []string{"github", "notifications", "review"},
+			},
+		}
+
+		tags := extractTagsFromWorkItem(workItem)
+		require.Len(t, tags, 3)
+		assert.Contains(t, tags, "github")
+		assert.Contains(t, tags, "notifications")
+		assert.Contains(t, tags, "review")
+	})
+
+	t.Run("extracts tags from []interface{} format", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			Fields: map[string]interface{}{
+				"tags": []interface{}{"github", "notifications", "review"},
+			},
+		}
+
+		tags := extractTagsFromWorkItem(workItem)
+		require.Len(t, tags, 3)
+		assert.Contains(t, tags, "github")
+		assert.Contains(t, tags, "notifications")
+		assert.Contains(t, tags, "review")
+	})
+
+	t.Run("returns empty slice when tags field doesn't exist", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			Fields: map[string]interface{}{
+				"other_field": "value",
+			},
+		}
+
+		tags := extractTagsFromWorkItem(workItem)
+		assert.Empty(t, tags)
+	})
+
+	t.Run("returns empty slice when Fields is nil", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			Fields: nil,
+		}
+
+		tags := extractTagsFromWorkItem(workItem)
+		assert.Empty(t, tags)
+	})
+
+	t.Run("returns empty slice when workItem is nil", func(t *testing.T) {
+		tags := extractTagsFromWorkItem(nil)
+		assert.Empty(t, tags)
+	})
+
+	t.Run("filters out empty strings and trims whitespace", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			Fields: map[string]interface{}{
+				"tags": []string{"  github  ", "", "notifications", "  ", "review"},
+			},
+		}
+
+		tags := extractTagsFromWorkItem(workItem)
+		require.Len(t, tags, 3)
+		assert.Contains(t, tags, "github")
+		assert.Contains(t, tags, "notifications")
+		assert.Contains(t, tags, "review")
+		// Verify whitespace was trimmed
+		for _, tag := range tags {
+			assert.Equal(t, strings.TrimSpace(tag), tag, "tag should be trimmed: %q", tag)
+		}
+	})
+
+	t.Run("handles mixed string and non-string types in []interface{}", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			Fields: map[string]interface{}{
+				"tags": []interface{}{"github", 123, "notifications", true, "review"},
+			},
+		}
+
+		tags := extractTagsFromWorkItem(workItem)
+		require.Len(t, tags, 3)
+		assert.Contains(t, tags, "github")
+		assert.Contains(t, tags, "notifications")
+		assert.Contains(t, tags, "review")
+		// Non-string types should be skipped
+		assert.NotContains(t, tags, "123")
+		assert.NotContains(t, tags, "true")
+	})
+
+	t.Run("returns empty slice for unknown tag type", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			Fields: map[string]interface{}{
+				"tags": "not-an-array",
+			},
+		}
+
+		tags := extractTagsFromWorkItem(workItem)
+		assert.Empty(t, tags)
+	})
+}
+
+// TestAddPRLabels tests the addPRLabels function
+// Note: These tests verify function structure and error handling.
+// Actual API calls with real GitHub tokens should be tested in integration tests.
+func TestAddPRLabels(t *testing.T) {
+	t.Run("returns error for nil client", func(t *testing.T) {
+		err := addPRLabels(nil, "owner", "repo", 1, []string{"label1"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "GitHub client cannot be nil")
+	})
+
+	t.Run("returns error for empty owner", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		err := addPRLabels(client, "", "repo", 1, []string{"label1"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "owner cannot be empty")
+	})
+
+	t.Run("returns error for empty repo", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		err := addPRLabels(client, "owner", "", 1, []string{"label1"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "repo cannot be empty")
+	})
+
+	t.Run("returns error for invalid PR number", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		err := addPRLabels(client, "owner", "repo", 0, []string{"label1"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "PR number must be greater than 0")
+	})
+
+	t.Run("returns error for negative PR number", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		err := addPRLabels(client, "owner", "repo", -1, []string{"label1"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "PR number must be greater than 0")
+	})
+
+	t.Run("returns error for nil tags", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		err := addPRLabels(client, "owner", "repo", 1, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "tags cannot be nil")
+	})
+
+	t.Run("returns no error for empty tags", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		err := addPRLabels(client, "owner", "repo", 1, []string{})
+		assert.NoError(t, err, "empty tags should not cause an error")
+	})
+
+	t.Run("returns error for whitespace-only owner", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		err := addPRLabels(client, "   ", "repo", 1, []string{"label1"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "owner cannot be empty")
+	})
+
+	t.Run("returns error for whitespace-only repo", func(t *testing.T) {
+		client, _ := gh.CreateGitHubClient("test-token")
+		err := addPRLabels(client, "owner", "   ", 1, []string{"label1"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "repo cannot be empty")
+	})
+
+	// Note: Tests for actual API calls (adding labels, handling 404 errors, etc.)
+	// should be done in integration tests with a real GitHub token and test repository.
+	// The unit tests above verify:
+	// 1. Input validation (nil client, empty parameters, invalid PR number, nil tags)
+	// 2. Error handling structure
+	// 3. Function signature and return types
+	// 4. Empty tags array is handled gracefully
+	//
+	// Integration tests should verify:
+	// - Adding existing labels successfully
+	// - Skipping non-existent labels with warning (404 handling)
+	// - Handling other API errors gracefully (network errors, authentication errors)
+	// - Adding multiple labels in sequence
+	// - Labels are added with 1:1 mapping (tag → label)
+}
