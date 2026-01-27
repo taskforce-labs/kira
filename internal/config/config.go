@@ -492,7 +492,6 @@ func mergeWithDefaults(config *Config) {
 func mergeFieldDefaults(config *Config) {
 	if config.Fields == nil {
 		config.Fields = make(map[string]FieldConfig)
-		return
 	}
 
 	// Set default CaseSensitive to true for enum fields when not explicitly set
@@ -504,6 +503,7 @@ func mergeFieldDefaults(config *Config) {
 			config.Fields[fieldName] = fieldConfig
 		}
 	}
+	// Always merge review defaults, regardless of Fields configuration
 	mergeReviewDefaults(config)
 }
 

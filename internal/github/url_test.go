@@ -235,7 +235,7 @@ func TestGetGitHubRepoInfo(t *testing.T) {
 			},
 		}
 
-		owner, repo, err := getGitHubRepoInfo(cfg)
+		owner, repo, err := GetGitHubRepoInfo(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "test-owner", owner)
 		assert.Equal(t, "test-repo", repo)
@@ -255,7 +255,7 @@ func TestGetGitHubRepoInfo(t *testing.T) {
 			},
 		}
 
-		owner, repo, err := getGitHubRepoInfo(cfg)
+		owner, repo, err := GetGitHubRepoInfo(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "test-owner", owner)
 		assert.Equal(t, "test-repo", repo)
@@ -275,7 +275,7 @@ func TestGetGitHubRepoInfo(t *testing.T) {
 			},
 		}
 
-		owner, repo, err := getGitHubRepoInfo(cfg)
+		owner, repo, err := GetGitHubRepoInfo(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "enterprise-org", owner)
 		assert.Equal(t, "enterprise-repo", repo)
@@ -295,7 +295,7 @@ func TestGetGitHubRepoInfo(t *testing.T) {
 			},
 		}
 
-		owner, repo, err := getGitHubRepoInfo(cfg)
+		owner, repo, err := GetGitHubRepoInfo(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "test-owner", owner)
 		assert.Equal(t, "test-repo", repo)
@@ -315,7 +315,7 @@ func TestGetGitHubRepoInfo(t *testing.T) {
 			},
 		}
 
-		owner, repo, err := getGitHubRepoInfo(cfg)
+		owner, repo, err := GetGitHubRepoInfo(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "upstream-owner", owner)
 		assert.Equal(t, "upstream-repo", repo)
@@ -335,7 +335,7 @@ func TestGetGitHubRepoInfo(t *testing.T) {
 			},
 		}
 
-		_, _, err := getGitHubRepoInfo(cfg)
+		_, _, err := GetGitHubRepoInfo(cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "is not a GitHub repository")
 		assert.Contains(t, err.Error(), "This command only works with GitHub repositories")
@@ -351,13 +351,13 @@ func TestGetGitHubRepoInfo(t *testing.T) {
 			},
 		}
 
-		_, _, err := getGitHubRepoInfo(cfg)
+		_, _, err := GetGitHubRepoInfo(cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not configured")
 	})
 
 	t.Run("returns error for nil config", func(t *testing.T) {
-		_, _, err := getGitHubRepoInfo(nil)
+		_, _, err := GetGitHubRepoInfo(nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "configuration cannot be nil")
 	})
@@ -376,7 +376,7 @@ func TestGetGitHubRepoInfo(t *testing.T) {
 			},
 		}
 
-		_, _, err = getGitHubRepoInfo(cfg)
+		_, _, err = GetGitHubRepoInfo(cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not a git repository")
 	})

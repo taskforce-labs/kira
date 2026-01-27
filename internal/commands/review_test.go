@@ -17,6 +17,10 @@ import (
 	"kira/internal/validation"
 )
 
+const (
+	testWorkItemPath = ".work/3_review/012-submit-for-review.prd.md"
+)
+
 func TestReviewCommandRegistration(t *testing.T) {
 	t.Run("command is registered in root", func(t *testing.T) {
 		// Verify reviewCmd is in the root command's list of commands
@@ -1488,4 +1492,384 @@ func TestValidateGitHubToken(t *testing.T) {
 	// 2. We don't want to expose tokens in test code
 	// 3. The actual validation will be tested in integration tests
 	// The unit tests verify error handling for invalid/missing tokens
+}
+
+func TestGeneratePRTitle(t *testing.T) {
+	t.Run("generates title with default template and all variables", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Submit for review",
+			Kind:  "prd",
+		}
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{},
+		}
+
+		title, err := generatePRTitle(workItem, cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "[012] Submit for review", title)
+	})
+
+	t.Run("generates title with custom template", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Submit for review",
+			Kind:  "prd",
+		}
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				PRTitle: "{kind}: {title} ({id})",
+			},
+		}
+
+		title, err := generatePRTitle(workItem, cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "prd: Submit for review (012)", title)
+	})
+
+	t.Run("handles missing variables with empty strings", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			ID:    "",
+			Title: "",
+			Kind:  "",
+		}
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				PRTitle: "[{id}] {title} ({kind})",
+			},
+		}
+
+		title, err := generatePRTitle(workItem, cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "[]  ()", title)
+	})
+
+	t.Run("truncates long titles to 200 chars", func(t *testing.T) {
+		longTitle := strings.Repeat("a", 300)
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: longTitle,
+			Kind:  "prd",
+		}
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				PRTitle: "[{id}] {title}",
+			},
+		}
+
+		title, err := generatePRTitle(workItem, cfg)
+		require.NoError(t, err)
+		assert.LessOrEqual(t, len(title), 200)
+		assert.Equal(t, 200, len(title))
+		assert.True(t, strings.HasPrefix(title, "[012]"))
+	})
+
+	t.Run("sanitizes newlines and carriage returns", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Title\nwith\rnewlines",
+			Kind:  "prd",
+		}
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				PRTitle: "[{id}] {title}",
+			},
+		}
+
+		title, err := generatePRTitle(workItem, cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "[012] Title with newlines", title)
+		assert.NotContains(t, title, "\n")
+		assert.NotContains(t, title, "\r")
+	})
+
+	t.Run("handles empty template by using default", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Submit for review",
+			Kind:  "prd",
+		}
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				PRTitle: "",
+			},
+		}
+
+		title, err := generatePRTitle(workItem, cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "[012] Submit for review", title)
+	})
+
+	t.Run("trims whitespace", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "  Title with spaces  ",
+			Kind:  "prd",
+		}
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				PRTitle: "[{id}] {title}",
+			},
+		}
+
+		title, err := generatePRTitle(workItem, cfg)
+		require.NoError(t, err)
+		// Final result is trimmed, so trailing spaces are removed
+		assert.Equal(t, "[012]   Title with spaces", title)
+	})
+
+	t.Run("returns error for nil work item", func(t *testing.T) {
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{},
+		}
+
+		_, err := generatePRTitle(nil, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "work item cannot be nil")
+	})
+
+	t.Run("returns error for nil config", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Test",
+			Kind:  "prd",
+		}
+
+		_, err := generatePRTitle(workItem, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "configuration cannot be nil")
+	})
+}
+
+func TestGeneratePRDescription(t *testing.T) {
+	t.Run("generates description with default template and all variables", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "012-test-feature")
+		_ = tmpDir // Use tmpDir to avoid unused variable
+
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Submit for review",
+			Kind:  "prd",
+		}
+		workItemPath := testWorkItemPath
+
+		// Add a GitHub remote
+		// #nosec G204 - tmpDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", tmpDir, "remote", "add", "origin", "https://github.com/test-owner/test-repo.git").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			Review: &config.ReviewConfig{},
+		}
+
+		description, err := generatePRDescription(workItem, workItemPath, cfg)
+		require.NoError(t, err)
+		// Default template uses [{id}-{title}] which becomes [012-Submit for review] (spaces, not hyphens)
+		assert.Contains(t, description, "[012-Submit for review]")
+		assert.Contains(t, description, "https://github.com/test-owner/test-repo/blob/main/.work/3_review/012-submit-for-review.prd.md")
+	})
+
+	t.Run("generates description with custom template", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "012-test-feature")
+		_ = tmpDir // Use tmpDir to avoid unused variable
+
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Submit for review",
+			Kind:  "prd",
+		}
+		workItemPath := testWorkItemPath
+
+		// Add a GitHub remote
+		// #nosec G204 - tmpDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", tmpDir, "remote", "add", "origin", "https://github.com/test-owner/test-repo.git").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			Review: &config.ReviewConfig{
+				PRDescription: "Work item {id}: {title}\n\nDetails: {work_item_url}",
+			},
+		}
+
+		description, err := generatePRDescription(workItem, workItemPath, cfg)
+		require.NoError(t, err)
+		assert.Contains(t, description, "Work item 012: Submit for review")
+		assert.Contains(t, description, "https://github.com/test-owner/test-repo/blob/main/.work/3_review/012-submit-for-review.prd.md")
+	})
+
+	t.Run("handles missing GitHub repo info gracefully", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "012-test-feature")
+		_ = tmpDir // Use tmpDir to avoid unused variable
+
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Submit for review",
+			Kind:  "prd",
+		}
+		workItemPath := ".work/3_review/012-submit-for-review.prd.md"
+
+		// No remote configured
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+			},
+			Review: &config.ReviewConfig{
+				PRDescription: "View: [{id}-{title}]({work_item_url})",
+			},
+		}
+
+		description, err := generatePRDescription(workItem, workItemPath, cfg)
+		require.NoError(t, err) // Should not fail
+		// Template uses [{id}-{title}] which becomes [012-Submit for review]
+		assert.Contains(t, description, "[012-Submit for review]")
+		// URL variable should be replaced with empty string
+		assert.Contains(t, description, "]()") // Empty URL in markdown link
+		// The URL should be empty since we can't get repo info
+		assert.NotContains(t, description, "https://github.com")
+	})
+
+	t.Run("handles missing trunk branch gracefully", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "012-test-feature")
+		_ = tmpDir // Use tmpDir to avoid unused variable
+
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Submit for review",
+			Kind:  "prd",
+		}
+		workItemPath := testWorkItemPath
+
+		// Add a GitHub remote
+		// #nosec G204 - tmpDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", tmpDir, "remote", "add", "origin", "https://github.com/test-owner/test-repo.git").Run())
+
+		// Configure with non-existent trunk branch
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "nonexistent-branch",
+				Remote:      "origin",
+			},
+			Review: &config.ReviewConfig{
+				PRDescription: "View: [{id}-{title}]({work_item_url})",
+			},
+		}
+
+		description, err := generatePRDescription(workItem, workItemPath, cfg)
+		require.NoError(t, err) // Should not fail
+		// Template uses [{id}-{title}] which becomes [012-Submit for review]
+		assert.Contains(t, description, "[012-Submit for review]")
+		// URL should be empty since trunk branch doesn't exist
+		assert.NotContains(t, description, "https://github.com")
+	})
+
+	t.Run("handles missing variables with empty strings", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			ID:    "",
+			Title: "",
+			Kind:  "prd",
+		}
+		workItemPath := testWorkItemPath
+
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{
+				PRDescription: "[{id}-{title}]({work_item_url})",
+			},
+		}
+
+		description, err := generatePRDescription(workItem, workItemPath, cfg)
+		require.NoError(t, err)
+		assert.Contains(t, description, "[-]")
+	})
+
+	t.Run("normalizes work item path correctly", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "012-test-feature")
+		_ = tmpDir // Use tmpDir to avoid unused variable
+
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Submit for review",
+			Kind:  "prd",
+		}
+		// Test with Windows-style path separators and leading ./
+		workItemPath := ".work\\3_review\\012-submit-for-review.prd.md"
+
+		// Add a GitHub remote
+		// #nosec G204 - tmpDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", tmpDir, "remote", "add", "origin", "https://github.com/test-owner/test-repo.git").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			Review: &config.ReviewConfig{
+				PRDescription: "View: {work_item_url}",
+			},
+		}
+
+		description, err := generatePRDescription(workItem, workItemPath, cfg)
+		require.NoError(t, err)
+		// Path should be normalized to forward slashes in the URL
+		assert.Contains(t, description, ".work/3_review/012-submit-for-review.prd.md")
+		assert.NotContains(t, description, "\\")
+	})
+
+	t.Run("handles empty template by using default", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "012-test-feature")
+		_ = tmpDir // Use tmpDir to avoid unused variable
+
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Submit for review",
+			Kind:  "prd",
+		}
+		workItemPath := testWorkItemPath
+
+		// Add a GitHub remote
+		// #nosec G204 - tmpDir is from t.TempDir() which is safe
+		require.NoError(t, exec.Command("git", "-C", tmpDir, "remote", "add", "origin", "https://github.com/test-owner/test-repo.git").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			Review: &config.ReviewConfig{
+				PRDescription: "",
+			},
+		}
+
+		description, err := generatePRDescription(workItem, workItemPath, cfg)
+		require.NoError(t, err)
+		// Template uses [{id}-{title}] which becomes [012-Submit for review]
+		assert.Contains(t, description, "[012-Submit for review]")
+	})
+
+	t.Run("returns error for nil work item", func(t *testing.T) {
+		cfg := &config.Config{
+			Review: &config.ReviewConfig{},
+		}
+
+		_, err := generatePRDescription(nil, ".work/test.md", cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "work item cannot be nil")
+	})
+
+	t.Run("returns error for nil config", func(t *testing.T) {
+		workItem := &validation.WorkItem{
+			ID:    "012",
+			Title: "Test",
+			Kind:  "prd",
+		}
+
+		_, err := generatePRDescription(workItem, ".work/test.md", nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "configuration cannot be nil")
+	})
 }

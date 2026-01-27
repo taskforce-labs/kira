@@ -97,9 +97,9 @@ func parseGitHubURL(remoteURL string) (owner, repo string, err error) {
 	return owner, repo, nil
 }
 
-// getGitHubRepoInfo retrieves the GitHub repository owner and name from the configured git remote.
+// GetGitHubRepoInfo retrieves the GitHub repository owner and name from the configured git remote.
 // It validates that the remote is a GitHub repository and extracts owner/repo information.
-func getGitHubRepoInfo(cfg *config.Config) (owner, repo string, err error) {
+func GetGitHubRepoInfo(cfg *config.Config) (owner, repo string, err error) {
 	if cfg == nil {
 		return "", "", fmt.Errorf("configuration cannot be nil")
 	}

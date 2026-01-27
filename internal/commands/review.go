@@ -17,6 +17,7 @@ import (
 	yaml "gopkg.in/yaml.v3"
 
 	"kira/internal/config"
+	gh "kira/internal/github"
 	"kira/internal/validation"
 )
 
@@ -686,4 +687,84 @@ func validateGitHubToken(token string) error {
 	_ = rateLimits // Suppress unused variable warning
 
 	return nil
+}
+
+// generatePRTitle generates a PR title from a work item using the configured template.
+// It replaces template variables {id}, {title}, and {kind}, sanitizes special characters,
+// and truncates to 200 characters.
+func generatePRTitle(workItem *validation.WorkItem, cfg *config.Config) (string, error) {
+	if workItem == nil {
+		return "", fmt.Errorf("work item cannot be nil")
+	}
+	if cfg == nil {
+		return "", fmt.Errorf("configuration cannot be nil")
+	}
+
+	// Get template from config (with default fallback)
+	template := cfg.Review.PRTitle
+	if template == "" {
+		template = "[{id}] {title}"
+	}
+
+	// Replace variables
+	result := template
+	result = strings.ReplaceAll(result, "{id}", workItem.ID)
+	result = strings.ReplaceAll(result, "{title}", workItem.Title)
+	result = strings.ReplaceAll(result, "{kind}", workItem.Kind)
+
+	// Sanitize: remove newlines and carriage returns
+	result = strings.ReplaceAll(result, "\n", " ")
+	result = strings.ReplaceAll(result, "\r", " ")
+	result = strings.TrimSpace(result)
+
+	// Truncate to 200 chars (GitHub limit is 255, leave room for ID prefix)
+	if len(result) > 200 {
+		result = result[:200]
+	}
+
+	return result, nil
+}
+
+// generatePRDescription generates a PR description from a work item using the configured template.
+// It replaces template variables {id}, {title}, and {work_item_url}. The work item URL
+// is constructed from the GitHub repository info and trunk branch, but if construction fails,
+// the function gracefully degrades by using an empty string for the URL.
+func generatePRDescription(workItem *validation.WorkItem, workItemPath string, cfg *config.Config) (string, error) {
+	if workItem == nil {
+		return "", fmt.Errorf("work item cannot be nil")
+	}
+	if cfg == nil {
+		return "", fmt.Errorf("configuration cannot be nil")
+	}
+
+	// Get template from config (with default fallback)
+	template := cfg.Review.PRDescription
+	if template == "" {
+		template = "View detailed work item: [{id}-{title}]({work_item_url})"
+	}
+
+	// Replace id and title
+	result := template
+	result = strings.ReplaceAll(result, "{id}", workItem.ID)
+	result = strings.ReplaceAll(result, "{title}", workItem.Title)
+
+	// Try to construct work item URL (optional - don't fail if it doesn't work)
+	workItemURL := ""
+	if owner, repo, err := gh.GetGitHubRepoInfo(cfg); err == nil {
+		repoRoot, err := getRepoRoot()
+		if err == nil {
+			if trunkBranch, err := determineTrunkBranch(cfg, "", repoRoot, false); err == nil {
+				// Normalize path: remove leading ./, ensure forward slashes for URLs
+				normalizedPath := strings.TrimPrefix(workItemPath, "./")
+				// Always use forward slashes for GitHub URLs, regardless of OS
+				normalizedPath = strings.ReplaceAll(normalizedPath, "\\", "/")
+				workItemURL = fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, repo, trunkBranch, normalizedPath)
+			}
+		}
+	}
+
+	// Replace work_item_url (empty string if construction failed)
+	result = strings.ReplaceAll(result, "{work_item_url}", workItemURL)
+
+	return result, nil
 }
