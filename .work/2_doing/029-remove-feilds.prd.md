@@ -88,6 +88,19 @@ Remove `due` and `estimate` from templates and defaults. Fix `created` so it is 
 - **Tests**: Grep for `due`, `estimate`, and `created` in test content; adjust minimal work item YAML and template expectations. Validator tests that expect `due` or `estimate` in default templates should be updated or made config/template-agnostic.
 - **Backward compatibility**: Validation does not require `due` or `estimate`; existing files with these keys are still valid. Only the default template set is reduced.
 
+## Slices / Commits
+
+Each slice is a separate commit. After each commit, run `make check` to ensure tests and lint pass.
+
+| Slice | Commit intent | Check |
+|-------|----------------|-------|
+| **0** | PRD: add this Slices/Commits section and implementation breakdown. | `make check` |
+| **1** | Remove `due` and `estimate` from repo-shipped `templates/*.md`; change `created` placeholder description to "Created (auto-set)". | `make check` |
+| **2** | Remove `due` and `estimate` from `internal/templates/templates.go` (getPRDTemplate, getIssueTemplate, getSpikeTemplate, getTaskTemplate); update `created` wording. Update `internal/templates/templates_test.go` if needed. | `make check` |
+| **3** | Update README.md: remove `due`/`estimate` from default examples; keep them only as optional fields in Field Configuration; adjust Work Item Format sample. | `make check` |
+| **4** | Update `kira_e2e_tests.sh`: Test 6 no longer requires `estimate:`/`due:` in created file; remove or adjust `--input estimate=...`/`--input due=...` to match default templates. | `make check` |
+| **5** | Verify `created` is never user-prompted (already set before interactive in new.go); optionally adjust `showTemplateInputs` so `created` is labelled as auto-set. | `make check`; `bash kira_e2e_tests.sh` |
+
 ## Release Notes
 
 - Default work item templates no longer include `due` or `estimate`. Use `kira.yml` `fields:` and custom templates if you need these fields.
