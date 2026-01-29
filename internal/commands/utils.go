@@ -288,10 +288,10 @@ func executeCommandCombinedOutput(ctx context.Context, name string, args []strin
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		outputStr := strings.TrimSpace(string(output))
-		if outputStr != "" {
-			return "", fmt.Errorf("%w: %s", err, outputStr)
+		if outputStr == "" {
+			outputStr = "(no output)"
 		}
-		return "", err
+		return "", fmt.Errorf("%w: %s", err, outputStr)
 	}
 
 	return string(output), nil
@@ -322,10 +322,10 @@ func executeCommandCombinedOutputWithEnv(ctx context.Context, name string, args 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		outputStr := strings.TrimSpace(string(output))
-		if outputStr != "" {
-			return "", fmt.Errorf("%w: %s", err, outputStr)
+		if outputStr == "" {
+			outputStr = "(no output)"
 		}
-		return "", err
+		return "", fmt.Errorf("%w: %s", err, outputStr)
 	}
 
 	return string(output), nil
