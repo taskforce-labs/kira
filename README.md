@@ -46,9 +46,10 @@ kira start 001
 3. Submits the work-item for review and creates a pull request
 ```bash
 kira review
-# 1. Rebases the branch onto the trunk branch
-# 2. Changes the work-item to review status
-# 3. Changes the status of the pull request to ready for review
+# 1. Moves the work-item to review status on the current branch
+# 2. Creates or updates a GitHub pull request (draft by default)
+# 3. Optionally updates trunk status and rebases onto trunk
+# Note: requires a GitHub remote and KIRA_GITHUB_TOKEN for PR creation
 ```
 
 4. Merges the pull request and marks the work-item as done
@@ -260,6 +261,54 @@ Behavior:
 - Updates/creates the `updated:` timestamp in changed work items
 - Stages only `.work/` changes; skips committing if external (non-.work) changes are detected
 - Uses provided commit message or the configured default when none is given
+
+### `kira review`
+Submits the current work item for review and creates (or updates) a GitHub pull request.
+
+The command derives the work item ID from the current branch name (e.g. `012-submit-for-review`) and:
+- Moves the work item to the `review` folder and updates `status: review`
+- Pushes the current branch if needed (never force-pushes)
+- Creates or updates a pull request on GitHub
+- Optionally updates the work item’s status on trunk and rebases onto trunk
+- Updates review metadata in the work item front matter:
+  - `review_pr_url`
+  - `reviewers`
+  - `reviewed_at` (RFC3339)
+  - `updated` (RFC3339)
+
+Requirements:
+- The configured git remote must be a GitHub URL (HTTPS or SSH)
+- Set `KIRA_GITHUB_TOKEN` (required for PR creation/update)
+
+```bash
+export KIRA_GITHUB_TOKEN="ghp_..."
+kira review
+
+# Non-default behavior:
+kira review --draft=false
+kira review --reviewer 1 --reviewer 2
+kira review --title "Custom PR title" --description "Custom PR description"
+kira review --no-trunk-update --no-rebase
+```
+
+Flags:
+- `--draft` (default: true): Create the PR as a draft
+- `--reviewer` (repeatable): Reviewer spec (user number from `kira users`, email, or GitHub username)
+- `--title`: Custom PR title (otherwise derived from work item)
+- `--description`: Custom PR description (otherwise derived from work item)
+- `--no-trunk-update`: Skip updating trunk branch status (overrides config)
+- `--no-rebase`: Skip rebasing after trunk update (overrides config)
+
+Configuration (`kira.yml`):
+
+```yaml
+review:
+  update_trunk_status: true
+  rebase_after_trunk_update: true
+  auto_request_reviews: true
+  pr_title: "[{id}] {title}"
+  pr_description: "View detailed work item: [{id}-{title}]({work_item_url})"
+```
 
 ### `kira version`
 Prints version information embedded at build time (SemVer tag if present), commit, build date, and dirty state.
