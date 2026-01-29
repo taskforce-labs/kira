@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"kira/internal/config"
@@ -1778,6 +1779,143 @@ func TestUpdateTrunkFromRemote(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, strings.TrimSpace(string(remoteOut)), strings.TrimSpace(string(out)))
 	})
+}
+
+func TestProcessRepositoryUpdateOnTrunk_stashAndPop(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir("/") }()
+
+	require.NoError(t, exec.Command("git", "init").Run())
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	require.NoError(t, os.WriteFile("a.txt", []byte("a"), 0o600))
+	require.NoError(t, exec.Command("git", "add", "a.txt").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+	_ = exec.Command("git", "branch", "-M", "main").Run()
+
+	remoteDir := t.TempDir()
+	// #nosec G204 - remoteDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+	require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+
+	// Uncommitted change so we trigger stash
+	require.NoError(t, os.WriteFile("dirty.txt", []byte("dirty"), 0o600))
+
+	repo := RepositoryInfo{Name: "test", Path: tmpDir, TrunkBranch: "main", Remote: "origin"}
+	var mu sync.Mutex
+	result := processRepositoryUpdate(repo, false, false, &mu)
+
+	require.NoError(t, result.Error)
+	assert.True(t, result.HadStash)
+	assert.True(t, result.StashPopped)
+	// Working tree should have dirty.txt back
+	_, err := os.Stat(filepath.Join(tmpDir, "dirty.txt"))
+	require.NoError(t, err)
+}
+
+func TestProcessRepositoryUpdateOnTrunk_noPopStash(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir("/") }()
+
+	require.NoError(t, exec.Command("git", "init").Run())
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	require.NoError(t, os.WriteFile("a.txt", []byte("a"), 0o600))
+	require.NoError(t, exec.Command("git", "add", "a.txt").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+	_ = exec.Command("git", "branch", "-M", "main").Run()
+
+	remoteDir := t.TempDir()
+	// #nosec G204 - remoteDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+	require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+
+	require.NoError(t, os.WriteFile("dirty.txt", []byte("dirty"), 0o600))
+
+	repo := RepositoryInfo{Name: "test", Path: tmpDir, TrunkBranch: "main", Remote: "origin"}
+	var mu sync.Mutex
+	result := processRepositoryUpdate(repo, false, true, &mu) // noPopStash=true
+
+	require.NoError(t, result.Error)
+	assert.True(t, result.HadStash)
+	assert.False(t, result.StashPopped)
+	// Stash should still have one entry
+	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+	out, err := exec.Command("git", "-C", tmpDir, "stash", "list").Output()
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "kira latest")
+}
+
+func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir("/") }()
+
+	require.NoError(t, exec.Command("git", "init").Run())
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	require.NoError(t, os.WriteFile("f", []byte("a"), 0o600))
+	require.NoError(t, exec.Command("git", "add", "f").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "A").Run())
+	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+	_ = exec.Command("git", "branch", "-M", "main").Run()
+
+	remoteDir := t.TempDir()
+	// #nosec G204 - remoteDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+	require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+
+	// Divergent commit on remote (clone, change f, push)
+	cloneDir := t.TempDir()
+	// #nosec G204 - paths from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "clone", remoteDir, cloneDir).Run())
+	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "f"), []byte("b"), 0o600))
+	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", cloneDir, "add", "f").Run())
+	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.email", "test@example.com").Run())
+	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.name", "Test User").Run())
+	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", cloneDir, "commit", "-m", "B").Run())
+	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", cloneDir, "push", "origin", "main").Run())
+
+	// Local divergent commit (change f to c) so rebase will conflict
+	require.NoError(t, os.WriteFile("f", []byte("c"), 0o600))
+	require.NoError(t, exec.Command("git", "add", "f").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "C").Run())
+
+	// Uncommitted file so we get a stash
+	require.NoError(t, os.WriteFile("g", []byte("g"), 0o600))
+
+	repo := RepositoryInfo{Name: "test", Path: tmpDir, TrunkBranch: "main", Remote: "origin"}
+	var mu sync.Mutex
+	result := processRepositoryUpdate(repo, false, false, &mu) // abortOnConflict=false
+
+	require.Error(t, result.Error)
+	assert.True(t, result.HadStash)
+	assert.False(t, result.StashPopped)
+	assert.True(t, result.RebaseHadConflicts)
+	// Stash should still contain one entry
+	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+	stashOut, err := exec.Command("git", "-C", tmpDir, "stash", "list").Output()
+	require.NoError(t, err)
+	assert.Contains(t, string(stashOut), "kira latest")
+	// Rebase should be in progress
+	// #nosec G304 - path under tmpDir from t.TempDir(), safe for test use
+	_, err = os.Stat(filepath.Join(tmpDir, ".git", "rebase-merge"))
+	require.NoError(t, err)
 }
 
 func TestPerformFetchAndRebase(t *testing.T) {
