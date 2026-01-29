@@ -2,7 +2,9 @@
 package commands
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -108,7 +110,7 @@ func runAssign(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 8: Process work item updates with batch processing and progress
-	results := processWorkItemUpdates(workItemPaths, resolvedUser, flags)
+	results := processWorkItemUpdates(workItemPaths, resolvedUser, flags, users)
 
 	// Display summary for batch operations or if there were failures
 	if len(workItemPaths) > 1 || flags.DryRun {
@@ -283,6 +285,7 @@ func processSingleWorkItem(
 	resolvedUser *UserInfo,
 	flags AssignFlags,
 	showProgress bool,
+	users []UserInfo,
 ) WorkItemUpdateResult {
 	if showProgress {
 		fmt.Printf("Processing work item %s...\n", displayID)
@@ -293,19 +296,68 @@ func processSingleWorkItem(
 		return processUnassignWorkItem(workItemPath, displayID, flags.Field, showProgress)
 	}
 
-	// For interactive mode, we'll handle in Phase 9
+	// For interactive mode, show selection and process
 	if flags.Interactive {
-		result := WorkItemUpdateResult{
-			WorkItemPath: workItemPath,
-			WorkItemID:   displayID,
-			Success:      false,
-			Operation:    "interactive",
-			Error:        fmt.Errorf("interactive mode not yet implemented"),
+		// Get current assignment for this work item
+		currentAssignment, err := getCurrentAssignment(workItemPath, flags.Field)
+		if err != nil {
+			result := WorkItemUpdateResult{
+				WorkItemPath: workItemPath,
+				WorkItemID:   displayID,
+				Success:      false,
+				Operation:    "interactive",
+				Error:        fmt.Errorf("failed to get current assignment: %w", err),
+			}
+			if showProgress {
+				displayWorkItemProgress(result)
+			}
+			return result
 		}
-		if showProgress {
-			displayWorkItemProgress(result)
+
+		// Show interactive selection
+		selection, err := showInteractiveSelection(users, currentAssignment, flags.Field, os.Stdin)
+		if err != nil {
+			result := WorkItemUpdateResult{
+				WorkItemPath: workItemPath,
+				WorkItemID:   displayID,
+				Success:      false,
+				Operation:    "interactive",
+				Error:        fmt.Errorf("interactive selection failed: %w", err),
+			}
+			if showProgress {
+				displayWorkItemProgress(result)
+			}
+			return result
 		}
-		return result
+
+		// Handle selection: 0 = unassign, 1+ = assign to user
+		if selection == 0 {
+			return processUnassignWorkItem(workItemPath, displayID, flags.Field, showProgress)
+		}
+
+		// Resolve selected user
+		selectedUser, err := findUserByNumber(selection, users)
+		if err != nil {
+			result := WorkItemUpdateResult{
+				WorkItemPath: workItemPath,
+				WorkItemID:   displayID,
+				Success:      false,
+				Operation:    "interactive",
+				Error:        fmt.Errorf("failed to resolve selected user: %w", err),
+			}
+			if showProgress {
+				displayWorkItemProgress(result)
+			}
+			return result
+		}
+
+		// Process assignment based on append flag
+		if flags.Append {
+			return processAppendWorkItem(workItemPath, displayID, flags.Field, selectedUser, showProgress)
+		}
+
+		// Switch mode: update field with user email
+		return processAssignWorkItem(workItemPath, displayID, flags.Field, selectedUser, showProgress)
 	}
 
 	// For append mode, handle in Phase 6
@@ -319,7 +371,7 @@ func processSingleWorkItem(
 
 // processWorkItemUpdates processes work item updates based on flags.
 // Returns a slice of results for each work item processed.
-func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flags AssignFlags) []WorkItemUpdateResult {
+func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flags AssignFlags, users []UserInfo) []WorkItemUpdateResult {
 	var results []WorkItemUpdateResult
 	showProgress := len(workItemPaths) > 1
 
@@ -335,7 +387,7 @@ func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flag
 	// Process each work item
 	for _, workItemPath := range workItemPaths {
 		displayID := getWorkItemDisplayID(workItemPath)
-		result := processSingleWorkItem(workItemPath, displayID, resolvedUser, flags, showProgress)
+		result := processSingleWorkItem(workItemPath, displayID, resolvedUser, flags, showProgress, users)
 		results = append(results, result)
 	}
 
@@ -513,7 +565,7 @@ func validateAssignFlagCombinations(userIdentifier string, flags AssignFlags) er
 		return fmt.Errorf("invalid flag combination: --unassign cannot be used together with --append")
 	}
 	if flags.Interactive {
-		return fmt.Errorf("invalid flag combination: --unassign cannot be used together with --interactive in this phase")
+		return fmt.Errorf("invalid flag combination: --unassign cannot be used together with --interactive (use --interactive and select 0 to unassign)")
 	}
 
 	return nil
@@ -1253,4 +1305,79 @@ func updateWorkItemFieldAppend(
 	}
 
 	return nil
+}
+
+// Phase 9: Interactive Mode
+
+// getCurrentAssignment retrieves the current assignment value for a work item field.
+// Returns the formatted string for display (or empty string if not assigned).
+func getCurrentAssignment(workItemPath, fieldName string) (string, error) {
+	frontMatter, _, err := parseWorkItemFrontMatter(workItemPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse work item: %w", err)
+	}
+
+	value, exists := getFieldValueAsString(frontMatter, fieldName)
+	if !exists || value == "" {
+		return "", nil
+	}
+
+	return value, nil
+}
+
+// showInteractiveSelection displays users in a numbered list and prompts for selection.
+// Returns the selected user number (0 for unassign, 1+ for users) or an error.
+// The inputReader parameter allows for testing by providing a mock input source.
+func showInteractiveSelection(users []UserInfo, currentAssignment, fieldName string, inputReader io.Reader) (int, error) {
+	if len(users) == 0 {
+		return 0, fmt.Errorf("no users available for selection")
+	}
+
+	// Display header
+	fmt.Println("Available users:")
+	fmt.Println(strings.Repeat("-", 50))
+
+	// Show current assignment if exists
+	if currentAssignment != "" {
+		fmt.Printf("Current assignment (%s): %s\n\n", fieldName, currentAssignment)
+	}
+
+	// Display users (same format as kira users list format)
+	for _, user := range users {
+		display := formatUserDisplay(user)
+		fmt.Printf("%d. %s\n", user.Number, display)
+	}
+
+	// Add unassign option
+	fmt.Println("0. Unassign")
+	fmt.Println()
+
+	// Get selection with retry logic
+	const maxRetries = 3
+	reader := bufio.NewReader(inputReader)
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		fmt.Print("Select user (number): ")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return 0, fmt.Errorf("failed to read input: %w", err)
+		}
+
+		input = strings.TrimSpace(input)
+		selection, err := strconv.Atoi(input)
+		if err != nil {
+			fmt.Printf("Invalid input: please enter a number (0-%d)\n", len(users))
+			continue
+		}
+
+		// Validate selection is within valid range
+		if selection < 0 || selection > len(users) {
+			fmt.Printf("Invalid selection: please enter a number between 0 and %d\n", len(users))
+			continue
+		}
+
+		return selection, nil
+	}
+
+	return 0, fmt.Errorf("too many invalid input attempts")
 }
