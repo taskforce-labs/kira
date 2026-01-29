@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -911,6 +912,167 @@ created: 2024-01-03
 		err := updateWorkItemStatusOnCurrentBranch(cfg, "999", statusReview)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "work item with ID 999 not found")
+	})
+}
+
+func TestUpdateWorkItemMetadata(t *testing.T) {
+	const workItemPath = ".work/3_review/001-test-feature.prd.md"
+
+	t.Run("updates metadata correctly", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+		require.NoError(t, os.WriteFile(workItemPath, []byte(testWorkItemContent), 0o600))
+
+		err := updateWorkItemMetadata("001", "https://github.com/o/r/pull/1", []string{"alice", "bob"})
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(workItemPath)
+		require.NoError(t, err)
+		text := string(content)
+
+		assert.Contains(t, text, "review_pr_url:")
+		assert.Contains(t, text, "https://github.com/o/r/pull/1")
+		assert.Contains(t, text, "reviewers:")
+		assert.Contains(t, text, "alice")
+		assert.Contains(t, text, "bob")
+		assert.Contains(t, text, "reviewed_at:")
+		assert.Contains(t, text, "updated:")
+
+		// Timestamps parse as RFC3339
+		cfg := &config.DefaultConfig
+		wi, _, err := loadWorkItem(cfg, "001")
+		require.NoError(t, err)
+		require.NotNil(t, wi)
+		if u, ok := wi.Fields["reviewed_at"].(string); ok && u != "" {
+			_, err := time.Parse(time.RFC3339, u)
+			assert.NoError(t, err, "reviewed_at should be RFC3339")
+		}
+		if u, ok := wi.Fields["updated"].(string); ok && u != "" {
+			_, err := time.Parse(time.RFC3339, u)
+			assert.NoError(t, err, "updated should be RFC3339")
+		}
+	})
+
+	t.Run("preserves existing front matter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+		withExtra := `---
+id: 001
+title: Test Feature
+status: review
+kind: prd
+created: 2024-01-02
+tags: [github, notifications]
+custom_field: custom-value
+---
+
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(workItemPath, []byte(withExtra), 0o600))
+
+		err := updateWorkItemMetadata("001", "https://github.com/o/r/pull/2", []string{"alice"})
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(workItemPath)
+		require.NoError(t, err)
+		text := string(content)
+
+		assert.Contains(t, text, "id: 001")
+		assert.Contains(t, text, "title: Test Feature")
+		assert.Contains(t, text, "kind: prd")
+		assert.Contains(t, text, "created: 2024-01-02")
+		assert.Contains(t, text, "tags:")
+		assert.Contains(t, text, "github")
+		assert.Contains(t, text, "notifications")
+		assert.Contains(t, text, "custom_field:")
+		assert.Contains(t, text, "custom-value")
+		assert.Contains(t, text, "review_pr_url:")
+		assert.Contains(t, text, "reviewers:")
+	})
+
+	t.Run("formats timestamps as RFC3339", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+		require.NoError(t, os.WriteFile(workItemPath, []byte(testWorkItemContent), 0o600))
+
+		err := updateWorkItemMetadata("001", "https://github.com/o/r/pull/1", []string{"alice"})
+		require.NoError(t, err)
+
+		cfg := &config.DefaultConfig
+		wi, _, err := loadWorkItem(cfg, "001")
+		require.NoError(t, err)
+		require.NotNil(t, wi)
+
+		reviewedAt, ok := wi.Fields["reviewed_at"].(string)
+		require.True(t, ok, "reviewed_at present")
+		_, err = time.Parse(time.RFC3339, reviewedAt)
+		assert.NoError(t, err, "reviewed_at must be RFC3339")
+
+		updated, ok := wi.Fields["updated"].(string)
+		require.True(t, ok, "updated present")
+		_, err = time.Parse(time.RFC3339, updated)
+		assert.NoError(t, err, "updated must be RFC3339")
+	})
+
+	t.Run("empty reviewers", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+		require.NoError(t, os.WriteFile(workItemPath, []byte(testWorkItemContent), 0o600))
+
+		err := updateWorkItemMetadata("001", "https://github.com/o/r/pull/1", []string{})
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(workItemPath)
+		require.NoError(t, err)
+		text := string(content)
+		assert.Contains(t, text, "reviewers:")
+	})
+
+	t.Run("empty prURL", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+		require.NoError(t, os.WriteFile(workItemPath, []byte(testWorkItemContent), 0o600))
+
+		err := updateWorkItemMetadata("001", "", []string{"alice"})
+		require.NoError(t, err)
+
+		content, err := os.ReadFile(workItemPath)
+		require.NoError(t, err)
+		text := string(content)
+		assert.Contains(t, text, "review_pr_url:")
+	})
+
+	t.Run("work item not found", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+
+		err := updateWorkItemMetadata("999", "", nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("empty work item ID", func(t *testing.T) {
+		err := updateWorkItemMetadata("", "https://github.com/o/r/pull/1", nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "work item ID cannot be empty")
 	})
 }
 

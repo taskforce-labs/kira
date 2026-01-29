@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/go-github/v58/github"
 	"github.com/spf13/cobra"
@@ -387,6 +388,111 @@ func updateWorkItemStatusOnCurrentBranch(cfg *config.Config, workItemID, targetS
 	}
 
 	return nil
+}
+
+// updateWorkItemMetadata adds or updates front matter fields for review: review_pr_url,
+// reviewers, reviewed_at, and updated. It preserves all existing front matter.
+func updateWorkItemMetadata(workItemID, prURL string, reviewers []string) error {
+	if strings.TrimSpace(workItemID) == "" {
+		return fmt.Errorf("work item ID cannot be empty")
+	}
+
+	workItemPath, err := findWorkItemFile(workItemID)
+	if err != nil {
+		if strings.Contains(err.Error(), "work item with ID") {
+			return fmt.Errorf("work item %s not found", workItemID)
+		}
+		return fmt.Errorf("failed to find work item %s: %w", workItemID, err)
+	}
+
+	content, err := safeReadFile(workItemPath)
+	if err != nil {
+		return fmt.Errorf("failed to read work item file %s: %w", workItemPath, err)
+	}
+
+	yamlLines, body, err := extractFrontMatterAndBody(content)
+	if err != nil {
+		return fmt.Errorf("failed to parse work item front matter: %w", err)
+	}
+
+	var fm map[string]interface{}
+	if len(yamlLines) > 0 {
+		if err := yaml.Unmarshal([]byte(strings.Join(yamlLines, "\n")), &fm); err != nil {
+			return fmt.Errorf("failed to parse work item front matter: %w", err)
+		}
+	}
+	if fm == nil {
+		fm = make(map[string]interface{})
+	}
+
+	// Preserve id as given (avoid YAML round-trip turning "001" into 1)
+	fm["id"] = workItemID
+
+	now := time.Now().Format(time.RFC3339)
+	fm["review_pr_url"] = prURL
+	fm["reviewed_at"] = now
+	fm["updated"] = now
+	if reviewers != nil {
+		fm["reviewers"] = reviewers
+	} else {
+		fm["reviewers"] = []string{}
+	}
+
+	out, err := yaml.Marshal(fm)
+	if err != nil {
+		return fmt.Errorf("failed to marshal work item front matter: %w", err)
+	}
+
+	yamlStr := strings.TrimSuffix(string(out), "\n")
+	// Unquote "id: \"001\"" so findWorkItemFile can match "id: 001"
+	quotedID := `id: "` + workItemID + `"`
+	unquotedID := "id: " + workItemID
+	yamlStr = strings.Replace(yamlStr, quotedID, unquotedID, 1)
+
+	assembled := yamlDelimiter + "\n" + yamlStr + "\n" + yamlDelimiter + "\n" + body
+
+	if err := validateWorkPath(workItemPath); err != nil {
+		return fmt.Errorf("invalid work item path: %w", err)
+	}
+	// #nosec G304 -- path validated by validateWorkPath above
+	if err := os.WriteFile(workItemPath, []byte(assembled), 0o600); err != nil {
+		return fmt.Errorf("failed to write work item file %s: %w", workItemPath, err)
+	}
+
+	return nil
+}
+
+// extractFrontMatterAndBody splits work item content into YAML front matter lines
+// and body. Returns (yamlLines, body, error). Body is everything after the second "---".
+func extractFrontMatterAndBody(content []byte) ([]string, string, error) {
+	lines := strings.Split(string(content), "\n")
+	var yamlLines []string
+	var bodyLines []string
+	inYAML := false
+	foundSecond := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if i == 0 && trimmed == yamlDelimiter {
+			inYAML = true
+			continue
+		}
+		if inYAML && !foundSecond {
+			if trimmed == yamlDelimiter {
+				foundSecond = true
+				inYAML = false
+				continue
+			}
+			yamlLines = append(yamlLines, line)
+			continue
+		}
+		if foundSecond {
+			bodyLines = append(bodyLines, line)
+		}
+	}
+
+	body := strings.Join(bodyLines, "\n")
+	return yamlLines, body, nil
 }
 
 // validateRemoteExists checks if the configured git remote exists in the repository.
