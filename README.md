@@ -312,6 +312,21 @@ Behavior:
 - Stages only `.work/` changes; skips committing if external (non-.work) changes are detected
 - Uses provided commit message or the configured default when none is given
 
+### `kira latest`
+Updates your branch with the latest trunk. Works on both trunk and feature branches.
+
+```bash
+kira latest                    # Stash (if needed), fetch, update; pop stash after
+kira latest --no-pop-stash      # Stash but do not pop after successful update
+kira latest --abort-on-conflict # On conflict, abort rebase/update and pop stash
+```
+
+Behavior:
+- **On a feature branch**: Fetches and rebases your branch onto trunk.
+- **On trunk**: Fetches and updates local trunk from remote (e.g. pull --rebase).
+- Uncommitted changes are stashed before the update and popped after success (unless `--no-pop-stash`).
+- In polyrepo setups, each repository is handled according to its own current branch.
+
 ### `kira version`
 Prints version information embedded at build time (SemVer tag if present), commit, build date, and dirty state.
 
