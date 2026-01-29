@@ -2426,6 +2426,8 @@ fi
 
 ###############################################
 # Test 33: kira review - local-only E2E
+# Covers: trunk branch rejection, uncommitted changes, missing remote, non-GitHub remote.
+# Full GitHub PR creation/update E2E would require KIRA_GITHUB_TOKEN and a real repo.
 ###############################################
 echo ""
 echo "🧪 Test 33: kira review - local-only E2E"

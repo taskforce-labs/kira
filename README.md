@@ -280,6 +280,8 @@ Requirements:
 - The configured git remote must be a GitHub URL (HTTPS or SSH)
 - Set `KIRA_GITHUB_TOKEN` (required for PR creation/update)
 
+E2E tests for `kira review` in this repo are local-only (trunk branch, uncommitted changes, remote validation). Full PR creation/update E2E require `KIRA_GITHUB_TOKEN` and a real GitHub repository.
+
 ```bash
 export KIRA_GITHUB_TOKEN="ghp_..."
 kira review
