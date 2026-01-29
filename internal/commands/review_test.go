@@ -2753,3 +2753,235 @@ func TestRequestPRReviews(t *testing.T) {
 	// - Handling network errors
 	// - Handling context timeout
 }
+
+// TestUpdateTrunkStatus tests the updateTrunkStatus function
+const testWorkItemContentForTrunkStatus = `---
+id: 012
+title: Test Feature
+status: doing
+kind: prd
+created: 2024-01-01
+---
+# Test Feature
+`
+
+func TestUpdateTrunkStatus(t *testing.T) {
+	t.Run("updates trunk status successfully when work item exists on trunk", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "main")
+		_ = tmpDir
+
+		// We're already on main branch from setupTestGitRepo
+
+		// Create .work directory structure on trunk
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+
+		// Create work item on trunk in doing status
+		require.NoError(t, os.WriteFile(".work/2_doing/012-test-feature.prd.md", []byte(testWorkItemContentForTrunkStatus), 0o600))
+		require.NoError(t, exec.Command("git", "add", ".work").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
+
+		// Create feature branch
+		require.NoError(t, exec.Command("git", "checkout", "-b", "012-test-feature").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			StatusFolders: map[string]string{
+				"doing":  "2_doing",
+				"review": "3_review",
+			},
+		}
+
+		// Update trunk status
+		err := updateTrunkStatus("012", cfg)
+		require.NoError(t, err)
+
+		// Verify we're back on feature branch
+		currentBranch, err := getCurrentBranch("")
+		require.NoError(t, err)
+		assert.Equal(t, "012-test-feature", currentBranch)
+
+		// Verify work item was moved to review on trunk
+		require.NoError(t, exec.Command("git", "checkout", "main").Run())
+		content, err := os.ReadFile(".work/3_review/012-test-feature.prd.md")
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "status: review")
+	})
+
+	t.Run("copies work item from feature branch when not on trunk", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "main")
+		_ = tmpDir
+
+		// We're already on main branch from setupTestGitRepo
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+		// Create a placeholder file so git can track the directory
+		require.NoError(t, os.WriteFile(".work/3_review/.gitkeep", []byte(""), 0o600))
+		require.NoError(t, exec.Command("git", "add", ".work").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create feature branch with work item
+		require.NoError(t, exec.Command("git", "checkout", "-b", "012-test-feature").Run())
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+
+		require.NoError(t, os.WriteFile(".work/2_doing/012-test-feature.prd.md", []byte(testWorkItemContentForTrunkStatus), 0o600))
+		require.NoError(t, exec.Command("git", "add", ".work").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			StatusFolders: map[string]string{
+				"doing":  "2_doing",
+				"review": "3_review",
+			},
+		}
+
+		// Update trunk status (should copy from feature branch)
+		err := updateTrunkStatus("012", cfg)
+		require.NoError(t, err)
+
+		// Verify we're back on feature branch
+		currentBranch, err := getCurrentBranch("")
+		require.NoError(t, err)
+		assert.Equal(t, "012-test-feature", currentBranch)
+
+		// Verify work item was copied and moved to review on trunk
+		require.NoError(t, exec.Command("git", "checkout", "main").Run())
+		content, err := os.ReadFile(".work/3_review/012-test-feature.prd.md")
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "status: review")
+		assert.Contains(t, string(content), "id: 012")
+		assert.Contains(t, string(content), "title: Test Feature")
+	})
+
+	t.Run("handles stash failures gracefully when no changes to stash", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "main")
+		_ = tmpDir
+
+		// We're already on main branch from setupTestGitRepo
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+
+		require.NoError(t, os.WriteFile(".work/2_doing/012-test-feature.prd.md", []byte(testWorkItemContentForTrunkStatus), 0o600))
+		require.NoError(t, exec.Command("git", "add", ".work").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
+
+		// Create feature branch (clean working directory - no changes to stash)
+		require.NoError(t, exec.Command("git", "checkout", "-b", "012-test-feature").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			StatusFolders: map[string]string{
+				"doing":  "2_doing",
+				"review": "3_review",
+			},
+		}
+
+		// Should succeed even though there's nothing to stash
+		err := updateTrunkStatus("012", cfg)
+		require.NoError(t, err)
+	})
+
+	t.Run("switches branches correctly", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "main")
+		_ = tmpDir
+
+		// We're already on main branch from setupTestGitRepo
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+
+		require.NoError(t, os.WriteFile(".work/2_doing/012-test-feature.prd.md", []byte(testWorkItemContentForTrunkStatus), 0o600))
+		require.NoError(t, exec.Command("git", "add", ".work").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
+
+		// Create feature branch
+		require.NoError(t, exec.Command("git", "checkout", "-b", "012-test-feature").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			StatusFolders: map[string]string{
+				"doing":  "2_doing",
+				"review": "3_review",
+			},
+		}
+
+		// Verify we start on feature branch
+		currentBranch, err := getCurrentBranch("")
+		require.NoError(t, err)
+		assert.Equal(t, "012-test-feature", currentBranch)
+
+		// Update trunk status
+		err = updateTrunkStatus("012", cfg)
+		require.NoError(t, err)
+
+		// Verify we're back on feature branch
+		currentBranch, err = getCurrentBranch("")
+		require.NoError(t, err)
+		assert.Equal(t, "012-test-feature", currentBranch)
+	})
+
+	t.Run("returns error for nil config", func(t *testing.T) {
+		err := updateTrunkStatus("012", nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "configuration cannot be nil")
+	})
+
+	t.Run("returns error for empty work item ID", func(t *testing.T) {
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+			},
+		}
+		err := updateTrunkStatus("", cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "work item ID cannot be empty")
+	})
+
+	t.Run("returns error when work item not found on feature branch", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "main")
+		_ = tmpDir
+
+		// We're already on main branch from setupTestGitRepo
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+		// Create a placeholder file so git can track the directory
+		require.NoError(t, os.WriteFile(".work/3_review/.gitkeep", []byte(""), 0o600))
+		require.NoError(t, exec.Command("git", "add", ".work").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create feature branch without work item (but with a commit so branch exists)
+		require.NoError(t, exec.Command("git", "checkout", "-b", "012-test-feature").Run())
+		require.NoError(t, os.WriteFile("test2.txt", []byte("test"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "test2.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Feature branch commit").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			StatusFolders: map[string]string{
+				"doing":  "2_doing",
+				"review": "3_review",
+			},
+		}
+
+		// Should fail because work item doesn't exist
+		err := updateTrunkStatus("012", cfg)
+		require.Error(t, err)
+		assert.True(t,
+			strings.Contains(err.Error(), "not found on feature branch") ||
+				strings.Contains(err.Error(), "work item 012 not found"),
+			"error should mention work item not found: %s", err.Error())
+	})
+}

@@ -1239,3 +1239,409 @@ func handleRequestReviewersError(err error, resp *github.Response, owner, repo s
 		return fmt.Errorf("failed to request reviews: %w", err)
 	}
 }
+
+// updateTrunkStatus updates the work item status on the trunk branch.
+// It pulls latest trunk, switches to trunk branch, copies work item if needed,
+// updates status to review, commits, and switches back to original branch.
+func updateTrunkStatus(workItemID string, cfg *config.Config) error {
+	// Validate inputs
+	if err := validateUpdateTrunkStatusInputs(workItemID, cfg); err != nil {
+		return err
+	}
+
+	// Prepare trunk update context
+	ctx, err := prepareTrunkUpdateContext(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Pull latest trunk before updating (similar to kira start pattern)
+	// This will skip if remote doesn't exist (not an error for local repos)
+	if err := pullLatestTrunk(ctx.trunkBranch, ctx.remoteName, ctx.repoRoot, cfg); err != nil {
+		return fmt.Errorf("failed to pull latest trunk: %w", err)
+	}
+
+	// Stash any uncommitted changes (handle failures gracefully)
+	hasStash, err := stashUncommittedChanges(ctx.repoRoot)
+	if err != nil {
+		return err
+	}
+
+	// Switch to trunk branch
+	if err := checkoutBranch(ctx.trunkBranch, ctx.repoRoot); err != nil {
+		return fmt.Errorf("failed to checkout trunk branch '%s': %w", ctx.trunkBranch, err)
+	}
+
+	// Always switch back to original branch, even on error
+	defer restoreBranchAndStash(ctx.currentBranch, ctx.repoRoot, hasStash)
+
+	// Perform trunk status update operations
+	return performTrunkStatusUpdate(workItemID, ctx, cfg)
+}
+
+// trunkUpdateContext holds context for trunk status update operations.
+type trunkUpdateContext struct {
+	repoRoot      string
+	currentBranch string
+	trunkBranch   string
+	remoteName    string
+}
+
+// validateUpdateTrunkStatusInputs validates inputs for updateTrunkStatus.
+func validateUpdateTrunkStatusInputs(workItemID string, cfg *config.Config) error {
+	if cfg == nil {
+		return fmt.Errorf("configuration cannot be nil")
+	}
+	if strings.TrimSpace(workItemID) == "" {
+		return fmt.Errorf("work item ID cannot be empty")
+	}
+	return nil
+}
+
+// prepareTrunkUpdateContext prepares the context for trunk status update.
+func prepareTrunkUpdateContext(cfg *config.Config) (*trunkUpdateContext, error) {
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get repository root: %w", err)
+	}
+
+	currentBranch, err := getCurrentBranch("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine current branch: %w", err)
+	}
+
+	trunkBranch, err := determineTrunkBranch(cfg, "", repoRoot, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine trunk branch: %w", err)
+	}
+
+	remoteName := resolveRemoteName(cfg, nil)
+
+	return &trunkUpdateContext{
+		repoRoot:      repoRoot,
+		currentBranch: currentBranch,
+		trunkBranch:   trunkBranch,
+		remoteName:    remoteName,
+	}, nil
+}
+
+// performTrunkStatusUpdate performs the actual trunk status update operations.
+func performTrunkStatusUpdate(workItemID string, ctx *trunkUpdateContext, cfg *config.Config) error {
+	// Ensure work item exists on trunk (copy if needed)
+	if err := ensureWorkItemOnTrunk(workItemID, ctx.currentBranch, ctx.repoRoot); err != nil {
+		return err
+	}
+
+	// Update work item status to review
+	if err := updateWorkItemStatusOnTrunk(workItemID, cfg); err != nil {
+		return fmt.Errorf("failed to update trunk status: %w", err)
+	}
+
+	// Commit the status update
+	if err := commitTrunkStatusUpdate(workItemID, ctx.trunkBranch, ctx.repoRoot, cfg); err != nil {
+		return fmt.Errorf("failed to commit trunk status update: %w", err)
+	}
+
+	// Push to remote if configured (optional - don't fail if push is disabled or fails)
+	// Note: Per PRD, push is optional and should not fail the operation
+	_ = pushTrunkStatusUpdate(ctx.trunkBranch, ctx.remoteName, ctx.repoRoot, cfg)
+
+	return nil
+}
+
+// pullLatestTrunk pulls the latest changes from the remote trunk branch.
+func pullLatestTrunk(trunkBranch, remoteName, repoRoot string, _ *config.Config) error {
+	// Check if remote exists
+	remoteExists, err := checkRemoteExists(remoteName, repoRoot, false)
+	if err != nil {
+		// If we can't check, assume remote doesn't exist and skip pull (not an error)
+		return nil
+	}
+
+	if !remoteExists {
+		// No remote configured - skip pull (not an error for local-only repos)
+		return nil
+	}
+
+	// Use the same pattern as pullLatestChanges from start.go
+	// Wrap error to provide context
+	if err := pullLatestChanges(remoteName, trunkBranch, repoRoot, false); err != nil {
+		// Check if error is due to remote not existing (might have been created between check and fetch)
+		if strings.Contains(err.Error(), "No such remote") || strings.Contains(err.Error(), "does not appear to be a git repository") {
+			// Remote doesn't exist - skip pull (not an error)
+			return nil
+		}
+		return err
+	}
+
+	return nil
+}
+
+// workItemExistsOnTrunk checks if a work item exists on the current branch (trunk).
+func workItemExistsOnTrunk(workItemID string) (bool, error) {
+	_, err := findWorkItemFile(workItemID)
+	if err != nil {
+		// If work item not found, it doesn't exist
+		if strings.Contains(err.Error(), "not found") {
+			return false, nil
+		}
+		// Other errors (permissions, etc.) should be returned
+		return false, err
+	}
+	return true, nil
+}
+
+// copyWorkItemFromFeatureBranch copies a work item from the feature branch to the trunk branch.
+func copyWorkItemFromFeatureBranch(workItemID, featureBranch, repoRoot string) error {
+	// Find work item path on feature branch
+	workItemPath, err := findWorkItemPathOnBranch(workItemID, featureBranch, repoRoot)
+	if err != nil {
+		return err
+	}
+
+	// Get file content and write it
+	return copyWorkItemFile(workItemID, featureBranch, workItemPath, repoRoot)
+}
+
+// findWorkItemPathOnBranch finds the path of a work item on a specific branch.
+func findWorkItemPathOnBranch(workItemID, branchName, repoRoot string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Try to find the work item file path by searching on the feature branch
+	lsTreeOutput, err := executeCommand(ctx, "git", []string{"ls-tree", "-r", "--name-only", branchName, ".work"}, repoRoot, false)
+	if err != nil {
+		// If ls-tree fails, try searching all files
+		return findWorkItemPathInAllFiles(workItemID, branchName, repoRoot)
+	}
+
+	// Search for the work item file in .work directory
+	lines := strings.Split(strings.TrimSpace(lsTreeOutput), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Check if this file contains the work item ID
+		if strings.Contains(line, workItemID) && strings.HasSuffix(line, ".md") {
+			return line, nil
+		}
+	}
+
+	return "", fmt.Errorf("work item %s not found on feature branch '%s'", workItemID, branchName)
+}
+
+// findWorkItemPathInAllFiles searches all files on a branch for the work item.
+func findWorkItemPathInAllFiles(workItemID, branchName, repoRoot string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	allFilesOutput, err := executeCommand(ctx, "git", []string{"ls-tree", "-r", "--name-only", branchName}, repoRoot, false)
+	if err != nil {
+		return "", fmt.Errorf("failed to list files on feature branch '%s': %w", branchName, err)
+	}
+
+	// Search in all files
+	lines := strings.Split(strings.TrimSpace(allFilesOutput), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Check if this is a work item file with the matching ID
+		if strings.HasPrefix(line, ".work/") && strings.Contains(line, workItemID) && strings.HasSuffix(line, ".md") {
+			return line, nil
+		}
+	}
+
+	return "", fmt.Errorf("work item %s not found on feature branch '%s'", workItemID, branchName)
+}
+
+// copyWorkItemFile copies a work item file from a branch to the current working directory.
+func copyWorkItemFile(_, branchName, workItemPath, repoRoot string) error { //nolint:revive // workItemID unused but kept for API consistency
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Get the file content from the feature branch
+	showOutput, err := executeCommand(ctx, "git", []string{"show", branchName + ":" + workItemPath}, repoRoot, false)
+	if err != nil {
+		return fmt.Errorf("failed to get work item content from feature branch: %w", err)
+	}
+
+	// Ensure target directory exists
+	targetDir := filepath.Dir(workItemPath)
+	if err := os.MkdirAll(targetDir, 0o700); err != nil {
+		return fmt.Errorf("failed to create target directory: %w", err)
+	}
+
+	// Validate the path is within .work directory
+	if err := validateWorkPath(workItemPath); err != nil {
+		return fmt.Errorf("invalid work item path: %w", err)
+	}
+
+	// Write the file content
+	if err := os.WriteFile(workItemPath, []byte(showOutput), 0o600); err != nil {
+		return fmt.Errorf("failed to write work item file: %w", err)
+	}
+
+	return nil
+}
+
+// updateWorkItemStatusOnTrunk updates the work item status to review on the trunk branch.
+func updateWorkItemStatusOnTrunk(workItemID string, cfg *config.Config) error {
+	// Use moveWorkItemWithoutCommit to update status
+	return moveWorkItemWithoutCommit(cfg, workItemID, statusReview)
+}
+
+// commitTrunkStatusUpdate commits the status update on the trunk branch.
+func commitTrunkStatusUpdate(workItemID, _, repoRoot string, cfg *config.Config) error {
+	// Find the work item file to get metadata
+	workItemPath, err := findWorkItemFile(workItemID)
+	if err != nil {
+		return fmt.Errorf("failed to find work item file: %w", err)
+	}
+
+	// Extract metadata for commit message
+	workItemType, id, title, currentStatus, err := extractWorkItemMetadata(workItemPath)
+	if err != nil {
+		return fmt.Errorf("failed to extract work item metadata: %w", err)
+	}
+
+	// Build commit message
+	subject, body, err := buildCommitMessage(cfg, workItemType, id, title, currentStatus, statusReview)
+	if err != nil {
+		return fmt.Errorf("failed to build commit message: %w", err)
+	}
+
+	// Get old and new paths for commit
+	oldPath := workItemPath
+	// The file should already be in the review folder after moveWorkItemWithoutCommit
+	// But let's verify by finding it again
+	newPath, err := findWorkItemFile(workItemID)
+	if err != nil {
+		return fmt.Errorf("failed to find work item after move: %w", err)
+	}
+
+	// Stage the changes
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	// Stage both old and new paths (git will handle the move)
+	if oldPath != newPath {
+		// File was moved - stage both deletion and addition
+		if _, err := executeCommand(ctx, "git", []string{"add", oldPath, newPath}, repoRoot, false); err != nil {
+			return fmt.Errorf("failed to stage work item changes: %w", err)
+		}
+	} else {
+		// File was updated in place - just stage it
+		if _, err := executeCommand(ctx, "git", []string{"add", newPath}, repoRoot, false); err != nil {
+			return fmt.Errorf("failed to stage work item changes: %w", err)
+		}
+	}
+
+	// Commit the changes
+	commitCtx, commitCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer commitCancel()
+
+	commitMsg := subject
+	if body != "" {
+		commitMsg = subject + "\n\n" + body
+	}
+
+	if _, err := executeCommand(commitCtx, "git", []string{"commit", "-m", commitMsg}, repoRoot, false); err != nil {
+		return fmt.Errorf("failed to commit status update: %w", err)
+	}
+
+	return nil
+}
+
+// pushTrunkStatusUpdate pushes the trunk branch changes to remote (optional).
+func pushTrunkStatusUpdate(trunkBranch, remoteName, repoRoot string, _ *config.Config) error {
+	// Check if remote exists
+	remoteExists, err := checkRemoteExists(remoteName, repoRoot, false)
+	if err != nil {
+		return fmt.Errorf("failed to check remote: %w", err)
+	}
+
+	if !remoteExists {
+		// No remote configured - skip push (not an error)
+		return nil
+	}
+
+	// Push to remote
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	if _, err := executeCommand(ctx, "git", []string{"push", remoteName, trunkBranch}, repoRoot, false); err != nil {
+		// Push failure is non-fatal per PRD - just log warning
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: failed to push trunk status update to %s/%s: %v\n", remoteName, trunkBranch, err)
+		return nil // Don't return error - push is optional
+	}
+
+	return nil
+}
+
+// checkoutBranch switches to the specified branch.
+func checkoutBranch(branchName, repoRoot string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	_, err := executeCommand(ctx, "git", []string{"checkout", branchName}, repoRoot, false)
+	if err != nil {
+		return fmt.Errorf("failed to checkout branch '%s': %w", branchName, err)
+	}
+
+	return nil
+}
+
+// stashUncommittedChanges stashes uncommitted changes and returns whether a stash was created.
+func stashUncommittedChanges(repoRoot string) (bool, error) {
+	stashOutput, err := executeCommand(context.Background(), "git", []string{"stash", "push", "-m", "kira-review-stash"}, repoRoot, false)
+	if err != nil {
+		// Check if stash failed because there were no changes to stash
+		// This is not an error - we can continue
+		if strings.Contains(err.Error(), "No local changes") || strings.Contains(err.Error(), "nothing to stash") {
+			return false, nil
+		}
+		// Check for uncommitted changes to provide better error message
+		hasUncommitted, checkErr := checkUncommittedChanges(repoRoot, false)
+		if checkErr == nil && hasUncommitted {
+			return false, fmt.Errorf("failed to stash uncommitted changes. Commit or stash changes manually before submitting for review: %w", err)
+		}
+		// Other stash errors - assume no stash needed
+		return false, nil
+	}
+	// Stash succeeded - we have something to restore later
+	return strings.TrimSpace(stashOutput) != "", nil
+}
+
+// restoreBranchAndStash restores the original branch and stashed changes.
+func restoreBranchAndStash(currentBranch, repoRoot string, hasStash bool) {
+	if restoreErr := checkoutBranch(currentBranch, repoRoot); restoreErr != nil {
+		// Log error but don't override original error
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: failed to switch back to branch '%s': %v\n", currentBranch, restoreErr)
+	}
+
+	// Restore stashed changes if any
+	if hasStash {
+		_, _ = executeCommand(context.Background(), "git", []string{"stash", "pop"}, repoRoot, false)
+	}
+}
+
+// ensureWorkItemOnTrunk ensures the work item exists on trunk, copying from feature branch if needed.
+func ensureWorkItemOnTrunk(workItemID, featureBranch, repoRoot string) error {
+	// Check if work item exists on trunk
+	exists, err := workItemExistsOnTrunk(workItemID)
+	if err != nil {
+		return fmt.Errorf("failed to check if work item exists on trunk: %w", err)
+	}
+
+	// If work item doesn't exist on trunk, copy from feature branch
+	if !exists {
+		if err := copyWorkItemFromFeatureBranch(workItemID, featureBranch, repoRoot); err != nil {
+			return fmt.Errorf("failed to copy work item to trunk: %w", err)
+		}
+	}
+
+	return nil
+}
