@@ -40,13 +40,13 @@ func addSafeDirectory(t *testing.T, dir string) {
 var gitConfigCIMu sync.Mutex
 
 // setupGitConfigForCI configures git to trust any directory (safe.directory=*), using a temp
-// config file so CI environments with read-only or missing ~/.gitconfig still allow repo operations.
+// config file so environments with restrictive ~/.gitconfig allow repo operations in t.TempDir().
 // Call at the start of tests that run git in t.TempDir() and restore env in defer.
 func setupGitConfigForCI(t *testing.T) {
 	t.Helper()
 	configDir := t.TempDir()
 	configPath := filepath.Join(configDir, "gitconfig")
-	// safe.directory=* so all temp repos are trusted (avoids "dubious ownership" in CI)
+	// safe.directory=* so all temp repos are trusted (avoids "dubious ownership" locally)
 	require.NoError(t, os.WriteFile(configPath, []byte("[safe]\n  directory = *\n"), 0o600))
 	oldVal := os.Getenv("GIT_CONFIG_GLOBAL")
 	require.NoError(t, os.Setenv("GIT_CONFIG_GLOBAL", configPath))
@@ -59,10 +59,15 @@ func setupGitConfigForCI(t *testing.T) {
 	})
 }
 
-// setupGitConfigForCISerial calls setupGitConfigForCI and holds a mutex for the test duration so
-// only one such test runs at a time. Use in tests that run git in temp dirs and may run with -parallel.
+// setupGitConfigForCISerial calls setupGitConfigForCI and holds a mutex so only one such test runs
+// at a time. On GitHub Actions we skip setup: other tests use temp dirs + git without it and pass on
+// CI; overriding with GIT_CONFIG_GLOBAL was causing exit status 1. If these tests still fail on CI,
+// the error will now include git's stderr (or "(no output)") so we can see the real cause.
 func setupGitConfigForCISerial(t *testing.T) {
 	t.Helper()
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		return // Use runner default config; do not set GIT_CONFIG_GLOBAL.
+	}
 	gitConfigCIMu.Lock()
 	t.Cleanup(func() { gitConfigCIMu.Unlock() })
 	setupGitConfigForCI(t)
@@ -1812,6 +1817,9 @@ func TestUpdateTrunkFromRemote(t *testing.T) {
 			Remote:      "origin",
 		}
 		err := updateTrunkFromRemote(repo)
+		if err != nil {
+			t.Logf("updateTrunkFromRemote full error: %v", err)
+		}
 		require.NoErrorf(t, err, "updateTrunkFromRemote: %v", err)
 
 		// Local main should have the remote's commit

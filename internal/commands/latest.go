@@ -1580,6 +1580,9 @@ func isOnTrunkBranch(repo RepositoryInfo) (bool, error) {
 	return currentBranch == repo.TrunkBranch, nil
 }
 
+// gitNonInteractiveEnv returns env vars so git rebase never opens an editor or pager (e.g. in CI).
+var gitNonInteractiveEnv = []string{"GIT_EDITOR=true", "GIT_PAGER=cat"}
+
 // updateTrunkFromRemote updates local trunk from remote (e.g. after fetch) by rebasing onto remote/trunk.
 // Use when the current branch is already trunk; uses the same timeout and error handling as rebaseOntoTrunk.
 func updateTrunkFromRemote(repo RepositoryInfo) error {
@@ -1587,7 +1590,7 @@ func updateTrunkFromRemote(repo RepositoryInfo) error {
 	defer cancel()
 
 	remoteRef := fmt.Sprintf("%s/%s", repo.Remote, repo.TrunkBranch)
-	_, err := executeCommandCombinedOutput(ctx, "git", []string{"rebase", remoteRef}, repo.Path, false)
+	_, err := executeCommandCombinedOutputWithEnv(ctx, "git", []string{"rebase", remoteRef}, repo.Path, gitNonInteractiveEnv, false)
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "CONFLICT") || strings.Contains(errStr, "conflict") {
@@ -1618,9 +1621,9 @@ func rebaseOntoTrunk(repo RepositoryInfo) error {
 	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer cancel()
 
-	// Rebase onto remote/trunkBranch
+	// Rebase onto remote/trunkBranch (GIT_EDITOR/GIT_PAGER avoid editor/pager in CI)
 	remoteRef := fmt.Sprintf("%s/%s", repo.Remote, repo.TrunkBranch)
-	_, err = executeCommandCombinedOutput(ctx, "git", []string{"rebase", remoteRef}, repo.Path, false)
+	_, err = executeCommandCombinedOutputWithEnv(ctx, "git", []string{"rebase", remoteRef}, repo.Path, gitNonInteractiveEnv, false)
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "CONFLICT") || strings.Contains(errStr, "conflict") {
