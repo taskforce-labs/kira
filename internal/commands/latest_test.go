@@ -75,12 +75,19 @@ func setupGitConfigForCISerial(t *testing.T) {
 
 func logGitDebug(t *testing.T, dir string) {
 	t.Helper()
-	t.Logf("env GITHUB_ACTIONS=%q GIT_CONFIG_GLOBAL=%q HOME=%q XDG_CONFIG_HOME=%q",
+	header := fmt.Sprintf("GIT DEBUG (dir=%s)", dir)
+	t.Log(header)
+	fmt.Fprintln(os.Stderr, header)
+
+	envLine := fmt.Sprintf(
+		"env GITHUB_ACTIONS=%q GIT_CONFIG_GLOBAL=%q HOME=%q XDG_CONFIG_HOME=%q",
 		os.Getenv("GITHUB_ACTIONS"),
 		os.Getenv("GIT_CONFIG_GLOBAL"),
 		os.Getenv("HOME"),
 		os.Getenv("XDG_CONFIG_HOME"),
 	)
+	t.Log(envLine)
+	fmt.Fprintln(os.Stderr, envLine)
 
 	commands := [][]string{
 		{"git", "--version"},
@@ -90,14 +97,20 @@ func logGitDebug(t *testing.T, dir string) {
 	}
 
 	for _, args := range commands {
+		cmdLine := fmt.Sprintf("git cmd: %s", strings.Join(args, " "))
 		// #nosec G204 - fixed git command list for test debugging
 		cmd := exec.Command(args[0], args[1:]...)
 		output, err := cmd.CombinedOutput()
-		t.Logf("git cmd: %s", strings.Join(args, " "))
+		t.Log(cmdLine)
+		fmt.Fprintln(os.Stderr, cmdLine)
 		if err != nil {
-			t.Logf("git err: %v", err)
+			errLine := fmt.Sprintf("git err: %v", err)
+			t.Log(errLine)
+			fmt.Fprintln(os.Stderr, errLine)
 		}
-		t.Logf("git out:\n%s", strings.TrimSpace(string(output)))
+		outLine := fmt.Sprintf("git out:\n%s", strings.TrimSpace(string(output)))
+		t.Log(outLine)
+		fmt.Fprintln(os.Stderr, outLine)
 	}
 }
 
@@ -1986,7 +1999,7 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	var mu sync.Mutex
 	result := processRepositoryUpdate(repo, false, false, &mu) // abortOnConflict=false
 
-	if result.Error != nil && strings.Contains(result.Error.Error(), "exit status") {
+	if result.Error != nil {
 		logGitDebug(t, tmpDir)
 	}
 	require.Error(t, result.Error, "expected rebase conflict")
@@ -2059,7 +2072,7 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	var mu sync.Mutex
 	result := processRepositoryUpdate(repo, true, false, &mu) // abortOnConflict=true
 
-	if result.Error != nil && strings.Contains(result.Error.Error(), "exit status") {
+	if result.Error != nil {
 		logGitDebug(t, tmpDir)
 	}
 	require.Error(t, result.Error, "expected rebase conflict")
