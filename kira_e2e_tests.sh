@@ -124,8 +124,6 @@ echo ""
 echo "📋 Test 6: Create a work item via 'kira new' (with --input, default status)"
 "$KIRA_BIN" new prd "Test Feature From Inputs" \
   --input assigned=qa@example.com \
-  --input estimate=5 \
-  --input due=2025-12-31 \
   --input tags="frontend,api" \
   --input criteria1="Login works" \
   --input criteria2="Logout works" \
@@ -146,13 +144,11 @@ else
     exit 1
 fi
 
-# Validate template fields were filled
+# Validate template fields were filled (default templates do not include estimate/due)
 if grep -q "^title: Test Feature From Inputs$" "$WORK_ITEM_PATH" && \
    grep -q "^status: backlog$" "$WORK_ITEM_PATH" && \
    grep -q "^kind: prd$" "$WORK_ITEM_PATH" && \
    grep -q "^assigned: qa@example.com$" "$WORK_ITEM_PATH" && \
-   grep -q "^estimate: 5$" "$WORK_ITEM_PATH" && \
-   grep -q "^due: 2025-12-31$" "$WORK_ITEM_PATH" && \
    grep -q "^tags: frontend,api$" "$WORK_ITEM_PATH" && \
    grep -q "^# Test Feature From Inputs$" "$WORK_ITEM_PATH"; then
     echo "✅ Template fields filled correctly from inputs"

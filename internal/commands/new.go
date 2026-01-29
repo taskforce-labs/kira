@@ -453,7 +453,11 @@ func showTemplateInputs(cfg *config.Config, template string) error {
 
 	fmt.Printf("Available inputs for template '%s':\n", template)
 	for _, input := range inputs {
-		fmt.Printf("- %s (%s): %s\n", input.Name, input.Type, input.Description)
+		desc := input.Description
+		if input.Name == "created" {
+			desc = desc + " (set automatically by kira new; not prompted)"
+		}
+		fmt.Printf("- %s (%s): %s\n", input.Name, input.Type, desc)
 		if len(input.Options) > 0 {
 			fmt.Printf("  Options: %s\n", strings.Join(input.Options, ", "))
 		}
