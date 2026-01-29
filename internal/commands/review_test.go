@@ -3364,31 +3364,31 @@ func TestReviewCommandIntegration_Phase21(t *testing.T) {
 // TestUpdateGitHubPR tests the updateGitHubPR function (Phase 21 - create/update PR).
 func TestUpdateGitHubPR(t *testing.T) {
 	t.Run("returns error for nil client", func(t *testing.T) {
-		_, err := updateGitHubPR(nil, "owner", "repo", 1, "Title", "Body")
+		_, err := updateGitHubPR(nil, "owner", "repo", 1, "Title", "Body", nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "client cannot be nil")
 	})
 
 	t.Run("returns error for empty owner", func(t *testing.T) {
-		_, err := updateGitHubPR(ghClientOrSkip(t), "", "repo", 1, "Title", "Body")
+		_, err := updateGitHubPR(ghClientOrSkip(t), "", "repo", 1, "Title", "Body", nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "owner cannot be empty")
 	})
 
 	t.Run("returns error for empty repo", func(t *testing.T) {
-		_, err := updateGitHubPR(ghClientOrSkip(t), "owner", "", 1, "Title", "Body")
+		_, err := updateGitHubPR(ghClientOrSkip(t), "owner", "", 1, "Title", "Body", nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "repo cannot be empty")
 	})
 
 	t.Run("returns error for invalid PR number", func(t *testing.T) {
-		_, err := updateGitHubPR(ghClientOrSkip(t), "owner", "repo", 0, "Title", "Body")
+		_, err := updateGitHubPR(ghClientOrSkip(t), "owner", "repo", 0, "Title", "Body", nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "PR number must be greater than 0")
 	})
 
 	t.Run("returns error for empty title", func(t *testing.T) {
-		_, err := updateGitHubPR(ghClientOrSkip(t), "owner", "repo", 1, "", "Body")
+		_, err := updateGitHubPR(ghClientOrSkip(t), "owner", "repo", 1, "", "Body", nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "title cannot be empty")
 	})

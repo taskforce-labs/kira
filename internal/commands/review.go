@@ -170,48 +170,69 @@ The command will:
 			return fmt.Errorf("failed to determine base branch: %w", err)
 		}
 
-		// Step 13: Create or update PR
+		// Step 13: Create or update PR (or short-circuit if existing PR is already ready)
 		var createdOrUpdatedPR *github.PullRequest
-		if existingPR != nil {
-			createdOrUpdatedPR, err = updateGitHubPR(client, owner, repo, existingPR.GetNumber(), prTitle, prDescription)
-			if err != nil {
-				return err
+		var reviewers []string
+		if existingPR != nil && !existingPR.GetDraft() {
+			// PR already exists and is ready for review: show message and skip API updates (PRD)
+			createdOrUpdatedPR = existingPR
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Pull request already exists and is ready for review.")
+			prURL := createdOrUpdatedPR.GetHTMLURL()
+			if prURL != "" {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), prURL)
 			}
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Pull request updated.")
+			// Resolve reviewers for metadata only (no API request)
+			reviewerSpecs, _ := cmd.Flags().GetStringArray("reviewer")
+			reviewers, _ = resolveReviewers(reviewerSpecs, cfg)
 		} else {
-			createdOrUpdatedPR, err = createGitHubPR(client, owner, repo, currentBranch, baseBranch, prTitle, prDescription, isDraft)
-			if err != nil {
-				return err
+			if existingPR != nil {
+				// When user passed --draft=false and existing PR is draft, mark it ready for review
+				var draftForEdit *bool
+				if existingPR.GetDraft() && !isDraft {
+					draftForEdit = github.Bool(false)
+				}
+				createdOrUpdatedPR, err = updateGitHubPR(client, owner, repo, existingPR.GetNumber(), prTitle, prDescription, draftForEdit)
+				if err != nil {
+					return err
+				}
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Pull request updated.")
+			} else {
+				createdOrUpdatedPR, err = createGitHubPR(client, owner, repo, currentBranch, baseBranch, prTitle, prDescription, isDraft)
+				if err != nil {
+					return err
+				}
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Pull request created.")
 			}
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Pull request created.")
+
+			prURL := createdOrUpdatedPR.GetHTMLURL()
+			if prURL != "" {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), prURL)
+			}
+
+			prNumber := createdOrUpdatedPR.GetNumber()
+			if prNumber == 0 {
+				return fmt.Errorf("failed to get pull request number after create/update")
+			}
+
+			// Step 14: Add labels
+			if err := addPRLabels(client, owner, repo, prNumber, extractTagsFromWorkItem(workItem)); err != nil {
+				return fmt.Errorf("failed to add PR labels: %w", err)
+			}
+
+			// Step 15: Resolve reviewers
+			reviewerSpecs, _ := cmd.Flags().GetStringArray("reviewer")
+			reviewers, err = resolveReviewers(reviewerSpecs, cfg)
+			if err != nil {
+				return fmt.Errorf("failed to resolve reviewers: %w", err)
+			}
+
+			// Step 16: Request reviews
+			if err := requestPRReviews(client, owner, repo, prNumber, reviewers, cfg); err != nil {
+				return fmt.Errorf("failed to request reviews: %w", err)
+			}
 		}
 
 		prURL := createdOrUpdatedPR.GetHTMLURL()
-		if prURL != "" {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), prURL)
-		}
-
-		prNumber := createdOrUpdatedPR.GetNumber()
-		if prNumber == 0 {
-			return fmt.Errorf("failed to get pull request number after create/update")
-		}
-
-		// Step 14: Add labels
-		if err := addPRLabels(client, owner, repo, prNumber, extractTagsFromWorkItem(workItem)); err != nil {
-			return fmt.Errorf("failed to add PR labels: %w", err)
-		}
-
-		// Step 15: Resolve reviewers
-		reviewerSpecs, _ := cmd.Flags().GetStringArray("reviewer")
-		reviewers, err := resolveReviewers(reviewerSpecs, cfg)
-		if err != nil {
-			return fmt.Errorf("failed to resolve reviewers: %w", err)
-		}
-
-		// Step 16: Request reviews
-		if err := requestPRReviews(client, owner, repo, prNumber, reviewers, cfg); err != nil {
-			return fmt.Errorf("failed to request reviews: %w", err)
-		}
 
 		// Step 17: Update trunk status (if enabled)
 		if trunkUpdateEnabled {
@@ -892,6 +913,7 @@ func pushBranchIfNeeded(branchName string, cfg *config.Config) error {
 const envGitHubToken = "KIRA_GITHUB_TOKEN"
 
 // githubTokenNewURL is the GitHub settings page for creating a new personal access token.
+// #nosec G101 -- URL to settings page, not a credential
 const githubTokenNewURL = "https://github.com/settings/personal-access-tokens/new"
 
 // getGitHubToken reads the GitHub token from the KIRA_GITHUB_TOKEN environment variable only.
@@ -917,10 +939,10 @@ func validateGitHubToken(token string) error {
 	tc := oauth2.NewClient(ctx, ts)
 	client := github.NewClient(tc)
 
-	// Make an authenticated API call to verify the token
-	// Using RateLimitService.Get endpoint which requires authentication
-	// This validates the token is valid without needing specific scopes
-	rateLimits, resp, err := client.RateLimit.Get(ctx)
+	// Make an authenticated API call to verify the token (with retry on transient failures)
+	rateLimits, resp, err := gh.RetryWithBackoff(func() (*github.RateLimits, *github.Response, error) {
+		return client.RateLimit.Get(ctx)
+	})
 	if err != nil {
 		// Check if it's an authentication error
 		if resp != nil && resp.StatusCode == http.StatusUnauthorized {
@@ -1044,7 +1066,9 @@ func findExistingPR(client *github.Client, owner, repo, branchName string) (*git
 		},
 	}
 
-	prs, resp, err := client.PullRequests.List(ctx, owner, repo, opts)
+	prs, resp, err := gh.RetryWithBackoff(func() ([]*github.PullRequest, *github.Response, error) {
+		return client.PullRequests.List(ctx, owner, repo, opts)
+	})
 	if err != nil {
 		return nil, handlePRListError(err, resp, owner, repo)
 	}
@@ -1139,8 +1163,10 @@ func createGitHubPR(client *github.Client, owner, repo, branchName, baseBranch, 
 		newPR.Body = &description
 	}
 
-	// Create the PR via GitHub API
-	pr, resp, err := client.PullRequests.Create(ctx, owner, repo, newPR)
+	// Create the PR via GitHub API (with retry on transient failures)
+	pr, resp, err := gh.RetryWithBackoff(func() (*github.PullRequest, *github.Response, error) {
+		return client.PullRequests.Create(ctx, owner, repo, newPR)
+	})
 	if err != nil {
 		return nil, handlePRCreateError(err, resp, owner, repo, branchName, baseBranch)
 	}
@@ -1194,9 +1220,10 @@ func handlePRCreateError(err error, resp *github.Response, owner, repo, branchNa
 	}
 }
 
-// updateGitHubPR updates an existing pull request's title and body.
+// updateGitHubPR updates an existing pull request's title, body, and optionally draft status.
+// When draft is non-nil (e.g. false to mark PR ready for review), the PR's draft status is updated.
 // Returns the updated PR or an error with a clear message.
-func updateGitHubPR(client *github.Client, owner, repo string, prNumber int, title, body string) (*github.PullRequest, error) {
+func updateGitHubPR(client *github.Client, owner, repo string, prNumber int, title, body string, draft *bool) (*github.PullRequest, error) {
 	if client == nil {
 		return nil, fmt.Errorf("GitHub client cannot be nil")
 	}
@@ -1220,8 +1247,13 @@ func updateGitHubPR(client *github.Client, owner, repo string, prNumber int, tit
 		Title: &title,
 		Body:  &body,
 	}
+	if draft != nil {
+		editPR.Draft = draft
+	}
 
-	pr, resp, err := client.PullRequests.Edit(ctx, owner, repo, prNumber, editPR)
+	pr, resp, err := gh.RetryWithBackoff(func() (*github.PullRequest, *github.Response, error) {
+		return client.PullRequests.Edit(ctx, owner, repo, prNumber, editPR)
+	})
 	if err != nil {
 		return nil, handlePRUpdateError(err, resp, owner, repo, prNumber)
 	}
@@ -1314,7 +1346,9 @@ func addPRLabels(client *github.Client, owner, repo string, prNumber int, tags [
 		label := tag
 		labels := []string{label}
 
-		_, resp, err := client.Issues.AddLabelsToIssue(ctx, owner, repo, prNumber, labels)
+		_, resp, err := gh.RetryWithBackoff(func() ([]*github.Label, *github.Response, error) {
+			return client.Issues.AddLabelsToIssue(ctx, owner, repo, prNumber, labels)
+		})
 		if err != nil {
 			// Handle 404 errors (label doesn't exist) by logging warning and continuing
 			if resp != nil && resp.StatusCode == http.StatusNotFound {
@@ -1493,7 +1527,9 @@ func requestPRReviews(client *github.Client, owner, repo string, prNumber int, r
 		Reviewers: reviewers,
 	}
 
-	_, resp, err := client.PullRequests.RequestReviewers(ctx, owner, repo, prNumber, reviewersRequest)
+	_, resp, err := gh.RetryWithBackoff(func() (*github.PullRequest, *github.Response, error) {
+		return client.PullRequests.RequestReviewers(ctx, owner, repo, prNumber, reviewersRequest)
+	})
 	if err != nil {
 		return handleRequestReviewersError(err, resp, owner, repo, prNumber)
 	}
