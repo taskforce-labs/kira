@@ -32,7 +32,7 @@ func TestParseTemplateInputs(t *testing.T) {
 	})
 
 	t.Run("parses datetime input", func(t *testing.T) {
-		content := `<!--input-datetime[yyyy-mm-dd]:created:"Creation date"-->`
+		content := `<!--input-datetime[yyyy-mm-dd]:created:"Created (auto-set)"-->`
 
 		inputs, err := ParseTemplateInputs(content)
 		require.NoError(t, err)
@@ -40,6 +40,7 @@ func TestParseTemplateInputs(t *testing.T) {
 		assert.Len(t, inputs.Inputs, 1)
 		assert.Equal(t, InputDateTime, inputs.Inputs["created"].Type)
 		assert.Equal(t, "yyyy-mm-dd", inputs.Inputs["created"].DateFormat)
+		assert.Equal(t, "Created (auto-set)", inputs.Inputs["created"].Description)
 	})
 
 	t.Run("parses string with options", func(t *testing.T) {
