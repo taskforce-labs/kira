@@ -28,6 +28,13 @@ kind: prd
 	testWorkItemPathDoing = ".work/2_doing/001-test-feature.prd.md"
 )
 
+// addSafeDirectory marks dir as a safe git directory (for CI where t.TempDir() can trigger dubious ownership).
+func addSafeDirectory(t *testing.T, dir string) {
+	t.Helper()
+	// #nosec G204 - dir is from t.TempDir() or test-controlled path, safe for test use
+	require.NoError(t, exec.Command("git", "config", "--global", "--add", "safe.directory", dir).Run())
+}
+
 func TestRunLatest(t *testing.T) {
 	t.Run("validates workspace exists", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -1720,6 +1727,7 @@ func TestIsOnTrunkBranch(t *testing.T) {
 func TestUpdateTrunkFromRemote(t *testing.T) {
 	t.Run("updates local trunk from remote", func(t *testing.T) {
 		tmpDir := t.TempDir()
+		addSafeDirectory(t, tmpDir)
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
 
@@ -1733,6 +1741,7 @@ func TestUpdateTrunkFromRemote(t *testing.T) {
 		_ = exec.Command("git", "branch", "-M", "main").Run()
 
 		remoteDir := t.TempDir()
+		addSafeDirectory(t, remoteDir)
 		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
 		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
 		// #nosec G204 - paths from t.TempDir(), safe for test use
@@ -1741,6 +1750,7 @@ func TestUpdateTrunkFromRemote(t *testing.T) {
 
 		// Add a commit on "remote" by cloning, committing, pushing
 		cloneDir := t.TempDir()
+		addSafeDirectory(t, cloneDir)
 		// #nosec G204 - paths from t.TempDir(), safe for test use
 		cloneCmd := exec.Command("git", "clone", remoteDir, cloneDir)
 		cloneCmd.Dir = filepath.Dir(cloneDir)
@@ -1856,6 +1866,7 @@ func TestProcessRepositoryUpdateOnTrunk_noPopStash(t *testing.T) {
 
 func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	tmpDir := t.TempDir()
+	addSafeDirectory(t, tmpDir)
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir("/") }()
 
@@ -1920,6 +1931,7 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 
 func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) {
 	tmpDir := t.TempDir()
+	addSafeDirectory(t, tmpDir)
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir("/") }()
 
@@ -1933,6 +1945,7 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	_ = exec.Command("git", "branch", "-M", "main").Run()
 
 	remoteDir := t.TempDir()
+	addSafeDirectory(t, remoteDir)
 	// #nosec G204 - remoteDir from t.TempDir(), safe for test use
 	require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
 	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
@@ -1941,6 +1954,7 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 
 	// Divergent commit on remote
 	cloneDir := t.TempDir()
+	addSafeDirectory(t, cloneDir)
 	// #nosec G204 - paths from t.TempDir(), safe for test use
 	require.NoError(t, exec.Command("git", "clone", remoteDir, cloneDir).Run())
 	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "f"), []byte("b"), 0o600))
