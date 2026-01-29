@@ -16,6 +16,19 @@ import (
 	"kira/internal/config"
 )
 
+// testCfgWithDir returns a config with ConfigDir set to dir (e.g. tmpDir after Chdir).
+// Uses EvalSymlinks so ConfigDir matches the canonical path used when resolving relative paths (e.g. on macOS /var -> /private/var).
+func testCfgWithDir(dir string) *config.Config {
+	cfg := &config.Config{}
+	*cfg = config.DefaultConfig
+	canonical, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		canonical = dir
+	}
+	cfg.ConfigDir = canonical
+	return cfg
+}
+
 func TestParseAssignArgs(t *testing.T) {
 	t.Run("splits work items and user identifier", func(t *testing.T) {
 		flags := AssignFlags{}
@@ -101,7 +114,7 @@ func TestValidateAssignInputWorkItems(t *testing.T) {
 
 		err := validateAssignInput([]string{"some/other/path/001-test-feature.prd.md"}, "5", flags, cfg)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "path outside .work directory")
+		assert.Contains(t, err.Error(), "path outside work directory")
 	})
 }
 
@@ -273,8 +286,9 @@ func TestResolveWorkItemPath(t *testing.T) {
 		// Create a work item file
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
 
+		cfg := testCfgWithDir(tmpDir)
 		// Resolve by ID
-		resolvedPath, err := resolveWorkItemPath("001")
+		resolvedPath, err := resolveWorkItemPath("001", cfg)
 		require.NoError(t, err)
 		assert.NotEmpty(t, resolvedPath)
 		assert.Contains(t, resolvedPath, "001-test-feature.prd.md")
@@ -292,8 +306,9 @@ func TestResolveWorkItemPath(t *testing.T) {
 		// Create a work item file
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
 
+		cfg := testCfgWithDir(tmpDir)
 		// Resolve by path
-		resolvedPath, err := resolveWorkItemPath(testFilePath)
+		resolvedPath, err := resolveWorkItemPath(testFilePath, cfg)
 		require.NoError(t, err)
 		assert.NotEmpty(t, resolvedPath)
 		// Should be absolute path
@@ -310,7 +325,8 @@ func TestResolveWorkItemPath(t *testing.T) {
 		// Create .work directory structure but no work items
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
-		_, err := resolveWorkItemPath("999")
+		cfg := testCfgWithDir(tmpDir)
+		_, err := resolveWorkItemPath("999", cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "work item 999 not found")
 	})
@@ -321,10 +337,11 @@ func TestResolveWorkItemPath(t *testing.T) {
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir(origDir) }()
 
-		_, err := resolveWorkItemPath("some/other/path/001-test.md")
+		cfg := testCfgWithDir(tmpDir)
+		_, err := resolveWorkItemPath("some/other/path/001-test.md", cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid work item path")
-		assert.Contains(t, err.Error(), "path outside .work directory")
+		assert.Contains(t, err.Error(), "path outside work directory")
 	})
 
 	t.Run("returns error for path with traversal", func(t *testing.T) {
@@ -333,7 +350,8 @@ func TestResolveWorkItemPath(t *testing.T) {
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir(origDir) }()
 
-		_, err := resolveWorkItemPath(".work/../other/001-test.md")
+		cfg := testCfgWithDir(tmpDir)
+		_, err := resolveWorkItemPath(".work/../other/001-test.md", cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid work item path")
 	})
@@ -356,7 +374,8 @@ func TestValidateWorkItemFile(t *testing.T) {
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		err = validateWorkItemFile(absPath)
+		cfg := testCfgWithDir(tmpDir)
+		err = validateWorkItemFile(absPath, cfg)
 		assert.NoError(t, err)
 	})
 
@@ -370,7 +389,8 @@ func TestValidateWorkItemFile(t *testing.T) {
 		absPath, err := filepath.Abs(nonExistentPath)
 		require.NoError(t, err)
 
-		err = validateWorkItemFile(absPath)
+		cfg := testCfgWithDir(tmpDir)
+		err = validateWorkItemFile(absPath, cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "work item file does not exist")
 	})
@@ -399,7 +419,8 @@ func TestValidateWorkItemFile(t *testing.T) {
 		if err := os.Chmod(testFilePath, 0o000); err == nil {
 			defer func() { _ = os.Chmod(testFilePath, 0o600) }()
 
-			err = validateWorkItemFile(absPath)
+			cfg := testCfgWithDir(tmpDir)
+			err = validateWorkItemFile(absPath, cfg)
 			// On some systems, this may still be readable by the owner
 			// So we just check that it either errors or succeeds, but doesn't panic
 			if err != nil {
@@ -444,8 +465,9 @@ created: 2024-01-01
 		require.NoError(t, os.WriteFile(".work/1_todo/001-test-feature-1.prd.md", []byte(workItem1), 0o600))
 		require.NoError(t, os.WriteFile(".work/2_doing/002-test-feature-2.prd.md", []byte(workItem2), 0o600))
 
+		cfg := testCfgWithDir(tmpDir)
 		// Resolve multiple work items
-		paths, err := resolveWorkItems([]string{"001", "002"})
+		paths, err := resolveWorkItems([]string{"001", "002"}, cfg)
 		require.NoError(t, err)
 		assert.Len(t, paths, 2)
 		assert.Contains(t, paths[0], "001-test-feature-1.prd.md")
@@ -464,8 +486,9 @@ created: 2024-01-01
 		// Create one work item file
 		require.NoError(t, os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(testWorkItemContent), 0o600))
 
+		cfg := testCfgWithDir(tmpDir)
 		// Try to resolve with one valid and one invalid ID
-		_, err := resolveWorkItems([]string{"001", "999"})
+		_, err := resolveWorkItems([]string{"001", "999"}, cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to resolve or validate work items")
 		assert.Contains(t, err.Error(), "999")
@@ -480,8 +503,9 @@ created: 2024-01-01
 		// Create .work directory structure
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
+		cfg := testCfgWithDir(tmpDir)
 		// Try to resolve with multiple invalid IDs
-		_, err := resolveWorkItems([]string{"998", "999"})
+		_, err := resolveWorkItems([]string{"998", "999"}, cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to resolve or validate work items")
 		assert.Contains(t, err.Error(), "998")
@@ -500,8 +524,9 @@ created: 2024-01-01
 		// Create work item file
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
 
+		cfg := testCfgWithDir(tmpDir)
 		// Resolve with mix of ID and path
-		paths, err := resolveWorkItems([]string{"001", testFilePath})
+		paths, err := resolveWorkItems([]string{"001", testFilePath}, cfg)
 		require.NoError(t, err)
 		assert.Len(t, paths, 2)
 		// Both should resolve to the same file (or at least both should be valid)
@@ -510,7 +535,8 @@ created: 2024-01-01
 	})
 
 	t.Run("returns error for empty identifiers", func(t *testing.T) {
-		_, err := resolveWorkItems([]string{})
+		cfg := &config.DefaultConfig
+		_, err := resolveWorkItems([]string{}, cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no work items to resolve")
 	})
@@ -864,7 +890,7 @@ created: 2024-01-01
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath)
+		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 		require.NotNil(t, frontMatter)
 		idVal := frontMatter["id"]
@@ -894,7 +920,7 @@ This is the body content.
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 		assert.NotNil(t, frontMatter)
 		// YAML may parse numeric IDs as int or string, handle both
@@ -924,7 +950,7 @@ title: Test Feature
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 		assert.NotNil(t, frontMatter)
 		// YAML may parse numeric IDs as int or string, handle both
@@ -956,7 +982,7 @@ reviewer:
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath)
+		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 		assert.NotNil(t, frontMatter)
 		// YAML may parse numeric IDs as int or string, handle both
@@ -993,7 +1019,7 @@ tags:
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath)
+		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 		assert.NotNil(t, frontMatter)
 		// YAML may parse numeric IDs as int or string, handle both
@@ -1022,7 +1048,7 @@ This is just markdown without front matter.
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.NoError(t, err) // Should not error, just return empty map
 		assert.NotNil(t, frontMatter)
 		assert.Empty(t, frontMatter)
@@ -1048,7 +1074,7 @@ invalid: [unclosed bracket
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		_, _, err := parseWorkItemFrontMatter(testFilePath)
+		_, _, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse front matter")
 	})
@@ -1062,7 +1088,7 @@ invalid: [unclosed bracket
 		// Create .work directory structure but don't create file
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
-		_, _, err := parseWorkItemFrontMatter(testFilePath)
+		_, _, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read work item file")
 	})
@@ -1091,7 +1117,7 @@ It has multiple paragraphs.
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 		assert.NotNil(t, frontMatter)
 		bodyStr := strings.Join(body, "\n")
@@ -1117,7 +1143,7 @@ title: Test Feature
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 		assert.NotNil(t, frontMatter)
 		// YAML may parse numeric IDs as int or string, handle both
@@ -1299,7 +1325,7 @@ Some details here.
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath)
+		frontMatter, body, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 		assert.NotNil(t, frontMatter)
 
@@ -1357,7 +1383,7 @@ Complex body content.
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath)
+		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath, testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 		assert.NotNil(t, frontMatter)
 
@@ -1752,7 +1778,7 @@ Body content.
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemField(testFilePath, "assigned", "new@example.com")
+		err := updateWorkItemField(testFilePath, "assigned", "new@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify file was updated
@@ -1776,7 +1802,7 @@ Body content.
 
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContentPhase5), 0o600))
 
-		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify field was created
@@ -1807,7 +1833,7 @@ updated: 2024-01-01T00:00:00Z
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify timestamp was updated
@@ -1852,7 +1878,7 @@ updated: 2024-01-01T00:00:00Z
 
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContentPhase5), 0o600))
 
-		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify updated timestamp was created
@@ -1899,7 +1925,7 @@ tags: [frontend, backend]
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify other fields are preserved
@@ -1937,7 +1963,7 @@ More content here.
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify body is preserved
@@ -1961,7 +1987,7 @@ More content here.
 
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContentPhase5), 0o600))
 
-		err := updateWorkItemField(testFilePath, "reviewer", "reviewer@example.com")
+		err := updateWorkItemField(testFilePath, "reviewer", "reviewer@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify custom field was set
@@ -1980,7 +2006,7 @@ More content here.
 
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
-		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read work item file")
 	})
@@ -1996,7 +2022,7 @@ More content here.
 		content := testWorkItemContentMalformedYAML
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemField(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemField(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse front matter")
 	})
@@ -2283,7 +2309,7 @@ func TestUpdateWorkItemFieldAppend(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContentPhase5), 0o600))
 
-		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify field was created
@@ -2314,7 +2340,7 @@ assigned: ""
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify field was set (not array)
@@ -2346,7 +2372,7 @@ assigned: alice@example.com
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldAppend(testFilePath, "assigned", "bob@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "assigned", "bob@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify field was converted to array
@@ -2380,7 +2406,7 @@ assigned: [alice@example.com, bob@example.com]
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldAppend(testFilePath, "assigned", "charlie@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "assigned", "charlie@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify new user was appended
@@ -2414,7 +2440,7 @@ assigned: [alice@example.com, bob@example.com]
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldAppend(testFilePath, "assigned", "alice@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "assigned", "alice@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify duplicate was not added
@@ -2448,7 +2474,7 @@ updated: 2024-01-01T00:00:00Z
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify timestamp was updated
@@ -2504,7 +2530,7 @@ tags: [frontend, backend]
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify other fields are preserved
@@ -2542,7 +2568,7 @@ More content here.
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify body is preserved
@@ -2576,7 +2602,7 @@ reviewer: alice@example.com
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldAppend(testFilePath, "reviewer", "bob@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "reviewer", "bob@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify custom field was updated
@@ -2610,11 +2636,11 @@ assigned: alice@example.com
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
 		// First append
-		err := updateWorkItemFieldAppend(testFilePath, "assigned", "bob@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "assigned", "bob@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Second append
-		err = updateWorkItemFieldAppend(testFilePath, "assigned", "charlie@example.com")
+		err = updateWorkItemFieldAppend(testFilePath, "assigned", "charlie@example.com", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify all users are in array
@@ -2636,7 +2662,7 @@ assigned: alice@example.com
 
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
-		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read work item file")
 	})
@@ -2652,7 +2678,7 @@ assigned: alice@example.com
 		content := testWorkItemContentMalformedYAML
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com")
+		err := updateWorkItemFieldAppend(testFilePath, "assigned", "user@example.com", testCfgWithDir(tmpDir))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse front matter")
 	})
@@ -2672,7 +2698,7 @@ func TestUpdateWorkItemFieldUnassign(t *testing.T) {
 		content := testWorkItemContentWithAssigned
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify field was removed
@@ -2697,7 +2723,7 @@ func TestUpdateWorkItemFieldUnassign(t *testing.T) {
 		content := testWorkItemContentWithAssigned
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify timestamp was added/updated
@@ -2741,7 +2767,7 @@ func TestUpdateWorkItemFieldUnassign(t *testing.T) {
 		content := testWorkItemContentWithAssigned
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		updatedContent, err := os.ReadFile(testFilePath)
@@ -2771,7 +2797,7 @@ reviewer: reviewer@example.com
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldUnassign(testFilePath, "reviewer")
+		err := updateWorkItemFieldUnassign(testFilePath, "reviewer", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		updatedContent, err := os.ReadFile(testFilePath)
@@ -2792,7 +2818,7 @@ reviewer: reviewer@example.com
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContentPhase5), 0o600))
 
 		// Should not error even if field doesn't exist
-		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Timestamp should still be updated
@@ -2826,7 +2852,7 @@ tags: [frontend, backend]
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify other fields are preserved
@@ -2866,7 +2892,7 @@ More content here.
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		// Verify body is preserved
@@ -2888,7 +2914,7 @@ More content here.
 
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
-		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned", testCfgWithDir(tmpDir))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read work item file")
 	})
@@ -2904,7 +2930,7 @@ More content here.
 		content := testWorkItemContentMalformedYAML
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned", testCfgWithDir(tmpDir))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse front matter")
 	})
@@ -2929,7 +2955,7 @@ assigned: [user1@example.com, user2@example.com]
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		updatedContent, err := os.ReadFile(testFilePath)
@@ -2950,7 +2976,7 @@ assigned: [user1@example.com, user2@example.com]
 		content := testWorkItemContentWithAssigned
 		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
 
-		err := updateWorkItemFieldUnassign(testFilePath, "assigned")
+		err := updateWorkItemFieldUnassign(testFilePath, "assigned", testCfgWithDir(tmpDir))
 		require.NoError(t, err)
 
 		updatedContent, err := os.ReadFile(testFilePath)
@@ -2983,7 +3009,7 @@ func TestProcessWorkItemUpdatesUnassign(t *testing.T) {
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 		require.Len(t, results, 1)
 		assert.True(t, results[0].Success)
 
@@ -3023,7 +3049,7 @@ reviewer: reviewer@example.com
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 		require.Len(t, results, 1)
 		assert.True(t, results[0].Success)
 
@@ -3079,7 +3105,7 @@ assigned: user2@example.com
 		absPath2, err := filepath.Abs(filePath2)
 		require.NoError(t, err)
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 		require.Len(t, results, 2)
 		assert.True(t, results[0].Success)
 		assert.True(t, results[1].Success)
@@ -3114,7 +3140,7 @@ assigned: user2@example.com
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 		require.Len(t, results, 1)
 		assert.True(t, results[0].Success)
 
@@ -3147,7 +3173,7 @@ assigned: user2@example.com
 		require.NoError(t, err)
 
 		// Should not error even if field doesn't exist
-		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 		require.Len(t, results, 1)
 		assert.True(t, results[0].Success)
 
@@ -3218,7 +3244,7 @@ created: 2024-01-01
 			Append: false,
 		}
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2, absPath3}, user, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath1, absPath2, absPath3}, user, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 
 		require.Len(t, results, 3)
 		assert.True(t, results[0].Success)
@@ -3279,7 +3305,7 @@ invalid: [unclosed bracket
 			Append: false,
 		}
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2}, user, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, user, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 
 		require.Len(t, results, 2)
 		assert.True(t, results[0].Success, "first work item should succeed")
@@ -3325,7 +3351,7 @@ invalid: [unclosed bracket
 			DryRun: true,
 		}
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 
 		require.Len(t, results, 2)
 		assert.True(t, results[0].Success, "first work item should validate")
@@ -3382,7 +3408,7 @@ assigned: user2@example.com
 			Unassign: true,
 		}
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 
 		require.Len(t, results, 2)
 		assert.True(t, results[0].Success)
@@ -3447,7 +3473,7 @@ created: 2024-01-01
 			Append: true,
 		}
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2}, user, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, user, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 
 		require.Len(t, results, 2)
 		assert.True(t, results[0].Success)
@@ -3493,7 +3519,7 @@ created: 2024-01-01
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		displayID := getWorkItemDisplayID(absPath)
+		displayID := getWorkItemDisplayID(absPath, testCfgWithDir(tmpDir))
 		assert.Equal(t, "001", displayID)
 	})
 
@@ -3517,7 +3543,7 @@ status: todo
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		displayID := getWorkItemDisplayID(absPath)
+		displayID := getWorkItemDisplayID(absPath, testCfgWithDir(tmpDir))
 		assert.Equal(t, "001-test-feature.prd", displayID)
 	})
 }
@@ -3655,7 +3681,7 @@ func TestProcessWorkItemInDryRun(t *testing.T) {
 		absPath, err := filepath.Abs(testFilePathPhase5)
 		require.NoError(t, err)
 
-		result := processWorkItemInDryRun(absPath)
+		result := processWorkItemInDryRun(absPath, testCfgWithDir(tmpDir))
 
 		assert.True(t, result.Success)
 		assert.Equal(t, "validate", result.Operation)
@@ -3664,7 +3690,7 @@ func TestProcessWorkItemInDryRun(t *testing.T) {
 
 	t.Run("invalid path or unreadable file", func(t *testing.T) {
 		// Use a path that does not exist and is not under .work so parseWorkItemFrontMatter fails
-		result := processWorkItemInDryRun("/nonexistent/path/to/work-item.md")
+		result := processWorkItemInDryRun("/nonexistent/path/to/work-item.md", &config.DefaultConfig)
 
 		assert.False(t, result.Success)
 		require.NotNil(t, result.Error)
@@ -3695,7 +3721,7 @@ func TestProcessWorkItemUpdatesDryRunOutput(t *testing.T) {
 
 		user := &UserInfo{Email: "bob@example.com", Name: "Bob", Number: 1}
 		flags := AssignFlags{Field: "assigned", DryRun: true}
-		results := processWorkItemUpdates([]string{absPath}, user, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath}, user, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 
 		_ = w.Close()
 		os.Stdout = oldStdout
@@ -3732,7 +3758,7 @@ func TestProcessWorkItemUpdatesDryRunOutput(t *testing.T) {
 		os.Stdout = w
 
 		flags := AssignFlags{Field: "assigned", Unassign: true, DryRun: true}
-		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{})
+		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{}, testCfgWithDir(tmpDir))
 
 		_ = w.Close()
 		os.Stdout = oldStdout
@@ -3769,7 +3795,7 @@ func TestProcessAssignWorkItemAlreadyAssigned(t *testing.T) {
 
 		// User with same email as current assignment
 		user := &UserInfo{Email: "user@example.com", Name: "Current User", Number: 1}
-		result := processAssignWorkItem(absPath, "001", "assigned", user, false)
+		result := processAssignWorkItem(absPath, "001", "assigned", user, false, testCfgWithDir(tmpDir))
 
 		require.True(t, result.Success)
 		assert.Equal(t, "already_assigned", result.Operation)
@@ -3796,7 +3822,7 @@ func TestProcessAssignWorkItemAlreadyAssigned(t *testing.T) {
 		require.NoError(t, err)
 
 		user := &UserInfo{Email: "other@example.com", Name: "Other", Number: 2}
-		result := processAssignWorkItem(absPath, "001", "assigned", user, false)
+		result := processAssignWorkItem(absPath, "001", "assigned", user, false, testCfgWithDir(tmpDir))
 
 		require.True(t, result.Success)
 		assert.Equal(t, "assign", result.Operation)
@@ -3971,7 +3997,8 @@ created: 2024-01-01
 		filePath := ".work/1_todo/001-test.prd.md"
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
-		assignment, err := getCurrentAssignment(filePath, "assigned")
+		cfg := testCfgWithDir(tmpDir)
+		assignment, err := getCurrentAssignment(filePath, "assigned", cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "user@example.com", assignment)
 	})
@@ -3990,7 +4017,8 @@ created: 2024-01-01
 		filePath := ".work/1_todo/002-test.prd.md"
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
-		assignment, err := getCurrentAssignment(filePath, "assigned")
+		cfg := testCfgWithDir(tmpDir)
+		assignment, err := getCurrentAssignment(filePath, "assigned", cfg)
 		require.NoError(t, err)
 		assert.Empty(t, assignment)
 	})
@@ -4010,7 +4038,8 @@ created: 2024-01-01
 		filePath := ".work/1_todo/003-test.prd.md"
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
-		assignment, err := getCurrentAssignment(filePath, "assigned")
+		cfg := testCfgWithDir(tmpDir)
+		assignment, err := getCurrentAssignment(filePath, "assigned", cfg)
 		require.NoError(t, err)
 		assert.Empty(t, assignment)
 	})
@@ -4030,7 +4059,8 @@ created: 2024-01-01
 		filePath := ".work/1_todo/004-test.prd.md"
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
-		assignment, err := getCurrentAssignment(filePath, "reviewer")
+		cfg := testCfgWithDir(tmpDir)
+		assignment, err := getCurrentAssignment(filePath, "reviewer", cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "reviewer@example.com", assignment)
 	})
@@ -4050,14 +4080,15 @@ created: 2024-01-01
 		filePath := ".work/1_todo/005-test.prd.md"
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
-		assignment, err := getCurrentAssignment(filePath, "assigned")
+		cfg := testCfgWithDir(tmpDir)
+		assignment, err := getCurrentAssignment(filePath, "assigned", cfg)
 		require.NoError(t, err)
 		assert.Contains(t, assignment, "user1@example.com")
 		assert.Contains(t, assignment, "user2@example.com")
 	})
 
 	t.Run("returns error for invalid file path", func(t *testing.T) {
-		_, err := getCurrentAssignment("nonexistent.md", "assigned")
+		_, err := getCurrentAssignment("nonexistent.md", "assigned", &config.DefaultConfig)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse work item")
 	})

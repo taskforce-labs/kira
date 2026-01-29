@@ -72,13 +72,13 @@ func init() {
 // runAssign is the entrypoint for the assign command.
 // Phase 1 only performs input parsing and validation.
 func runAssign(cmd *cobra.Command, args []string) error {
-	if err := checkWorkDir(); err != nil {
-		return err
-	}
-
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	if err := checkWorkDir(cfg); err != nil {
+		return err
 	}
 
 	flags, err := parseAssignFlags(cmd)
@@ -93,7 +93,7 @@ func runAssign(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 2: Resolve and validate work items exist.
-	workItemPaths, err := resolveWorkItems(workItems)
+	workItemPaths, err := resolveWorkItems(workItems, cfg)
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func runAssign(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 8: Process work item updates with batch processing and progress
-	results := processWorkItemUpdates(workItemPaths, resolvedUser, flags, users)
+	results := processWorkItemUpdates(workItemPaths, resolvedUser, flags, users, cfg)
 	return handleAssignResults(results, workItemPaths, flags, resolvedUser)
 }
 
@@ -136,9 +136,9 @@ func handleAssignResults(results []WorkItemUpdateResult, workItemPaths []string,
 
 // getWorkItemDisplayID extracts a display identifier from a work item file path.
 // Returns the work item ID if available, otherwise returns a shortened path.
-func getWorkItemDisplayID(workItemPath string) string {
+func getWorkItemDisplayID(workItemPath string, cfg *config.Config) string {
 	// Try to extract ID from front matter
-	frontMatter, _, err := parseWorkItemFrontMatter(workItemPath)
+	frontMatter, _, err := parseWorkItemFrontMatter(workItemPath, cfg)
 	if err == nil {
 		if idValue, exists := frontMatter["id"]; exists {
 			if idStr, ok := idValue.(string); ok && idStr != "" {
@@ -160,9 +160,9 @@ func getWorkItemDisplayID(workItemPath string) string {
 }
 
 // processWorkItemInDryRun validates a work item in dry-run mode.
-func processWorkItemInDryRun(path string) WorkItemUpdateResult {
-	displayID := getWorkItemDisplayID(path)
-	_, _, err := parseWorkItemFrontMatter(path)
+func processWorkItemInDryRun(path string, cfg *config.Config) WorkItemUpdateResult {
+	displayID := getWorkItemDisplayID(path, cfg)
+	_, _, err := parseWorkItemFrontMatter(path, cfg)
 	if err != nil {
 		return WorkItemUpdateResult{
 			WorkItemPath: path,
@@ -186,6 +186,7 @@ func processUnassignWorkItem(
 	displayID string,
 	field string,
 	showProgress bool,
+	cfg *config.Config,
 ) WorkItemUpdateResult {
 	result := WorkItemUpdateResult{
 		WorkItemPath: workItemPath,
@@ -194,7 +195,7 @@ func processUnassignWorkItem(
 		Operation:    "unassign",
 	}
 
-	if err := updateWorkItemFieldUnassign(workItemPath, field); err != nil {
+	if err := updateWorkItemFieldUnassign(workItemPath, field, cfg); err != nil {
 		result.Error = fmt.Errorf("failed to update work item %s: %w", displayID, err)
 		if showProgress {
 			displayWorkItemProgress(result)
@@ -215,6 +216,7 @@ func processAppendWorkItem(
 	field string,
 	resolvedUser *UserInfo,
 	showProgress bool,
+	cfg *config.Config,
 ) WorkItemUpdateResult {
 	result := WorkItemUpdateResult{
 		WorkItemPath: workItemPath,
@@ -231,7 +233,7 @@ func processAppendWorkItem(
 		return result
 	}
 
-	if err := updateWorkItemFieldAppend(workItemPath, field, resolvedUser.Email); err != nil {
+	if err := updateWorkItemFieldAppend(workItemPath, field, resolvedUser.Email, cfg); err != nil {
 		result.Error = fmt.Errorf("failed to update work item %s: %w", displayID, err)
 		if showProgress {
 			displayWorkItemProgress(result)
@@ -252,6 +254,7 @@ func processAssignWorkItem(
 	field string,
 	resolvedUser *UserInfo,
 	showProgress bool,
+	cfg *config.Config,
 ) WorkItemUpdateResult {
 	result := WorkItemUpdateResult{
 		WorkItemPath: workItemPath,
@@ -268,7 +271,7 @@ func processAssignWorkItem(
 		return result
 	}
 
-	current, err := getCurrentAssignment(workItemPath, field)
+	current, err := getCurrentAssignment(workItemPath, field, cfg)
 	if err == nil && current != "" {
 		// Same user: exact email match or display format match
 		if current == resolvedUser.Email || current == formatUserDisplay(*resolvedUser) {
@@ -295,7 +298,7 @@ func processAssignWorkItem(
 		}
 	}
 
-	if err := updateWorkItemField(workItemPath, field, resolvedUser.Email); err != nil {
+	if err := updateWorkItemField(workItemPath, field, resolvedUser.Email, cfg); err != nil {
 		result.Error = fmt.Errorf("failed to update work item %s: %w", displayID, err)
 		if showProgress {
 			displayWorkItemProgress(result)
@@ -317,6 +320,7 @@ func processSingleWorkItem(
 	flags AssignFlags,
 	showProgress bool,
 	users []UserInfo,
+	cfg *config.Config,
 ) WorkItemUpdateResult {
 	if showProgress {
 		fmt.Printf("Processing work item %s...\n", displayID)
@@ -324,13 +328,13 @@ func processSingleWorkItem(
 
 	// For unassign mode, remove the field
 	if flags.Unassign {
-		return processUnassignWorkItem(workItemPath, displayID, flags.Field, showProgress)
+		return processUnassignWorkItem(workItemPath, displayID, flags.Field, showProgress, cfg)
 	}
 
 	// For interactive mode, show selection and process
 	if flags.Interactive {
 		// Get current assignment for this work item
-		currentAssignment, err := getCurrentAssignment(workItemPath, flags.Field)
+		currentAssignment, err := getCurrentAssignment(workItemPath, flags.Field, cfg)
 		if err != nil {
 			result := WorkItemUpdateResult{
 				WorkItemPath: workItemPath,
@@ -363,7 +367,7 @@ func processSingleWorkItem(
 
 		// Handle selection: 0 = unassign, 1+ = assign to user
 		if selection == 0 {
-			return processUnassignWorkItem(workItemPath, displayID, flags.Field, showProgress)
+			return processUnassignWorkItem(workItemPath, displayID, flags.Field, showProgress, cfg)
 		}
 
 		// Resolve selected user
@@ -384,32 +388,32 @@ func processSingleWorkItem(
 
 		// Process assignment based on append flag
 		if flags.Append {
-			return processAppendWorkItem(workItemPath, displayID, flags.Field, selectedUser, showProgress)
+			return processAppendWorkItem(workItemPath, displayID, flags.Field, selectedUser, showProgress, cfg)
 		}
 
 		// Switch mode: update field with user email
-		return processAssignWorkItem(workItemPath, displayID, flags.Field, selectedUser, showProgress)
+		return processAssignWorkItem(workItemPath, displayID, flags.Field, selectedUser, showProgress, cfg)
 	}
 
 	// For append mode, handle in Phase 6
 	if flags.Append {
-		return processAppendWorkItem(workItemPath, displayID, flags.Field, resolvedUser, showProgress)
+		return processAppendWorkItem(workItemPath, displayID, flags.Field, resolvedUser, showProgress, cfg)
 	}
 
 	// Switch mode: update field with user email
-	return processAssignWorkItem(workItemPath, displayID, flags.Field, resolvedUser, showProgress)
+	return processAssignWorkItem(workItemPath, displayID, flags.Field, resolvedUser, showProgress, cfg)
 }
 
 // processWorkItemUpdates processes work item updates based on flags.
 // Returns a slice of results for each work item processed.
-func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flags AssignFlags, users []UserInfo) []WorkItemUpdateResult {
+func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flags AssignFlags, users []UserInfo, cfg *config.Config) []WorkItemUpdateResult {
 	var results []WorkItemUpdateResult
 	showProgress := len(workItemPaths) > 1
 
 	// Skip if dry-run mode
 	if flags.DryRun {
 		for _, path := range workItemPaths {
-			res := processWorkItemInDryRun(path)
+			res := processWorkItemInDryRun(path, cfg)
 			if res.Success {
 				displayID := res.WorkItemID
 				if flags.Unassign {
@@ -425,8 +429,8 @@ func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flag
 
 	// Process each work item
 	for _, workItemPath := range workItemPaths {
-		displayID := getWorkItemDisplayID(workItemPath)
-		result := processSingleWorkItem(workItemPath, displayID, resolvedUser, flags, showProgress, users)
+		displayID := getWorkItemDisplayID(workItemPath, cfg)
+		result := processSingleWorkItem(workItemPath, displayID, resolvedUser, flags, showProgress, users, cfg)
 		results = append(results, result)
 	}
 
@@ -594,7 +598,7 @@ func validateAssignInput(workItems []string, userIdentifier string, flags Assign
 	// Validate work item tokens as IDs or paths.
 	for _, token := range workItems {
 		if isWorkItemPath(token) {
-			if err := validateWorkPath(token); err != nil {
+			if err := validateWorkPath(token, cfg); err != nil {
 				return err
 			}
 			continue
@@ -663,10 +667,10 @@ func isWorkItemPath(token string) bool {
 // resolveWorkItemPath resolves a work item identifier (ID or path) to an absolute file path.
 // If identifier is a path, it validates and returns the absolute path.
 // If identifier is an ID, it uses findWorkItemFile to locate the file.
-func resolveWorkItemPath(identifier string) (string, error) {
+func resolveWorkItemPath(identifier string, cfg *config.Config) (string, error) {
 	// If identifier is a path, validate and return it.
 	if isWorkItemPath(identifier) {
-		if err := validateWorkPath(identifier); err != nil {
+		if err := validateWorkPath(identifier, cfg); err != nil {
 			return "", fmt.Errorf("invalid work item path '%s': %w", identifier, err)
 		}
 
@@ -680,7 +684,7 @@ func resolveWorkItemPath(identifier string) (string, error) {
 	}
 
 	// Treat as work item ID and find the file.
-	workItemPath, err := findWorkItemFile(identifier)
+	workItemPath, err := findWorkItemFile(identifier, cfg)
 	if err != nil {
 		return "", fmt.Errorf("work item %s not found", identifier)
 	}
@@ -695,7 +699,7 @@ func resolveWorkItemPath(identifier string) (string, error) {
 }
 
 // validateWorkItemFile validates that a work item file exists and is readable.
-func validateWorkItemFile(path string) error {
+func validateWorkItemFile(path string, cfg *config.Config) error {
 	// Check if file exists.
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return fmt.Errorf("work item file does not exist: %s", path)
@@ -705,7 +709,7 @@ func validateWorkItemFile(path string) error {
 
 	// Try to read the file to ensure it's readable.
 	// Use safeReadFile which validates the path is within .work.
-	if _, err := safeReadFile(path); err != nil {
+	if _, err := safeReadFile(path, cfg); err != nil {
 		return fmt.Errorf("failed to read work item file: %w", err)
 	}
 
@@ -714,7 +718,7 @@ func validateWorkItemFile(path string) error {
 
 // resolveWorkItems resolves multiple work item identifiers to file paths and validates them.
 // Returns an error if any work item cannot be resolved or validated.
-func resolveWorkItems(identifiers []string) ([]string, error) {
+func resolveWorkItems(identifiers []string, cfg *config.Config) ([]string, error) {
 	if len(identifiers) == 0 {
 		return nil, fmt.Errorf("no work items to resolve")
 	}
@@ -723,13 +727,13 @@ func resolveWorkItems(identifiers []string) ([]string, error) {
 	var errors []string
 
 	for _, identifier := range identifiers {
-		path, err := resolveWorkItemPath(identifier)
+		path, err := resolveWorkItemPath(identifier, cfg)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("  %s: %v", identifier, err))
 			continue
 		}
 
-		if err := validateWorkItemFile(path); err != nil {
+		if err := validateWorkItemFile(path, cfg); err != nil {
 			errors = append(errors, fmt.Sprintf("  %s: %v", identifier, err))
 			continue
 		}
@@ -922,8 +926,8 @@ const yamlSeparator = "---"
 // parseWorkItemFrontMatter reads a work item file and parses its YAML front matter.
 // Returns the parsed front matter as a map, the body content as lines, and any error.
 // The front matter is expected to be between the first pair of --- lines.
-func parseWorkItemFrontMatter(filePath string) (map[string]interface{}, []string, error) {
-	content, err := safeReadFile(filePath)
+func parseWorkItemFrontMatter(filePath string, cfg *config.Config) (map[string]interface{}, []string, error) {
+	content, err := safeReadFile(filePath, cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to read work item file: %w", err)
 	}
@@ -1233,9 +1237,10 @@ func updateWorkItemField(
 	filePath string,
 	fieldName string,
 	userEmail string,
+	cfg *config.Config,
 ) error {
 	// Parse front matter and body
-	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath)
+	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to parse work item: %w", err)
 	}
@@ -1354,9 +1359,10 @@ func clearField(frontMatter map[string]interface{}, fieldName string) (existed b
 func updateWorkItemFieldUnassign(
 	filePath string,
 	fieldName string,
+	cfg *config.Config,
 ) error {
 	// Parse front matter and body
-	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath)
+	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to parse work item: %w", err)
 	}
@@ -1381,9 +1387,10 @@ func updateWorkItemFieldAppend(
 	filePath string,
 	fieldName string,
 	userEmail string,
+	cfg *config.Config,
 ) error {
 	// Parse front matter and body
-	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath)
+	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to parse work item: %w", err)
 	}
@@ -1406,8 +1413,8 @@ func updateWorkItemFieldAppend(
 
 // getCurrentAssignment retrieves the current assignment value for a work item field.
 // Returns the formatted string for display (or empty string if not assigned).
-func getCurrentAssignment(workItemPath, fieldName string) (string, error) {
-	frontMatter, _, err := parseWorkItemFrontMatter(workItemPath)
+func getCurrentAssignment(workItemPath, fieldName string, cfg *config.Config) (string, error) {
+	frontMatter, _, err := parseWorkItemFrontMatter(workItemPath, cfg)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse work item: %w", err)
 	}
