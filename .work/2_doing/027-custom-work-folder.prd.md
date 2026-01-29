@@ -1,7 +1,7 @@
 ---
 id: 027
 title: custom work folder
-status: todo
+status: doing
 kind: prd
 assigned: 
 estimate: 0
