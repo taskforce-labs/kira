@@ -4,9 +4,7 @@ title: <!--input-string:title:"Feature title"-->
 status: <!--input-string[backlog,todo,doing,review,done,released,abandoned,archived]:status:"Current status"-->
 kind: prd
 assigned: <!--input-string:assigned:"Assigned to (email)"-->
-estimate: <!--input-number:estimate:"Estimate in days"-->
-created: <!--input-datetime[yyyy-mm-dd]:created:"Creation date"-->
-due: <!--input-datetime[yyyy-mm-dd]:due:"Due date (optional)"-->
+created: <!--input-datetime[yyyy-mm-dd]:created:"Created (auto-set)"-->
 tags: <!--input-strings[frontend,backend,database,api,ui,security]:tags:"Tags"-->
 ---
 
