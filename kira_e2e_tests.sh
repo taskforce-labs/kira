@@ -2424,6 +2424,103 @@ else
   exit 1
 fi
 
+###############################################
+# Test 33: kira review - local-only E2E
+###############################################
+echo ""
+echo "🧪 Test 33: kira review - local-only E2E"
+
+# Reset to clean state
+rm -rf .git > /dev/null 2>&1
+git init > /dev/null 2>&1
+"$KIRA_BIN" init --force > /dev/null 2>&1
+git config user.email test@example.com
+git config user.name "Test User"
+git add .
+git commit -m "init" > /dev/null 2>&1
+
+# Ensure trunk branch is main (rename if needed)
+git branch -M main > /dev/null 2>&1 || true
+
+# Create a minimal doing work item that matches a feature branch name
+cat > .work/2_doing/012-submit-for-review.prd.md << 'EOF'
+---
+id: 012
+title: Submit for review
+status: doing
+kind: prd
+created: 2025-01-01
+---
+
+# Submit for review
+EOF
+git add .work/2_doing/012-submit-for-review.prd.md
+git commit -m "Add work item 012" > /dev/null 2>&1
+
+echo ""
+echo "  🔒 Test 33a: review fails on trunk branch"
+TRUNK_REVIEW_OUTPUT=$("$KIRA_BIN" review 2>&1) || true
+if echo "$TRUNK_REVIEW_OUTPUT" | grep -q "cannot run 'kira review' on trunk branch"; then
+  echo "  ✅ Trunk branch protection works"
+else
+  echo "  ❌ Expected trunk branch protection error"
+  echo "Output: $TRUNK_REVIEW_OUTPUT"
+  exit 1
+fi
+
+echo ""
+echo "  🧪 Test 33b: review fails with uncommitted changes"
+git checkout -b 012-submit-for-review > /dev/null 2>&1
+echo "dirty" > dirty.txt
+DIRTY_REVIEW_OUTPUT=$("$KIRA_BIN" review --no-trunk-update --no-rebase 2>&1) || true
+if echo "$DIRTY_REVIEW_OUTPUT" | grep -qi "uncommitted changes detected"; then
+  echo "  ✅ Uncommitted changes are rejected"
+else
+  echo "  ❌ Expected uncommitted changes error"
+  echo "Output: $DIRTY_REVIEW_OUTPUT"
+  exit 1
+fi
+
+# Clean up working directory
+rm -f dirty.txt
+# Ensure we're clean without requiring a commit
+git reset --hard > /dev/null 2>&1
+git clean -fd > /dev/null 2>&1
+
+echo ""
+echo "  🔌 Test 33c: review fails when remote not configured"
+NO_REMOTE_OUTPUT=$("$KIRA_BIN" review --no-trunk-update --no-rebase 2>&1) || true
+if echo "$NO_REMOTE_OUTPUT" | grep -qi "remote" || echo "$NO_REMOTE_OUTPUT" | grep -qi "GitHub remote"; then
+  echo "  ✅ Missing remote detected"
+else
+  echo "  ❌ Expected missing remote error"
+  echo "Output: $NO_REMOTE_OUTPUT"
+  exit 1
+fi
+
+echo ""
+echo "  🧭 Test 33d: review fails when remote is not a GitHub repository (local-only)"
+# Reset changes from previous review attempt (it moves the work item before failing)
+git reset --hard > /dev/null 2>&1
+git clean -fd > /dev/null 2>&1
+
+# Add a local bare remote so remote exists, but it is not a GitHub URL
+REMOTE_DIR_REVIEW=$(mktemp -d)
+git init --bare "$REMOTE_DIR_REVIEW" > /dev/null 2>&1
+git remote add origin "$REMOTE_DIR_REVIEW"
+
+NON_GH_REMOTE_OUTPUT=$("$KIRA_BIN" review --no-trunk-update --no-rebase 2>&1) || true
+if echo "$NON_GH_REMOTE_OUTPUT" | grep -qi "not a GitHub repository"; then
+  echo "  ✅ Non-GitHub remote rejected"
+else
+  echo "  ❌ Expected non-GitHub remote error"
+  echo "Output: $NON_GH_REMOTE_OUTPUT"
+  exit 1
+fi
+
+# Cleanup remote dir
+rm -rf "$REMOTE_DIR_REVIEW"
+
 # Cleanup
 echo ""
 if [ "$KEEP" -eq 1 ] || [ "${KEEP_TEST_DIR:-0}" -ne 0 ]; then
