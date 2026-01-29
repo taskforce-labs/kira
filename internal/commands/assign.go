@@ -27,13 +27,16 @@ type AssignFlags struct {
 	DryRun      bool
 }
 
+// Operation name for "no change, already assigned to same user".
+const opAlreadyAssigned = "already_assigned"
+
 // WorkItemUpdateResult tracks the result of updating a single work item.
 type WorkItemUpdateResult struct {
 	WorkItemPath string
 	WorkItemID   string // Display identifier (ID or path)
 	Success      bool
 	Error        error
-	Operation    string // "assign", "unassign", "append"
+	Operation    string // "assign", "unassign", "append", or opAlreadyAssigned
 }
 
 var assignCmd = &cobra.Command{
@@ -111,22 +114,23 @@ func runAssign(cmd *cobra.Command, args []string) error {
 
 	// Phase 8: Process work item updates with batch processing and progress
 	results := processWorkItemUpdates(workItemPaths, resolvedUser, flags, users)
+	return handleAssignResults(results, workItemPaths, flags, resolvedUser)
+}
 
-	// Display summary for batch operations or if there were failures
+// handleAssignResults displays batch or single-item output and returns an error if any update failed.
+func handleAssignResults(results []WorkItemUpdateResult, workItemPaths []string, flags AssignFlags, resolvedUser *UserInfo) error {
 	if len(workItemPaths) > 1 || flags.DryRun {
 		displayBatchSummary(results)
 	} else if len(results) > 0 && !results[0].Success {
-		// For single item failures, show summary
 		displayBatchSummary(results)
+	} else if len(results) == 1 && results[0].Success && !flags.DryRun {
+		displaySingleSuccessMessage(results[0], resolvedUser, flags)
 	}
-
-	// Return error if any operations failed
 	for _, result := range results {
 		if !result.Success {
 			return fmt.Errorf("one or more work items failed to update")
 		}
 	}
-
 	return nil
 }
 
@@ -191,7 +195,7 @@ func processUnassignWorkItem(
 	}
 
 	if err := updateWorkItemFieldUnassign(workItemPath, field); err != nil {
-		result.Error = fmt.Errorf("failed to unassign: %w", err)
+		result.Error = fmt.Errorf("failed to update work item %s: %w", displayID, err)
 		if showProgress {
 			displayWorkItemProgress(result)
 		}
@@ -228,7 +232,7 @@ func processAppendWorkItem(
 	}
 
 	if err := updateWorkItemFieldAppend(workItemPath, field, resolvedUser.Email); err != nil {
-		result.Error = fmt.Errorf("failed to append: %w", err)
+		result.Error = fmt.Errorf("failed to update work item %s: %w", displayID, err)
 		if showProgress {
 			displayWorkItemProgress(result)
 		}
@@ -264,8 +268,35 @@ func processAssignWorkItem(
 		return result
 	}
 
+	current, err := getCurrentAssignment(workItemPath, field)
+	if err == nil && current != "" {
+		// Same user: exact email match or display format match
+		if current == resolvedUser.Email || current == formatUserDisplay(*resolvedUser) {
+			result.Success = true
+			result.Operation = opAlreadyAssigned
+			if showProgress {
+				displayWorkItemProgress(result)
+			}
+			return result
+		}
+		// Current is comma-separated list (array display); check if email is in it
+		if strings.Contains(current, resolvedUser.Email) {
+			parts := strings.Split(current, ", ")
+			for _, p := range parts {
+				if strings.TrimSpace(p) == resolvedUser.Email {
+					result.Success = true
+					result.Operation = opAlreadyAssigned
+					if showProgress {
+						displayWorkItemProgress(result)
+					}
+					return result
+				}
+			}
+		}
+	}
+
 	if err := updateWorkItemField(workItemPath, field, resolvedUser.Email); err != nil {
-		result.Error = fmt.Errorf("failed to assign: %w", err)
+		result.Error = fmt.Errorf("failed to update work item %s: %w", displayID, err)
 		if showProgress {
 			displayWorkItemProgress(result)
 		}
@@ -377,9 +408,17 @@ func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flag
 
 	// Skip if dry-run mode
 	if flags.DryRun {
-		// In dry-run mode, just validate that we can parse the files
 		for _, path := range workItemPaths {
-			results = append(results, processWorkItemInDryRun(path))
+			res := processWorkItemInDryRun(path)
+			if res.Success {
+				displayID := res.WorkItemID
+				if flags.Unassign {
+					fmt.Printf("Would unassign work item %s\n", displayID)
+				} else if resolvedUser != nil {
+					fmt.Printf("Would assign work item %s to %s\n", displayID, formatUserDisplay(*resolvedUser))
+				}
+			}
+			results = append(results, res)
 		}
 		return results
 	}
@@ -392,6 +431,40 @@ func processWorkItemUpdates(workItemPaths []string, resolvedUser *UserInfo, flag
 	}
 
 	return results
+}
+
+// displaySingleSuccessMessage prints the PRD success message for a single work item.
+func displaySingleSuccessMessage(result WorkItemUpdateResult, resolvedUser *UserInfo, flags AssignFlags) {
+	id := result.WorkItemID
+	switch result.Operation {
+	case "unassign":
+		fmt.Printf("Unassigned work item %s\n", id)
+	case "append":
+		if resolvedUser != nil {
+			fmt.Printf("Added %s to %s for work item %s\n", formatUserDisplay(*resolvedUser), flags.Field, id)
+		}
+	case opAlreadyAssigned:
+		if resolvedUser != nil {
+			fmt.Printf("Work item %s is already assigned to %s. Use --unassign to clear or specify a different user.\n", id, formatUserDisplay(*resolvedUser))
+		}
+	case "assign":
+		if resolvedUser != nil {
+			if flags.Field != "assigned" {
+				fmt.Printf("Assigned %s for work item %s to %s\n", flags.Field, id, formatUserDisplay(*resolvedUser))
+			} else {
+				fmt.Printf("Assigned work item %s to %s\n", id, formatUserDisplay(*resolvedUser))
+			}
+		}
+	default:
+		// Fallback for validate or other operations
+		if result.Success {
+			op := result.Operation
+			if op == "validate" {
+				op = "validated"
+			}
+			fmt.Printf("  ✓ Work item %s: %s successfully\n", id, op)
+		}
+	}
 }
 
 // displayWorkItemProgress shows progress for processing a single work item.
