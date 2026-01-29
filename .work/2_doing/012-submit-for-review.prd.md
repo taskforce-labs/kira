@@ -7,7 +7,7 @@ assigned:
 estimate: 3 days
 created: 2026-01-19
 due: 2026-01-19
-tags: [github, notifications, review, cli]
+tags: [github, review, cli]
 ---
 
 # submit for review
@@ -24,7 +24,7 @@ The `kira review` command (note: renamed from "submit for review" to avoid confu
 2. Optionally updating the work item status on the main trunk branch to maintain it as the source of truth
 3. Rebasing the current branch onto the updated trunk branch
 4. Automatically creating a draft PR on GitHub with proper branch naming and descriptions
-5. Optionally notifying reviewers through configurable channels
+5. Reviewer notifications are out of scope; GitHub handles PR review notifications
 6. Supporting only individual work items
 
 This approach treats the trunk branch as the authoritative source of truth for work item status, ensuring that the project's current state is always reflected in the main branch, while avoiding merge conflicts through strategic rebasing.
@@ -41,7 +41,7 @@ This approach treats the trunk branch as the authoritative source of truth for w
 - **Restrictions**: Cannot be run on trunk branch or non-kira branches
 - **Flags**:
   - `--reviewer <user>` - Specify reviewer (can be user number from `kira user` command or email address). Can be used multiple times
-  - `--draft` (default: true) - Create as draft PR
+  - `--draft` - Create as draft PR (default comes from `review.draft_by_default` in kira.yml; use `--draft=false` to create ready-for-review, or `--draft=true` to force draft). Explicit flag overrides config.
   - `--no-trunk-update` - Skip updating trunk branch status (overrides config)
   - `--no-rebase` - Skip rebasing current branch after trunk update (overrides config)
   - `--title <title>` - Custom PR title (derived from work item if not provided)
@@ -67,6 +67,9 @@ This approach treats the trunk branch as the authoritative source of truth for w
 - Assign reviewers specified via `--reviewer` flag (supports user numbers from `kira user` command or email addresses)
 - Push current branch if not already pushed to remote
 
+#### Resilience
+- GitHub API and network calls (PR create/update, find existing PR, request reviews, etc.) must use **retry with exponential backoff** on transient failures (e.g. 5xx, rate limit 429, network errors)
+- Max retries: 3; backoff policy: exponential (e.g. 1s, 2s, 4s); only retryable errors are retried (do not retry on 4xx except 429)
 
 ### Configuration
 
@@ -77,10 +80,11 @@ review:
   rebase_after_trunk_update: true # Rebase current branch after trunk status update (default: true)
   draft_by_default: true    # Create draft PRs by default (default: true)
   auto_request_reviews: true # Auto-request reviews from assigned reviewers (default: true)
-  github_token: "${GITHUB_TOKEN}"  # Environment variable or direct value (required)
   pr_title: "[{id}] {title}"  # Template variables: {id}, {title}, {kind}
   pr_description: "View detailed work item: [{id}-{title}]({work_item_url})"  # {work_item_url} points to trunk branch
 ```
+
+GitHub token is not configured in kira.yml; the command uses the `KIRA_GITHUB_TOKEN` environment variable only.
 
 ### Branch and PR Management
 
@@ -110,7 +114,7 @@ review:
 - Work item not found: "Work item {id} not found"
 - Already in review: If work item already in 'review' status, show message and exit successfully (don't fail)
 - Missing required fields: "Work item missing required fields: {field1}, {field2}. Update work item and try again." (uses `validation.required_fields` from config)
-- GitHub token missing: "GitHub token required for PR creation. Configure `review.github_token` in kira.yml or set GITHUB_TOKEN environment variable."
+- GitHub token missing: "GitHub token required for PR creation. Set KIRA_GITHUB_TOKEN environment variable."
 - GitHub token invalid: "GitHub token validation failed. Token must have 'repo' scope for PR creation."
 
 #### Git Operations
@@ -122,9 +126,7 @@ review:
 - Trunk branch diverged: Pull latest trunk before updating status (similar to `kira start` pattern) similar to `kira latest` pattern
 
 #### Notification Failures
-- Log notification errors but don't fail the command
-- Retry logic for transient failures (network issues)
-- Graceful degradation when notification services are unavailable
+- Notifications are out of scope; no notification failure handling
 
 ## Acceptance Criteria
 
@@ -144,6 +146,7 @@ review:
 - [ ] `kira review --draft=false` creates ready-for-review PR
 - [ ] Command fails gracefully when GitHub token is missing
 - [ ] Command shows helpful error messages for invalid work items
+- [ ] GitHub API transient errors (e.g. rate limit 429, 5xx) are retried with exponential backoff
 
 ### GitHub Integration
 - [ ] Creates draft PR with proper title and description
@@ -196,9 +199,7 @@ internal/commands/review.go
 
 #### Dependencies
 - **GitHub**: `github.com/google/go-github/v58/github` for API client
-- **HTTP**: Standard library for webhook notifications
-- **SMTP**: `net/smtp` for email notifications
-- **YAML**: Extended config parsing for notification settings
+- **YAML**: Extended config parsing for review config
 
 ### GitHub API Integration
 
@@ -223,6 +224,8 @@ owner, repo := parseGitHubURL(remoteURL)
 ```
 
 #### Authentication
+Token is read from the `KIRA_GITHUB_TOKEN` environment variable only (no config key).
+
 ```go
 ctx := context.Background()
 ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
@@ -258,7 +261,7 @@ pr := &github.NewPullRequest{
 ```
 
 #### Error Handling
-- Rate limiting: Implement backoff and retry logic
+- Retry with exponential backoff on rate limit (429), server errors (5xx), and transient network failures; do not retry on 4xx (except 429)
 - API errors: Parse and provide user-friendly messages
 - Token issues: Clear guidance on token setup
 - Rebase conflicts: "Rebase conflicts detected. Resolve conflicts manually, then run 'git rebase --continue' and re-run 'kira review'"
@@ -433,13 +436,11 @@ frontMatter := map[string]interface{}{
 
 #### Integration Tests
 - Full workflow testing with test GitHub repo
-- Notification webhook testing
-- Email delivery verification
+- N/A – notifications out of scope
 
 #### E2E Tests
 - `kira review` command in test environment
 - Verify PR creation and work item updates
-- Test notification delivery
 
 ## Implementation Phases
 
@@ -530,7 +531,6 @@ This section breaks down the `kira review` command implementation into small, at
 **Tests**:
 - Config loads with defaults when review section missing
 - Config loads custom review values from kira.yml
-- Environment variable expansion works for `github_token`
 
 **Commit message**: `feat(config): add review configuration section with defaults`
 
@@ -696,8 +696,7 @@ This section breaks down the `kira review` command implementation into small, at
 - `internal/commands/review.go` (or new `internal/github/client.go`)
 
 **What to implement**:
-- `getGitHubToken(cfg *config.Config) (string, error)` - Get token from config
-  - Support environment variable expansion: `${GITHUB_TOKEN}`
+- `getGitHubToken(cfg *config.Config) (string, error)` - Get token from `KIRA_GITHUB_TOKEN` environment variable only (no config key)
   - Return error if missing
 - `validateGitHubToken(token string) error` - Validate token has repo scope
   - Create GitHub client
@@ -705,8 +704,7 @@ This section breaks down the `kira review` command implementation into small, at
   - Return error if invalid or missing repo scope
 
 **Tests**:
-- Extracts token from config
-- Expands environment variables
+- Reads token from KIRA_GITHUB_TOKEN environment variable
 - Validates token permissions
 - Returns clear errors for missing/invalid tokens
 
@@ -1121,10 +1119,12 @@ Each phase is:
 - Return clear error: "Work item missing required fields: {field1}, {field2}. Update work item and try again."
 
 #### GitHub Token Configuration
-- Place in `review.github_token` (as shown in config section)
-- Support environment variable expansion: `${GITHUB_TOKEN}`
+- Token is read from the `KIRA_GITHUB_TOKEN` environment variable only
 - Validate token has `repo` scope before operations
-- Return clear error if token missing/invalid: "GitHub token validation failed. Token must have 'repo' scope for PR creation."
+- Return clear error if missing or invalid: "GitHub token validation failed. Token must have 'repo' scope for PR creation."
+
+#### Existing PR draft → ready
+- When updating an existing PR, if the user passed `--draft=false` and the existing PR is draft, the implementation must set the PR to ready-for-review (e.g. via API) in addition to updating title/body.
 
 #### Polyrepo Support
 - **For MVP**: Only support standalone/monorepo (single repository)
@@ -1142,7 +1142,6 @@ type ReviewConfig struct {
     RebaseAfterTrunkUpdate bool `yaml:"rebase_after_trunk_update"` // default: true
     DraftByDefault       bool   `yaml:"draft_by_default"`       // default: true
     AutoRequestReviews   bool   `yaml:"auto_request_reviews"`    // default: true
-    GitHubToken          string `yaml:"github_token"`            // required, supports ${VAR}
     PRTitle              string `yaml:"pr_title"`                // default: "[{id}] {title}"
     PRDescription        string `yaml:"pr_description"`         // default template
 }
@@ -1160,16 +1159,16 @@ type ReviewConfig struct {
 
 #### Token Management
 - Never log or expose GitHub tokens
-- Use environment variables for sensitive config
+- Token is supplied via KIRA_GITHUB_TOKEN environment variable only (no token in config files)
 - Validate token permissions before operations
 
 #### Input Validation
 - Sanitize work item content for PR descriptions
-- Validate email addresses and webhook URLs
+- Validate email addresses for reviewer resolution
 - Escape special characters in branch names
 
 #### API Rate Limiting
-- Implement intelligent backoff for GitHub API calls
+- Implement retries with **exponential backoff** for GitHub API calls (e.g. base delay 1s, multiplier 2, max 3 attempts)
 - Cache repository information where possible
 - Provide clear error messages for rate limit issues
 
@@ -1194,6 +1193,6 @@ type ReviewConfig struct {
 
 ### Technical Changes
 - Added GitHub API client dependency for PR management
-- Extended configuration schema for review and notification settings
+- Extended configuration schema for review settings
 - New command structure following established Kira patterns
 
