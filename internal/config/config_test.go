@@ -701,7 +701,6 @@ review:
   auto_request_reviews: false
   pr_title: "Custom [{id}]"
   pr_description: "Custom {work_item_url}"
-  github_token: "secret"
 `
 		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
 		defer func() { _ = os.Remove("kira.yml") }()
@@ -719,25 +718,5 @@ review:
 		assert.False(t, *config.Review.AutoRequestReviews)
 		assert.Equal(t, "Custom [{id}]", config.Review.PRTitle)
 		assert.Equal(t, "Custom {work_item_url}", config.Review.PRDescription)
-		assert.Equal(t, "secret", config.Review.GitHubToken)
-	})
-
-	t.Run("expands environment variables in github_token", func(t *testing.T) {
-		testEnvVar := "KIRA_TEST_GITHUB_TOKEN"
-		testValue := "expanded-secret"
-		require.NoError(t, os.Setenv(testEnvVar, testValue))
-		defer func() { _ = os.Unsetenv(testEnvVar) }()
-
-		testConfig := `version: "1.0"
-review:
-  github_token: "${KIRA_TEST_GITHUB_TOKEN}"
-`
-		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
-		defer func() { _ = os.Remove("kira.yml") }()
-
-		config, err := LoadConfig()
-		require.NoError(t, err)
-		require.NotNil(t, config.Review)
-		assert.Equal(t, testValue, config.Review.GitHubToken)
 	})
 }

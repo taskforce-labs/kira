@@ -97,12 +97,12 @@ type ReleaseConfig struct {
 }
 
 // ReviewConfig contains review-related settings.
+// GitHub token is not configured here; use KIRA_GITHUB_TOKEN environment variable only.
 type ReviewConfig struct {
 	UpdateTrunkStatus      *bool  `yaml:"update_trunk_status"`
 	RebaseAfterTrunkUpdate *bool  `yaml:"rebase_after_trunk_update"`
 	DraftByDefault         *bool  `yaml:"draft_by_default"`
 	AutoRequestReviews     *bool  `yaml:"auto_request_reviews"`
-	GitHubToken            string `yaml:"github_token"`
 	PRTitle                string `yaml:"pr_title"`
 	PRDescription          string `yaml:"pr_description"`
 }
@@ -597,11 +597,6 @@ func mergeReviewDefaults(config *Config) {
 
 	if config.Review.PRDescription == "" {
 		config.Review.PRDescription = "View detailed work item: [{id}-{title}]({work_item_url})"
-	}
-
-	// Expand environment variables in GitHubToken if set
-	if config.Review.GitHubToken != "" {
-		config.Review.GitHubToken = os.ExpandEnv(config.Review.GitHubToken)
 	}
 }
 
