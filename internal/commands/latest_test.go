@@ -73,6 +73,34 @@ func setupGitConfigForCISerial(t *testing.T) {
 	setupGitConfigForCI(t)
 }
 
+func logGitDebug(t *testing.T, dir string) {
+	t.Helper()
+	t.Logf("env GITHUB_ACTIONS=%q GIT_CONFIG_GLOBAL=%q HOME=%q XDG_CONFIG_HOME=%q",
+		os.Getenv("GITHUB_ACTIONS"),
+		os.Getenv("GIT_CONFIG_GLOBAL"),
+		os.Getenv("HOME"),
+		os.Getenv("XDG_CONFIG_HOME"),
+	)
+
+	commands := [][]string{
+		{"git", "--version"},
+		{"git", "-C", dir, "rev-parse", "--show-toplevel"},
+		{"git", "-C", dir, "status", "-sb"},
+		{"git", "-C", dir, "config", "--list", "--show-origin"},
+	}
+
+	for _, args := range commands {
+		// #nosec G204 - fixed git command list for test debugging
+		cmd := exec.Command(args[0], args[1:]...)
+		output, err := cmd.CombinedOutput()
+		t.Logf("git cmd: %s", strings.Join(args, " "))
+		if err != nil {
+			t.Logf("git err: %v", err)
+		}
+		t.Logf("git out:\n%s", strings.TrimSpace(string(output)))
+	}
+}
+
 func TestRunLatest(t *testing.T) {
 	t.Run("validates workspace exists", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -1818,6 +1846,7 @@ func TestUpdateTrunkFromRemote(t *testing.T) {
 		}
 		err := updateTrunkFromRemote(repo)
 		if err != nil {
+			logGitDebug(t, tmpDir)
 			t.Logf("updateTrunkFromRemote full error: %v", err)
 		}
 		require.NoErrorf(t, err, "updateTrunkFromRemote: %v", err)
@@ -1957,6 +1986,9 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	var mu sync.Mutex
 	result := processRepositoryUpdate(repo, false, false, &mu) // abortOnConflict=false
 
+	if result.Error != nil && strings.Contains(result.Error.Error(), "exit status") {
+		logGitDebug(t, tmpDir)
+	}
 	require.Error(t, result.Error, "expected rebase conflict")
 	assert.True(t, result.HadStash)
 	assert.False(t, result.StashPopped)
@@ -1964,6 +1996,9 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	// Stash should still contain one entry
 	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
 	stashOut, err := exec.Command("git", "-C", tmpDir, "stash", "list").Output()
+	if err != nil {
+		logGitDebug(t, tmpDir)
+	}
 	require.NoErrorf(t, err, "git stash list: %v", err)
 	assert.Contains(t, string(stashOut), "kira latest")
 	// Rebase should be in progress
@@ -2024,6 +2059,9 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	var mu sync.Mutex
 	result := processRepositoryUpdate(repo, true, false, &mu) // abortOnConflict=true
 
+	if result.Error != nil && strings.Contains(result.Error.Error(), "exit status") {
+		logGitDebug(t, tmpDir)
+	}
 	require.Error(t, result.Error, "expected rebase conflict")
 	assert.True(t, result.HadStash)
 	assert.True(t, result.RebaseAborted)
@@ -2031,6 +2069,9 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	// No rebase in progress
 	// #nosec G304 - path under tmpDir from t.TempDir(), safe for test use
 	_, err := os.Stat(filepath.Join(tmpDir, ".git", "rebase-merge"))
+	if err != nil && !os.IsNotExist(err) {
+		logGitDebug(t, tmpDir)
+	}
 	require.True(t, os.IsNotExist(err))
 	// Uncommitted file restored from stash
 	// #nosec G304 - path under tmpDir from t.TempDir(), safe for test use
