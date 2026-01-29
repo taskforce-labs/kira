@@ -812,7 +812,65 @@ func TestFormatMultipleMatchesError(t *testing.T) {
 
 // Phase 4: Front Matter Parsing & Field Access Tests
 
+func TestExtractIDFromYAMLLines(t *testing.T) {
+	t.Run("returns id value from unquoted line", func(t *testing.T) {
+		lines := []string{"id: 017", "title: Test"}
+		assert.Equal(t, "017", extractIDFromYAMLLines(lines))
+	})
+	t.Run("returns id value from quoted line", func(t *testing.T) {
+		lines := []string{`id: "017"`, "title: Test"}
+		assert.Equal(t, "017", extractIDFromYAMLLines(lines))
+	})
+	t.Run("returns id value with single quotes", func(t *testing.T) {
+		lines := []string{"id: '001'", "title: Test"}
+		assert.Equal(t, "001", extractIDFromYAMLLines(lines))
+	})
+	t.Run("returns first id when multiple id-like keys", func(t *testing.T) {
+		lines := []string{"id: 017", "identity: other", "title: Test"}
+		assert.Equal(t, "017", extractIDFromYAMLLines(lines))
+	})
+	t.Run("returns empty when no id line", func(t *testing.T) {
+		lines := []string{"title: Test", "status: todo"}
+		assert.Equal(t, "", extractIDFromYAMLLines(lines))
+	})
+	t.Run("handles id with leading/trailing spaces on line", func(t *testing.T) {
+		lines := []string{"  id: 017  ", "title: Test"}
+		assert.Equal(t, "017", extractIDFromYAMLLines(lines))
+	})
+	t.Run("preserves id 001 as written", func(t *testing.T) {
+		lines := []string{"id: 001", "title: Test"}
+		assert.Equal(t, "001", extractIDFromYAMLLines(lines))
+	})
+}
+
 func TestParseWorkItemFrontMatter(t *testing.T) {
+	t.Run("preserves id 017 as string so YAML octal is not used", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		// Unquoted 017 would be parsed by YAML as octal 15; we preserve raw value as "017"
+		content := `---
+id: 017
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+---
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		frontMatter, _, err := parseWorkItemFrontMatter(testFilePath)
+		require.NoError(t, err)
+		require.NotNil(t, frontMatter)
+		idVal := frontMatter["id"]
+		assert.Equal(t, "017", idVal, "id must be string 017, not YAML-parsed octal 15")
+	})
+
 	t.Run("parses valid front matter with all fields", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		origDir, _ := os.Getwd()
