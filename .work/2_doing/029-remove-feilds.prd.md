@@ -1,7 +1,7 @@
 ---
 id: 029
 title: remove fields
-status: backlog
+status: doing
 kind: prd
 assigned:
 estimate: 0
