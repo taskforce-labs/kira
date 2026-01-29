@@ -1666,14 +1666,117 @@ func TestRebaseOntoTrunk(t *testing.T) {
 			Remote:      "origin",
 		}
 
-		// Rebase should fail because we're already on trunk or remote doesn't exist
+		// rebaseOntoTrunk errors when already on trunk (caller should use updateTrunkFromRemote instead)
 		err := rebaseOntoTrunk(repo)
 		require.Error(t, err)
-		// Error may be "already on trunk branch" or "invalid upstream" if remote doesn't exist
-		assert.True(t, strings.Contains(err.Error(), "already on trunk branch") ||
-			strings.Contains(err.Error(), "invalid upstream") ||
-			strings.Contains(err.Error(), "does not exist"),
-			"Expected 'already on trunk branch' or remote error, got: %s", err.Error())
+		assert.Contains(t, err.Error(), "already on trunk branch")
+	})
+}
+
+func TestIsOnTrunkBranch(t *testing.T) {
+	t.Run("on trunk returns true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile("f", []byte("x"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "f").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "c").Run())
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		_ = exec.Command("git", "branch", "-M", "main").Run()
+
+		repo := RepositoryInfo{Path: tmpDir, TrunkBranch: "main"}
+		onTrunk, err := isOnTrunkBranch(repo)
+		require.NoError(t, err)
+		assert.True(t, onTrunk)
+	})
+
+	t.Run("on feature branch returns false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile("f", []byte("x"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "f").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "c").Run())
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		_ = exec.Command("git", "branch", "-M", "main").Run()
+		require.NoError(t, exec.Command("git", "checkout", "-b", "feature").Run())
+
+		repo := RepositoryInfo{Path: tmpDir, TrunkBranch: "main"}
+		onTrunk, err := isOnTrunkBranch(repo)
+		require.NoError(t, err)
+		assert.False(t, onTrunk)
+	})
+}
+
+func TestUpdateTrunkFromRemote(t *testing.T) {
+	t.Run("updates local trunk from remote", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile("a.txt", []byte("a"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "a.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
+		_ = exec.Command("git", "branch", "-M", "main").Run()
+
+		remoteDir := t.TempDir()
+		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+		// #nosec G204 - paths from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+		require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+
+		// Add a commit on "remote" by cloning, committing, pushing
+		cloneDir := t.TempDir()
+		// #nosec G204 - paths from t.TempDir(), safe for test use
+		cloneCmd := exec.Command("git", "clone", remoteDir, cloneDir)
+		cloneCmd.Dir = filepath.Dir(cloneDir)
+		require.NoError(t, cloneCmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "b.txt"), []byte("b"), 0o600))
+		// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "add", "b.txt").Run())
+		// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.name", "Test User").Run())
+		// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "commit", "-m", "Second").Run())
+		// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", cloneDir, "push", "origin", "main").Run())
+
+		// Back in original repo: fetch so origin/main is ahead
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+		require.NoError(t, exec.Command("git", "-C", tmpDir, "fetch", "origin", "main").Run())
+
+		repo := RepositoryInfo{
+			Name:        "test-repo",
+			Path:        tmpDir,
+			TrunkBranch: "main",
+			Remote:      "origin",
+		}
+		err := updateTrunkFromRemote(repo)
+		require.NoError(t, err)
+
+		// Local main should have the remote's commit
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+		out, err := exec.Command("git", "-C", tmpDir, "rev-parse", "HEAD").Output()
+		require.NoError(t, err)
+		// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+		remoteOut, err := exec.Command("git", "-C", cloneDir, "rev-parse", "HEAD").Output()
+		require.NoError(t, err)
+		assert.Equal(t, strings.TrimSpace(string(remoteOut)), strings.TrimSpace(string(out)))
 	})
 }
 
