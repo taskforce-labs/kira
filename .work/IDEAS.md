@@ -40,3 +40,5 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 31. [2026-01-23] ralph build: a ralph loop that builds all the items in todo
 32. [2026-01-23] kira cursor plugin: a plugin that allows kira to control agents in the ide
 33. [2026-01-23] show templates on err: when kira new fails it should list the available templates also
+34. [2026-01-27] Kira server: a light weight agent first, self hosted replacement for github that can be used to manage task centrally and kick off workflows possible even a matrix based chat
+35. [2026-01-27] Multi Kira Planning: an approach to planning work across multiple kira projects for enterprise usecases
