@@ -24,31 +24,35 @@ var initCmd = &cobra.Command{
 			targetDir = args[0]
 		}
 
+		cfg, err := config.LoadConfigFromDir(targetDir)
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+
 		force, _ := cmd.Flags().GetBool("force")
 		fillMissing, _ := cmd.Flags().GetBool("fill-missing")
-		workPath := filepath.Join(targetDir, ".work")
+		workPath := filepath.Join(targetDir, config.GetWorkFolderPath(cfg))
 		if err := ensureDirDecision(workPath, force, fillMissing); err != nil {
 			return err
 		}
 
-		return initializeWorkspace(targetDir)
+		return initializeWorkspace(targetDir, cfg)
 	},
 }
 
 func init() {
-	initCmd.Flags().Bool("force", false, "Overwrite existing .work directory if present")
+	initCmd.Flags().Bool("force", false, "Overwrite existing work folder if present")
 	initCmd.Flags().Bool("fill-missing", false, "Create any missing files/folders without overwriting existing ones")
 }
 
-func initializeWorkspace(targetDir string) error {
-	// Create .work directory
-	workDir := filepath.Join(targetDir, ".work")
+func initializeWorkspace(targetDir string, cfg *config.Config) error {
+	// Create work directory (configured work folder)
+	workDir := filepath.Join(targetDir, config.GetWorkFolderPath(cfg))
 	if err := os.MkdirAll(workDir, 0o700); err != nil {
-		return fmt.Errorf("failed to create .work directory: %w", err)
+		return fmt.Errorf("failed to create work directory: %w", err)
 	}
 
 	// Create status folders and .gitkeep files
-	cfg := &config.DefaultConfig
 	for _, folder := range cfg.StatusFolders {
 		folderPath := filepath.Join(workDir, folder)
 		if err := os.MkdirAll(folderPath, 0o700); err != nil {
@@ -85,7 +89,7 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 			return fmt.Errorf("failed to create IDEAS.md: %w", err)
 		}
 	} else {
-		content, readErr := safeReadFile(ideasPath)
+		content, readErr := safeReadFile(ideasPath, cfg)
 		if readErr != nil {
 			return fmt.Errorf("failed to read IDEAS.md: %w", readErr)
 		}
@@ -98,7 +102,7 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 	}
 
 	// Create kira.yml config file under the target directory
-	if err := config.SaveConfigToDir(&config.DefaultConfig, targetDir); err != nil {
+	if err := config.SaveConfigToDir(cfg, targetDir); err != nil {
 		return fmt.Errorf("failed to create kira.yml: %w", err)
 	}
 
@@ -112,7 +116,7 @@ func ensureDirDecision(workPath string, force, fillMissing bool) error {
 	}
 	if force {
 		if err := os.RemoveAll(workPath); err != nil {
-			return fmt.Errorf("failed to remove existing .work: %w", err)
+			return fmt.Errorf("failed to remove existing work folder: %w", err)
 		}
 		return nil
 	}
@@ -120,7 +124,7 @@ func ensureDirDecision(workPath string, force, fillMissing bool) error {
 		return nil
 	}
 
-	fmt.Println(".work already exists. Choose an option: [c]ancel, [o]verwrite, [f]ill-missing")
+	fmt.Printf("Work folder (%s) already exists. Choose an option: [c]ancel, [o]verwrite, [f]ill-missing\n", workPath)
 	fmt.Print("Enter choice (c/o/f): ")
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
@@ -131,7 +135,7 @@ func ensureDirDecision(workPath string, force, fillMissing bool) error {
 	switch choice {
 	case "o", "overwrite":
 		if err := os.RemoveAll(workPath); err != nil {
-			return fmt.Errorf("failed to remove existing .work: %w", err)
+			return fmt.Errorf("failed to remove existing work folder: %w", err)
 		}
 		return nil
 	case "f", "fill-missing":

@@ -129,13 +129,12 @@ type RepositoryConflicts struct {
 }
 
 func runLatest(cmd *cobra.Command, _ []string) error {
-	if err := checkWorkDir(); err != nil {
-		return err
-	}
-
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if err := checkWorkDir(cfg); err != nil {
+		return err
 	}
 
 	repos, err := discoverRepositories(cfg)
@@ -339,7 +338,7 @@ func discoverRepositories(cfg *config.Config) ([]RepositoryInfo, error) {
 	}
 
 	// Step 2: Extract work item metadata
-	metadata, err := extractWorkItemMetadataForLatest(workItemPath)
+	metadata, err := extractWorkItemMetadataForLatest(workItemPath, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract work item metadata: %w", err)
 	}
@@ -368,7 +367,8 @@ func findCurrentWorkItem(cfg *config.Config) (string, error) {
 		doingFolder = "2_doing" // default
 	}
 
-	doingPath := filepath.Join(".work", doingFolder)
+	workFolder := config.GetWorkFolderPath(cfg)
+	doingPath := filepath.Join(workFolder, doingFolder)
 	entries, err := os.ReadDir(doingPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -400,8 +400,8 @@ func findCurrentWorkItem(cfg *config.Config) (string, error) {
 const yamlFrontMatterDelimiter = "---"
 
 // extractWorkItemMetadataForLatest parses YAML front matter from work item file
-func extractWorkItemMetadataForLatest(filePath string) (*WorkItemMetadata, error) {
-	content, err := safeReadFile(filePath)
+func extractWorkItemMetadataForLatest(filePath string, cfg *config.Config) (*WorkItemMetadata, error) {
+	content, err := safeReadFile(filePath, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read work item file: %w", err)
 	}

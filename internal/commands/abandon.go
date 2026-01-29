@@ -20,13 +20,12 @@ var abandonCmd = &cobra.Command{
 Updates work item status to "abandoned" before archival.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(_ *cobra.Command, args []string) error {
-		if err := checkWorkDir(); err != nil {
-			return err
-		}
-
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := checkWorkDir(cfg); err != nil {
+			return err
 		}
 
 		target := args[0]
@@ -50,11 +49,11 @@ func abandonWorkItems(cfg *config.Config, target, reasonOrSubfolder string) erro
 		return nil
 	}
 
-	if err := markWorkItemsAbandoned(workItems, reasonOrSubfolder); err != nil {
+	if err := markWorkItemsAbandoned(workItems, reasonOrSubfolder, cfg); err != nil {
 		return err
 	}
 
-	archivePath, err := archiveWorkItems(workItems, sourcePath)
+	archivePath, err := archiveWorkItems(workItems, sourcePath, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to archive work items: %w", err)
 	}
@@ -69,13 +68,13 @@ func abandonWorkItems(cfg *config.Config, target, reasonOrSubfolder string) erro
 
 func resolveAbandonTarget(cfg *config.Config, target, reasonOrSubfolder string) ([]string, string, error) {
 	if isWorkItemID(target) {
-		return resolveByID(target)
+		return resolveByID(cfg, target)
 	}
 	return resolveByPath(cfg, target, reasonOrSubfolder)
 }
 
-func resolveByID(target string) ([]string, string, error) {
-	workItemPath, err := findWorkItemFile(target)
+func resolveByID(cfg *config.Config, target string) ([]string, string, error) {
+	workItemPath, err := findWorkItemFile(target, cfg)
 	if err != nil {
 		return nil, "", err
 	}
@@ -96,15 +95,16 @@ func resolveByPath(cfg *config.Config, target, reasonOrSubfolder string) ([]stri
 }
 
 func buildSourcePath(cfg *config.Config, target, reasonOrSubfolder string) (string, error) {
+	workFolder := config.GetWorkFolderPath(cfg)
 	var sourcePath string
 	if strings.Contains(target, "/") {
-		sourcePath = filepath.Join(".work", target)
+		sourcePath = filepath.Join(workFolder, target)
 	} else {
 		statusFolder, exists := cfg.StatusFolders[target]
 		if !exists {
 			return "", fmt.Errorf("invalid status: %s", target)
 		}
-		sourcePath = filepath.Join(".work", statusFolder)
+		sourcePath = filepath.Join(workFolder, statusFolder)
 	}
 
 	if reasonOrSubfolder != "" && !strings.Contains(reasonOrSubfolder, " ") {
@@ -113,14 +113,14 @@ func buildSourcePath(cfg *config.Config, target, reasonOrSubfolder string) (stri
 	return sourcePath, nil
 }
 
-func markWorkItemsAbandoned(workItems []string, reasonOrSubfolder string) error {
+func markWorkItemsAbandoned(workItems []string, reasonOrSubfolder string, cfg *config.Config) error {
 	for _, workItem := range workItems {
-		if err := updateWorkItemStatus(workItem, "abandoned"); err != nil {
+		if err := updateWorkItemStatus(workItem, "abandoned", cfg); err != nil {
 			return fmt.Errorf("failed to update work item status: %w", err)
 		}
 
 		if reasonOrSubfolder != "" && strings.Contains(reasonOrSubfolder, " ") {
-			if err := addAbandonmentReason(workItem, reasonOrSubfolder); err != nil {
+			if err := addAbandonmentReason(workItem, reasonOrSubfolder, cfg); err != nil {
 				return fmt.Errorf("failed to add abandonment reason: %w", err)
 			}
 		}
@@ -142,8 +142,8 @@ func isWorkItemID(target string) bool {
 	return len(target) == 3 && target[0] >= '0' && target[0] <= '9'
 }
 
-func addAbandonmentReason(filePath, reason string) error {
-	content, err := safeReadFile(filePath)
+func addAbandonmentReason(filePath, reason string, cfg *config.Config) error {
+	content, err := safeReadFile(filePath, cfg)
 	if err != nil {
 		return err
 	}

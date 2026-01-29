@@ -93,8 +93,13 @@ type WorkItem struct {
 func ValidateWorkItems(cfg *config.Config) (*ValidationResult, error) {
 	result := &ValidationResult{}
 
+	workDirAbs, err := config.GetWorkFolderAbsPath(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve work folder: %w", err)
+	}
+
 	// Get all work item files
-	files, err := getWorkItemFiles()
+	files, err := getWorkItemFiles(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get work item files: %w", err)
 	}
@@ -103,7 +108,7 @@ func ValidateWorkItems(cfg *config.Config) (*ValidationResult, error) {
 	idMap := make(map[string][]string)
 
 	for _, file := range files {
-		workItem, err := parseWorkItemFile(file)
+		workItem, err := parseWorkItemFile(file, workDirAbs)
 		if err != nil {
 			result.AddError(file, fmt.Sprintf("failed to parse file: %v", err))
 			continue
@@ -160,10 +165,11 @@ func ValidateWorkItems(cfg *config.Config) (*ValidationResult, error) {
 	return result, nil
 }
 
-func getWorkItemFiles() ([]string, error) {
+func getWorkItemFiles(cfg *config.Config) ([]string, error) {
 	var files []string
+	workFolder := config.GetWorkFolderPath(cfg)
 
-	err := filepath.Walk(".work", func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(workFolder, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -185,38 +191,42 @@ func getWorkItemFiles() ([]string, error) {
 	return files, err
 }
 
-// validateWorkItemPath ensures a work item path is safe and within .work/
-func validateWorkItemPath(path string) error {
+// validateWorkItemPath ensures a work item path is safe and within the work directory.
+func validateWorkItemPath(
+	path string,
+	workDirAbs string,
+) error {
 	cleanPath := filepath.Clean(path)
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
 		return fmt.Errorf("invalid path: %w", err)
 	}
 
-	workDir, err := filepath.Abs(".work")
-	if err != nil {
-		return fmt.Errorf("failed to resolve .work directory: %w", err)
-	}
-
-	workDirWithSep := workDir + string(filepath.Separator)
-	if !strings.HasPrefix(absPath+string(filepath.Separator), workDirWithSep) && absPath != workDir {
-		return fmt.Errorf("path outside .work directory: %s", path)
+	workDirWithSep := workDirAbs + string(filepath.Separator)
+	if !strings.HasPrefix(absPath+string(filepath.Separator), workDirWithSep) && absPath != workDirAbs {
+		return fmt.Errorf("path outside work directory: %s", path)
 	}
 
 	return nil
 }
 
 // safeReadWorkItemFile reads a work item file after validating the path
-func safeReadWorkItemFile(filePath string) ([]byte, error) {
-	if err := validateWorkItemPath(filePath); err != nil {
+func safeReadWorkItemFile(
+	filePath string,
+	workDirAbs string,
+) ([]byte, error) {
+	if err := validateWorkItemPath(filePath, workDirAbs); err != nil {
 		return nil, err
 	}
 	// #nosec G304 - path has been validated by validateWorkItemPath above
 	return os.ReadFile(filePath)
 }
 
-func parseWorkItemFile(filePath string) (*WorkItem, error) {
-	content, err := safeReadWorkItemFile(filePath)
+func parseWorkItemFile(
+	filePath string,
+	workDirAbs string,
+) (*WorkItem, error) {
+	content, err := safeReadWorkItemFile(filePath, workDirAbs)
 	if err != nil {
 		return nil, err
 	}
@@ -1150,15 +1160,19 @@ func validateWorkflowRules(_ *config.Config) error {
 }
 
 // GetNextID generates the next available work item ID.
-func GetNextID() (string, error) {
-	files, err := getWorkItemFiles()
+func GetNextID(cfg *config.Config) (string, error) {
+	workDirAbs, err := config.GetWorkFolderAbsPath(cfg)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve work folder: %w", err)
+	}
+	files, err := getWorkItemFiles(cfg)
 	if err != nil {
 		return "", fmt.Errorf("failed to get work item files: %w", err)
 	}
 
 	var maxID int
 	for _, file := range files {
-		workItem, err := parseWorkItemFile(file)
+		workItem, err := parseWorkItemFile(file, workDirAbs)
 		if err != nil {
 			continue
 		}
@@ -1175,10 +1189,14 @@ func GetNextID() (string, error) {
 }
 
 // FixDuplicateIDs fixes duplicate work item IDs by assigning new IDs.
-func FixDuplicateIDs() (*ValidationResult, error) {
+func FixDuplicateIDs(cfg *config.Config) (*ValidationResult, error) {
 	result := &ValidationResult{}
 
-	files, err := getWorkItemFiles()
+	workDirAbs, err := config.GetWorkFolderAbsPath(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve work folder: %w", err)
+	}
+	files, err := getWorkItemFiles(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get work item files: %w", err)
 	}
@@ -1186,7 +1204,7 @@ func FixDuplicateIDs() (*ValidationResult, error) {
 	// Group files by ID
 	idGroups := make(map[string][]string)
 	for _, file := range files {
-		workItem, err := parseWorkItemFile(file)
+		workItem, err := parseWorkItemFile(file, workDirAbs)
 		if err != nil {
 			continue
 		}
@@ -1205,14 +1223,14 @@ func FixDuplicateIDs() (*ValidationResult, error) {
 
 			// Keep the oldest file with the original ID, assign new IDs to others
 			for i := 1; i < len(files); i++ {
-				newID, err := GetNextID()
+				newID, err := GetNextID(cfg)
 				if err != nil {
 					result.AddError(files[i], fmt.Sprintf("failed to generate new ID: %v", err))
 					continue
 				}
 
 				// Update the file with new ID
-				if err := updateWorkItemID(files[i], newID); err != nil {
+				if err := updateWorkItemID(files[i], newID, workDirAbs); err != nil {
 					result.AddError(files[i], fmt.Sprintf("failed to update ID: %v", err))
 				}
 			}
@@ -1222,8 +1240,11 @@ func FixDuplicateIDs() (*ValidationResult, error) {
 	return result, nil
 }
 
-func updateWorkItemID(filePath, newID string) error {
-	content, err := safeReadWorkItemFile(filePath)
+func updateWorkItemID(
+	filePath, newID string,
+	workDirAbs string,
+) error {
+	content, err := safeReadWorkItemFile(filePath, workDirAbs)
 	if err != nil {
 		return err
 	}
@@ -1244,7 +1265,11 @@ func updateWorkItemID(filePath, newID string) error {
 func FixFieldIssues(cfg *config.Config) (*ValidationResult, error) {
 	result := &ValidationResult{}
 
-	files, err := getWorkItemFiles()
+	workDirAbs, err := config.GetWorkFolderAbsPath(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve work folder: %w", err)
+	}
+	files, err := getWorkItemFiles(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get work item files: %w", err)
 	}
@@ -1255,7 +1280,7 @@ func FixFieldIssues(cfg *config.Config) (*ValidationResult, error) {
 	}
 
 	for _, file := range files {
-		if err := fixWorkItemFields(file, cfg, result); err != nil {
+		if err := fixWorkItemFields(file, cfg, result, workDirAbs); err != nil {
 			result.AddError(file, fmt.Sprintf("failed to fix fields: %v", err))
 		}
 	}
@@ -1264,16 +1289,20 @@ func FixFieldIssues(cfg *config.Config) (*ValidationResult, error) {
 }
 
 // FixHardcodedDateFormats fixes date format issues in hardcoded fields like `created`.
-func FixHardcodedDateFormats() (*ValidationResult, error) {
+func FixHardcodedDateFormats(cfg *config.Config) (*ValidationResult, error) {
 	result := &ValidationResult{}
 
-	files, err := getWorkItemFiles()
+	workDirAbs, err := config.GetWorkFolderAbsPath(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve work folder: %w", err)
+	}
+	files, err := getWorkItemFiles(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get work item files: %w", err)
 	}
 
 	for _, file := range files {
-		workItem, err := parseWorkItemFile(file)
+		workItem, err := parseWorkItemFile(file, workDirAbs)
 		if err != nil {
 			continue
 		}
@@ -1286,7 +1315,7 @@ func FixHardcodedDateFormats() (*ValidationResult, error) {
 				if fixedDate, fixed := tryFixHardcodedDate(workItem.Created); fixed {
 					workItem.Created = fixedDate
 					// Write back the fixed work item
-					if err := writeWorkItemFile(file, workItem); err != nil {
+					if err := writeWorkItemFile(file, workItem, workDirAbs); err != nil {
 						result.AddError(file, fmt.Sprintf("failed to fix created date: %v", err))
 					} else {
 						result.AddError(file, fmt.Sprintf("fixed created date format: %s -> %s", originalDate, fixedDate))
@@ -1323,8 +1352,8 @@ func tryFixHardcodedDate(dateStr string) (string, bool) {
 	return dateStr, false
 }
 
-func fixWorkItemFields(file string, cfg *config.Config, result *ValidationResult) error {
-	workItem, err := parseWorkItemFile(file)
+func fixWorkItemFields(file string, cfg *config.Config, result *ValidationResult, workDirAbs string) error {
+	workItem, err := parseWorkItemFile(file, workDirAbs)
 	if err != nil {
 		return fmt.Errorf("failed to parse file: %w", err)
 	}
@@ -1346,7 +1375,7 @@ func fixWorkItemFields(file string, cfg *config.Config, result *ValidationResult
 
 	// Write back if modified
 	if modified {
-		if err := writeWorkItemFile(file, workItem); err != nil {
+		if err := writeWorkItemFile(file, workItem, workDirAbs); err != nil {
 			return fmt.Errorf("failed to write fixes: %w", err)
 		}
 	}
@@ -1487,8 +1516,8 @@ func tryFixEmailValue(value interface{}) (interface{}, bool) {
 }
 
 // writeWorkItemFile writes a work item back to a file.
-func writeWorkItemFile(filePath string, workItem *WorkItem) error {
-	content, err := safeReadWorkItemFile(filePath)
+func writeWorkItemFile(filePath string, workItem *WorkItem, workDirAbs string) error {
+	content, err := safeReadWorkItemFile(filePath, workDirAbs)
 	if err != nil {
 		return err
 	}

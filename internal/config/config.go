@@ -28,6 +28,8 @@ type Config struct {
 	Workspace     *WorkspaceConfig       `yaml:"workspace"`
 	Users         UsersConfig            `yaml:"users"`
 	Fields        map[string]FieldConfig `yaml:"fields"`
+	// ConfigDir is the absolute path to the directory containing kira.yml (set at load time; not persisted).
+	ConfigDir string `yaml:"-"`
 }
 
 // GitConfig contains git-related settings.
@@ -53,6 +55,7 @@ type IDEConfig struct {
 type WorkspaceConfig struct {
 	Root            string          `yaml:"root"`             // default: "../"
 	WorktreeRoot    string          `yaml:"worktree_root"`    // derived if not set
+	WorkFolder      string          `yaml:"work_folder"`      // default: ".work"
 	ArchitectureDoc string          `yaml:"architecture_doc"` // optional path to architecture doc
 	Description     string          `yaml:"description"`      // optional workspace description
 	DraftPR         bool            `yaml:"draft_pr"`         // default: false
@@ -188,6 +191,11 @@ func LoadConfig() (*Config, error) {
 		// No config file - return a copy of defaults with all defaults applied
 		config := DefaultConfig
 		mergeWithDefaults(&config)
+		configDir, err := filepath.Abs(".")
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve config directory: %w", err)
+		}
+		config.ConfigDir = configDir
 		return &config, nil
 	}
 
@@ -215,7 +223,86 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
+	configDir, err := filepath.Abs(filepath.Dir(configPath))
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve config directory: %w", err)
+	}
+	config.ConfigDir = configDir
+
 	return &config, nil
+}
+
+// LoadConfigFromDir loads configuration from the given directory (looks for kira.yml in dir, then dir/.work/kira.yml).
+// ConfigDir is set to the absolute path of dir.
+func LoadConfigFromDir(dir string) (*Config, error) {
+	rootPath := filepath.Join(dir, "kira.yml")
+	legacyPath := filepath.Join(dir, ".work", "kira.yml")
+
+	configPath := ""
+	if _, err := os.Stat(rootPath); err == nil {
+		configPath = rootPath
+	} else if _, err := os.Stat(legacyPath); err == nil {
+		configPath = legacyPath
+	} else {
+		config := DefaultConfig
+		mergeWithDefaults(&config)
+		configDir, err := filepath.Abs(dir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve config directory: %w", err)
+		}
+		config.ConfigDir = configDir
+		return &config, nil
+	}
+
+	cleanPath := filepath.Clean(configPath)
+	if strings.Contains(cleanPath, "..") {
+		return nil, fmt.Errorf("invalid config path: %s", configPath)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	mergeWithDefaults(&config)
+	if err := validateConfig(&config); err != nil {
+		return nil, err
+	}
+
+	configDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve config directory: %w", err)
+	}
+	config.ConfigDir = configDir
+
+	return &config, nil
+}
+
+// GetWorkFolderPath returns the configured work folder path, defaulting to ".work".
+func GetWorkFolderPath(cfg *Config) string {
+	if cfg != nil && cfg.Workspace != nil && cfg.Workspace.WorkFolder != "" {
+		return strings.TrimSpace(cfg.Workspace.WorkFolder)
+	}
+	return ".work"
+}
+
+// GetWorkFolderAbsPath returns the absolute path to the work folder, resolved relative to ConfigDir.
+func GetWorkFolderAbsPath(cfg *Config) (string, error) {
+	workFolder := GetWorkFolderPath(cfg)
+	baseDir := "."
+	if cfg != nil && cfg.ConfigDir != "" {
+		baseDir = cfg.ConfigDir
+	}
+	absPath, err := filepath.Abs(filepath.Join(baseDir, workFolder))
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve work folder path: %w", err)
+	}
+	return absPath, nil
 }
 
 // ValidStatusActions defines the valid values for start.status_action
@@ -247,6 +334,17 @@ func validateConfig(config *Config) error {
 		if !valid {
 			return fmt.Errorf("invalid status_action value '%s': use one of: %s",
 				config.Start.StatusAction, strings.Join(ValidStatusActions, ", "))
+		}
+	}
+
+	// Validate workspace.work_folder if set
+	if config.Workspace != nil && config.Workspace.WorkFolder != "" {
+		wf := strings.TrimSpace(config.Workspace.WorkFolder)
+		if wf == "" {
+			return fmt.Errorf("workspace.work_folder cannot be empty or whitespace only")
+		}
+		if strings.Contains(config.Workspace.WorkFolder, "\x00") {
+			return fmt.Errorf("workspace.work_folder cannot contain null byte")
 		}
 	}
 
@@ -525,6 +623,9 @@ func mergeWorkspaceDefaults(config *Config) {
 	}
 	if config.Workspace.Root == "" {
 		config.Workspace.Root = "../"
+	}
+	if config.Workspace.WorkFolder == "" {
+		config.Workspace.WorkFolder = ".work"
 	}
 	// WorktreeRoot is derived at runtime if not set
 	// DraftPR defaults to false (zero value)

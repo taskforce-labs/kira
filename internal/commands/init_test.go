@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"kira/internal/config"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,7 +50,10 @@ func TestInitializeWorkspace(t *testing.T) {
 	t.Run("creates workspace structure", func(t *testing.T) {
 		tmpDir := t.TempDir()
 
-		err := initializeWorkspace(tmpDir)
+		cfg, err := config.LoadConfigFromDir(tmpDir)
+		require.NoError(t, err)
+
+		err = initializeWorkspace(tmpDir, cfg)
 		require.NoError(t, err)
 
 		// Check that .work directory was created
@@ -81,7 +86,10 @@ func TestInitializeWorkspace(t *testing.T) {
 		err := os.WriteFile(existingFile, []byte("existing content"), 0o600)
 		require.NoError(t, err)
 
-		err = initializeWorkspace(tmpDir)
+		cfg, err := config.LoadConfigFromDir(tmpDir)
+		require.NoError(t, err)
+
+		err = initializeWorkspace(tmpDir, cfg)
 		require.NoError(t, err)
 
 		// Check that existing file is still there
@@ -109,11 +117,14 @@ func TestIdeasFileBehavior(t *testing.T) {
 		existing := "Custom ideas content\n- [2025-01-01] Something\n"
 		require.NoError(t, os.WriteFile(filepath.Join(workDir, "IDEAS.md"), []byte(existing), 0o600))
 
-		// Initialize (should prepend header without wiping existing)
-		err := initializeWorkspace(".")
+		cfg, err := config.LoadConfig()
 		require.NoError(t, err)
 
-		data, readErr := safeReadFile(".work/IDEAS.md")
+		// Initialize (should prepend header without wiping existing)
+		err = initializeWorkspace(".", cfg)
+		require.NoError(t, err)
+
+		data, readErr := safeReadFile(".work/IDEAS.md", cfg)
 		require.NoError(t, readErr)
 		content := string(data)
 		assert.True(t, strings.HasPrefix(content, "# Ideas"))
@@ -125,12 +136,15 @@ func TestIdeasFileBehavior(t *testing.T) {
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
 
-		// First run creates header
-		require.NoError(t, initializeWorkspace("."))
-		// Second run should not duplicate header
-		require.NoError(t, initializeWorkspace("."))
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
 
-		data, err := safeReadFile(".work/IDEAS.md")
+		// First run creates header
+		require.NoError(t, initializeWorkspace(".", cfg))
+		// Second run should not duplicate header
+		require.NoError(t, initializeWorkspace(".", cfg))
+
+		data, err := safeReadFile(".work/IDEAS.md", cfg)
 		require.NoError(t, err)
 		content := string(data)
 		// Count only top-level "# Ideas" lines (ignore "## List")

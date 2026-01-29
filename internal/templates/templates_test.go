@@ -2,6 +2,7 @@ package templates
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -74,13 +75,16 @@ title: <!--input-string:title:"Feature title"-->
 
 		require.NoError(t, os.WriteFile(templatePath, []byte(templateContent), 0o600))
 
+		workDirAbs, err := filepath.Abs(".work")
+		require.NoError(t, err)
+
 		inputs := map[string]string{
 			"id":      "001",
 			"title":   "Test Feature",
 			"context": "This is a test feature",
 		}
 
-		result, err := ProcessTemplate(templatePath, inputs)
+		result, err := ProcessTemplate(templatePath, inputs, workDirAbs)
 		require.NoError(t, err)
 
 		assert.Contains(t, result, "id: 001")

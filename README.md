@@ -331,6 +331,13 @@ release:
   releases_file: "RELEASES.md"
   archive_date_format: "2006-01-02"
 
+workspace:
+  work_folder: ".work"  # optional; default is ".work"
+
+### Custom work folder
+
+By default, kira uses the `.work` directory for status folders, templates, and IDEAS.md. You can override this with `workspace.work_folder` in `kira.yml`. Examples: `work`, `tasks`, or a relative path like `../shared-work`. The path is resolved relative to the directory containing `kira.yml`. Existing repos that do not set `work_folder` continue to use `.work` (backward compatible).
+
 # Field Configuration (optional)
 # Define custom fields with validation rules, defaults, and metadata
 fields:

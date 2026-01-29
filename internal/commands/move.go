@@ -23,13 +23,12 @@ var moveCmd = &cobra.Command{
 	Long:  `Moves the work item to the target status folder. Will display options if target status not provided.`,
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := checkWorkDir(); err != nil {
-			return err
-		}
-
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := checkWorkDir(cfg); err != nil {
+			return err
 		}
 
 		workItemID := args[0]
@@ -52,8 +51,8 @@ func init() {
 const unknownValue = "unknown"
 
 // extractWorkItemMetadata extracts work item metadata from front matter
-func extractWorkItemMetadata(filePath string) (workItemType, id, title, currentStatus string, err error) {
-	content, err := safeReadFile(filePath)
+func extractWorkItemMetadata(filePath string, cfg *config.Config) (workItemType, id, title, currentStatus string, err error) {
+	content, err := safeReadFile(filePath, cfg)
 	if err != nil {
 		return unknownValue, "", "", unknownValue, fmt.Errorf("failed to read work item file: %w", err)
 	}
@@ -302,7 +301,7 @@ type workItemMetadata struct {
 
 func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFlag, dryRun bool) error {
 	// Find the work item file
-	workItemPath, err := findWorkItemFile(workItemID)
+	workItemPath, err := findWorkItemFile(workItemID, cfg)
 	if err != nil {
 		return err
 	}
@@ -310,7 +309,7 @@ func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFla
 	// Extract metadata BEFORE moving (to get current status)
 	var metadata workItemMetadata
 	if commitFlag || dryRun {
-		metadata.workItemType, metadata.id, metadata.title, metadata.currentStatus, err = extractWorkItemMetadata(workItemPath)
+		metadata.workItemType, metadata.id, metadata.title, metadata.currentStatus, err = extractWorkItemMetadata(workItemPath, cfg)
 		if err != nil {
 			return fmt.Errorf("failed to extract work item metadata: %w", err)
 		}
@@ -333,7 +332,7 @@ func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFla
 	}
 
 	// Get target folder path
-	targetFolder := filepath.Join(".work", cfg.StatusFolders[targetStatus])
+	targetFolder := filepath.Join(config.GetWorkFolderPath(cfg), cfg.StatusFolders[targetStatus])
 	filename := filepath.Base(workItemPath)
 	targetPath := filepath.Join(targetFolder, filename)
 
@@ -351,7 +350,7 @@ func executeMoveWorkItem(cfg *config.Config, workItemID, workItemPath, targetPat
 	}
 
 	// Update the status in the file
-	if err := updateWorkItemStatus(targetPath, targetStatus); err != nil {
+	if err := updateWorkItemStatus(targetPath, targetStatus, cfg); err != nil {
 		return fmt.Errorf("failed to update work item status: %w", err)
 	}
 

@@ -22,13 +22,12 @@ var saveCmd = &cobra.Command{
 Validates all non-archived work items before staging.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := checkWorkDir(); err != nil {
-			return err
-		}
-
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := checkWorkDir(cfg); err != nil {
+			return err
 		}
 
 		var commitMessage string
@@ -65,25 +64,26 @@ func saveWorkItems(cfg *config.Config, commitMessage string, dryRun bool) error 
 		fmt.Println("[DRY RUN] Update timestamps for modified work items")
 	} else {
 		// Update timestamps for modified work items
-		if err := updateWorkItemTimestamps(); err != nil {
+		if err := updateWorkItemTimestamps(cfg); err != nil {
 			return fmt.Errorf("failed to update timestamps: %w", err)
 		}
 	}
 
 	// Check for external changes (always runs even in dry-run for validation)
-	hasExternalChanges, err := checkExternalChanges()
+	hasExternalChanges, err := checkExternalChanges(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to check for external changes: %w", err)
 	}
 
 	if hasExternalChanges {
-		fmt.Println("Warning: External changes detected outside .work/ directory.")
+		workFolder := config.GetWorkFolderPath(cfg)
+		fmt.Printf("Warning: External changes detected outside %s/ directory.\n", workFolder)
 		fmt.Println("Skipping commit to avoid mixing work item changes with other changes.")
 		return nil
 	}
 
-	// Stage only .work/ directory changes
-	if err := stageWorkChanges(dryRun); err != nil {
+	// Stage only work folder changes
+	if err := stageWorkChanges(cfg, dryRun); err != nil {
 		return fmt.Errorf("failed to stage work changes: %w", err)
 	}
 
@@ -104,10 +104,11 @@ func saveWorkItems(cfg *config.Config, commitMessage string, dryRun bool) error 
 	return nil
 }
 
-func updateWorkItemTimestamps() error {
+func updateWorkItemTimestamps(cfg *config.Config) error {
 	currentTime := time.Now().Format("2006-01-02T15:04:05Z")
+	workFolder := config.GetWorkFolderPath(cfg)
 
-	return filepath.Walk(".work", func(path string, info os.FileInfo, err error) error {
+	return filepath.Walk(workFolder, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -129,12 +130,12 @@ func updateWorkItemTimestamps() error {
 		}
 
 		// Update the updated timestamp
-		return updateFileTimestamp(path, currentTime)
+		return updateFileTimestamp(path, currentTime, cfg)
 	})
 }
 
-func updateFileTimestamp(filePath, timestamp string) error {
-	content, err := safeReadFile(filePath)
+func updateFileTimestamp(filePath, timestamp string, cfg *config.Config) error {
+	content, err := safeReadFile(filePath, cfg)
 	if err != nil {
 		return err
 	}
@@ -196,8 +197,8 @@ func sanitizeCommitMessage(msg string) (string, error) {
 	return msg, nil
 }
 
-func checkExternalChanges() (bool, error) {
-	// Check git status for changes outside .work/
+func checkExternalChanges(cfg *config.Config) (bool, error) {
+	// Check git status for changes outside work folder
 	// Note: This function always executes git commands even in dry-run mode because it's a read-only check
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -208,14 +209,15 @@ func checkExternalChanges() (bool, error) {
 		return false, nil
 	}
 
+	workFolder := config.GetWorkFolderPath(cfg)
+	workPrefix := workFolder + "/"
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
 		if line != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "??") {
-			// Check if the change is outside .work/
 			parts := strings.Fields(line)
 			if len(parts) > 1 {
 				filePath := parts[1]
-				if !strings.HasPrefix(filePath, ".work/") {
+				if !strings.HasPrefix(filePath, workPrefix) && filePath != workFolder {
 					return true, nil
 				}
 			}
@@ -225,12 +227,14 @@ func checkExternalChanges() (bool, error) {
 	return false, nil
 }
 
-func stageWorkChanges(dryRun bool) error {
-	// Stage all changes in .work/ directory
+func stageWorkChanges(cfg *config.Config, dryRun bool) error {
+	// Stage all changes in work folder
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err := executeCommand(ctx, "git", []string{"add", ".work/"}, "", dryRun)
+	workFolder := config.GetWorkFolderPath(cfg)
+	addPath := workFolder + "/"
+	_, err := executeCommand(ctx, "git", []string{"add", addPath}, "", dryRun)
 	return err
 }
 

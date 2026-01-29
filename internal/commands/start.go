@@ -145,13 +145,12 @@ func init() {
 }
 
 func runStart(cmd *cobra.Command, args []string) error {
-	if err := checkWorkDir(); err != nil {
-		return err
-	}
-
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if err := checkWorkDir(cfg); err != nil {
+		return err
 	}
 
 	workItemID := args[0]
@@ -325,14 +324,14 @@ func buildStartContext(cfg *config.Config, workItemID string, flags StartFlags) 
 	}
 
 	// Step 2: Find and validate work item exists
-	workItemPath, err := findWorkItemFile(workItemID)
+	workItemPath, err := findWorkItemFile(workItemID, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("work item '%s' not found: no work item file exists with that ID", workItemID)
 	}
 	ctx.WorkItemPath = workItemPath
 
 	// Step 3: Extract work item metadata
-	workItemType, id, title, currentStatus, err := extractWorkItemMetadata(workItemPath)
+	workItemType, id, title, currentStatus, err := extractWorkItemMetadata(workItemPath, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read work item '%s': could not extract metadata: %w", workItemID, err)
 	}
@@ -1852,7 +1851,7 @@ func performStatusUpdate(ctx *StartContext, repoRoot, trunkBranch, remoteName st
 	}
 
 	// Get the new path after moving
-	newPath := filepath.Join(".work", ctx.Config.StatusFolders[targetStatus], filepath.Base(oldPath))
+	newPath := filepath.Join(config.GetWorkFolderPath(ctx.Config), ctx.Config.StatusFolders[targetStatus], filepath.Base(oldPath))
 
 	// Update ctx.WorkItemPath to the new location
 	ctx.WorkItemPath = newPath
@@ -1914,7 +1913,7 @@ func performStatusUpdateOnBranch(ctx *StartContext, worktreePath string) error {
 	}
 
 	// Get the new path after moving
-	newPath := filepath.Join(".work", ctx.Config.StatusFolders[targetStatus], filepath.Base(oldPath))
+	newPath := filepath.Join(config.GetWorkFolderPath(ctx.Config), ctx.Config.StatusFolders[targetStatus], filepath.Base(oldPath))
 
 	// Update ctx.WorkItemPath to the new location
 	ctx.WorkItemPath = newPath
@@ -1926,7 +1925,7 @@ func performStatusUpdateOnBranch(ctx *StartContext, worktreePath string) error {
 	}
 
 	// Commit the status change in the worktree (on the new branch)
-	// Note: The worktree sees the same .work/ directory as the main repo
+	// Note: The worktree sees the same work directory as the main repo
 	if err := commitStatusChange(worktreePath, oldPath, newPath, commitMsg); err != nil {
 		return fmt.Errorf("failed to commit status change on branch: %w", err)
 	}
@@ -1940,7 +1939,7 @@ func performStatusUpdateOnBranch(ctx *StartContext, worktreePath string) error {
 // This mirrors the logic in moveWorkItem but without the commit step.
 func moveWorkItemWithoutCommit(cfg *config.Config, workItemID, targetStatus string) error {
 	// Find the work item file
-	workItemPath, err := findWorkItemFile(workItemID)
+	workItemPath, err := findWorkItemFile(workItemID, cfg)
 	if err != nil {
 		return err
 	}
@@ -1951,7 +1950,7 @@ func moveWorkItemWithoutCommit(cfg *config.Config, workItemID, targetStatus stri
 	}
 
 	// Get target folder path
-	targetFolder := filepath.Join(".work", cfg.StatusFolders[targetStatus])
+	targetFolder := filepath.Join(config.GetWorkFolderPath(cfg), cfg.StatusFolders[targetStatus])
 	filename := filepath.Base(workItemPath)
 	targetPath := filepath.Join(targetFolder, filename)
 
@@ -1961,7 +1960,7 @@ func moveWorkItemWithoutCommit(cfg *config.Config, workItemID, targetStatus stri
 	}
 
 	// Update the status in the file
-	if err := updateWorkItemStatus(targetPath, targetStatus); err != nil {
+	if err := updateWorkItemStatus(targetPath, targetStatus, cfg); err != nil {
 		return fmt.Errorf("failed to update work item status: %w", err)
 	}
 

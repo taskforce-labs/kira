@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"kira/internal/config"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,8 +27,11 @@ func TestFindWorkItemFile(t *testing.T) {
 		filePath := ".work/1_todo/001-test-feature.prd.md"
 		require.NoError(t, os.WriteFile(filePath, []byte(testWorkItemContent), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Find the work item
-		foundPath, err := findWorkItemFile("001")
+		foundPath, err := findWorkItemFile("001", cfg)
 		require.NoError(t, err)
 		assert.Equal(t, filePath, foundPath)
 	})
@@ -39,8 +44,11 @@ func TestFindWorkItemFile(t *testing.T) {
 		// Create .work directory structure
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Try to find non-existent work item
-		_, err := findWorkItemFile("999")
+		_, err = findWorkItemFile("999", cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "work item with ID 999 not found")
 	})
@@ -68,8 +76,11 @@ created: 2024-01-01
 		filePath := ".work/1_todo/test-work-item.md"
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Update status
-		err := updateWorkItemStatus(filePath, "doing")
+		err = updateWorkItemStatus(filePath, "doing", cfg)
 		require.NoError(t, err)
 
 		// Check that status was updated
@@ -145,8 +156,11 @@ title: Test Feature 2
 
 		workItems := []string{".work/work-item1.md", ".work/work-item2.md"}
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Archive work items
-		archivePath, err := archiveWorkItems(workItems, "source-dir")
+		archivePath, err := archiveWorkItems(workItems, "source-dir", cfg)
 		require.NoError(t, err)
 
 		// Check that archive directory was created
@@ -160,11 +174,11 @@ title: Test Feature 2
 		assert.FileExists(t, archivedFile2)
 
 		// Check that content was preserved
-		content1, err := safeReadFile(archivedFile1)
+		content1, err := safeReadFile(archivedFile1, cfg)
 		require.NoError(t, err)
 		assert.Contains(t, string(content1), "Test Feature 1")
 
-		content2, err := safeReadFile(archivedFile2)
+		content2, err := safeReadFile(archivedFile2, cfg)
 		require.NoError(t, err)
 		assert.Contains(t, string(content2), "Test Feature 2")
 	})

@@ -175,7 +175,10 @@ Content here
 `
 		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(workItemContent), 0o600))
 
-		metadata, err := extractWorkItemMetadataForLatest(testWorkItemPathDoing)
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		metadata, err := extractWorkItemMetadataForLatest(testWorkItemPathDoing, cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "001", metadata.ID)
 		assert.Equal(t, "Test Feature", metadata.Title)
@@ -199,7 +202,10 @@ id: 001
 `
 		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(workItemContent), 0o600))
 
-		metadata, err := extractWorkItemMetadataForLatest(testWorkItemPathDoing)
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		metadata, err := extractWorkItemMetadataForLatest(testWorkItemPathDoing, cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "001", metadata.ID)
 		assert.Empty(t, metadata.Title)
@@ -223,7 +229,10 @@ title: [invalid
 `
 		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(workItemContent), 0o600))
 
-		_, err := extractWorkItemMetadataForLatest(testWorkItemPathDoing)
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		_, err = extractWorkItemMetadataForLatest(testWorkItemPathDoing, cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse front matter")
 	})
@@ -236,7 +245,10 @@ title: [invalid
 		// Create .work directory structure
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
 
-		_, err := extractWorkItemMetadataForLatest(".work/2_doing/nonexistent.md")
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		_, err = extractWorkItemMetadataForLatest(".work/2_doing/nonexistent.md", cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read work item file")
 	})
