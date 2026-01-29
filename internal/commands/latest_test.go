@@ -1799,7 +1799,7 @@ func TestUpdateTrunkFromRemote(t *testing.T) {
 			Remote:      "origin",
 		}
 		err := updateTrunkFromRemote(repo)
-		require.NoError(t, err)
+		require.NoErrorf(t, err, "updateTrunkFromRemote: %v", err)
 
 		// Local main should have the remote's commit
 		// #nosec G204 - tmpDir from t.TempDir(), safe for test use
@@ -1936,19 +1936,19 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	var mu sync.Mutex
 	result := processRepositoryUpdate(repo, false, false, &mu) // abortOnConflict=false
 
-	require.Error(t, result.Error)
+	require.Error(t, result.Error, "expected rebase conflict")
 	assert.True(t, result.HadStash)
 	assert.False(t, result.StashPopped)
 	assert.True(t, result.RebaseHadConflicts)
 	// Stash should still contain one entry
 	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
 	stashOut, err := exec.Command("git", "-C", tmpDir, "stash", "list").Output()
-	require.NoError(t, err)
+	require.NoErrorf(t, err, "git stash list: %v", err)
 	assert.Contains(t, string(stashOut), "kira latest")
 	// Rebase should be in progress
 	// #nosec G304 - path under tmpDir from t.TempDir(), safe for test use
 	_, err = os.Stat(filepath.Join(tmpDir, ".git", "rebase-merge"))
-	require.NoError(t, err)
+	require.NoErrorf(t, err, "rebase-merge dir: %v", err)
 }
 
 func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) {
@@ -2003,7 +2003,7 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	var mu sync.Mutex
 	result := processRepositoryUpdate(repo, true, false, &mu) // abortOnConflict=true
 
-	require.Error(t, result.Error)
+	require.Error(t, result.Error, "expected rebase conflict")
 	assert.True(t, result.HadStash)
 	assert.True(t, result.RebaseAborted)
 	assert.True(t, result.StashPopped)
@@ -2014,7 +2014,7 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	// Uncommitted file restored from stash
 	// #nosec G304 - path under tmpDir from t.TempDir(), safe for test use
 	_, err = os.Stat(filepath.Join(tmpDir, "g"))
-	require.NoError(t, err)
+	require.NoErrorf(t, err, "stash-restored g: %v", err)
 }
 
 func TestPerformFetchAndRebase(t *testing.T) {
