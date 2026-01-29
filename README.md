@@ -47,7 +47,7 @@ kira start 001
 ```bash
 kira review
 # 1. Moves the work-item to review status on the current branch
-# 2. Creates or updates a GitHub pull request (draft by default)
+# 2. Creates or updates a GitHub pull request (draft or ready; default from review.draft_by_default, override with --draft / --draft=false)
 # 3. Optionally updates trunk status and rebases onto trunk
 # Note: requires a GitHub remote and KIRA_GITHUB_TOKEN for PR creation
 ```
@@ -292,7 +292,7 @@ kira review --no-trunk-update --no-rebase
 ```
 
 Flags:
-- `--draft` (default: true): Create the PR as a draft
+- `--draft`: Create the PR as draft or ready-for-review. Default comes from `review.draft_by_default` in kira.yml (default: true); use `--draft=false` for ready-for-review or `--draft=true` to force draft. Explicit flag overrides config.
 - `--reviewer` (repeatable): Reviewer spec (user number from `kira users`, email, or GitHub username)
 - `--title`: Custom PR title (otherwise derived from work item)
 - `--description`: Custom PR description (otherwise derived from work item)
@@ -305,6 +305,7 @@ Configuration (`kira.yml`):
 review:
   update_trunk_status: true
   rebase_after_trunk_update: true
+  draft_by_default: true   # Default for new PRs: true = draft, false = ready-for-review (overridden by --draft when passed)
   auto_request_reviews: true
   pr_title: "[{id}] {title}"
   pr_description: "View detailed work item: [{id}-{title}]({work_item_url})"

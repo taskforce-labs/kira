@@ -151,7 +151,15 @@ The command will:
 			}
 		}
 
-		isDraft, _ := cmd.Flags().GetBool("draft")
+		// Default draft/ready from config (review.draft_by_default); explicit --draft flag overrides
+		defaultDraft := true
+		if cfg.Review != nil && cfg.Review.DraftByDefault != nil {
+			defaultDraft = *cfg.Review.DraftByDefault
+		}
+		isDraft := defaultDraft
+		if cmd.Flags().Changed("draft") {
+			isDraft, _ = cmd.Flags().GetBool("draft")
+		}
 
 		repoRoot, err := getRepoRoot()
 		if err != nil {
@@ -231,7 +239,7 @@ The command will:
 
 func init() {
 	reviewCmd.Flags().StringArray("reviewer", []string{}, "Specify reviewer (can be used multiple times). Can be user number from 'kira user' command or email address")
-	reviewCmd.Flags().Bool("draft", true, "Create as draft PR (default: true)")
+	reviewCmd.Flags().Bool("draft", true, "Create as draft PR (default from review.draft_by_default in kira.yml; flag overrides)")
 	reviewCmd.Flags().Bool("no-trunk-update", false, "Skip updating trunk branch status (overrides config)")
 	reviewCmd.Flags().Bool("no-rebase", false, "Skip rebasing current branch after trunk update (overrides config)")
 	reviewCmd.Flags().String("title", "", "Custom PR title (derived from work item if not provided)")
