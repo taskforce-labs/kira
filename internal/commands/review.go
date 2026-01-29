@@ -891,12 +891,16 @@ func pushBranchIfNeeded(branchName string, cfg *config.Config) error {
 // #nosec G101 -- env var name only, not a credential
 const envGitHubToken = "KIRA_GITHUB_TOKEN"
 
+// githubTokenNewURL is the GitHub settings page for creating a new personal access token.
+const githubTokenNewURL = "https://github.com/settings/personal-access-tokens/new"
+
 // getGitHubToken reads the GitHub token from the KIRA_GITHUB_TOKEN environment variable only.
 // Returns the token or an error if the token is missing.
 func getGitHubToken(_ *config.Config) (string, error) {
 	token := strings.TrimSpace(os.Getenv(envGitHubToken))
 	if token == "" {
-		return "", fmt.Errorf("GitHub token required for PR creation. Set KIRA_GITHUB_TOKEN environment variable")
+		return "", fmt.Errorf("GitHub token required for PR creation. Set KIRA_GITHUB_TOKEN environment variable. "+
+			"To create a token: %s (fine-grained: set Pull requests to Read and write; classic: enable 'repo' scope)", githubTokenNewURL)
 	}
 	return token, nil
 }
