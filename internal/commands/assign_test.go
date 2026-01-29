@@ -3227,7 +3227,8 @@ invalid: [unclosed bracket
 		assert.True(t, results[0].Success, "first work item should succeed")
 		assert.False(t, results[1].Success, "second work item should fail")
 		assert.NotNil(t, results[1].Error)
-		assert.Contains(t, results[1].Error.Error(), "failed to assign")
+		assert.Contains(t, results[1].Error.Error(), "failed to update work item")
+		assert.Contains(t, results[1].Error.Error(), "002")
 
 		// Verify first file was updated
 		updatedContent1, err := os.ReadFile(testFilePath1)
@@ -3463,6 +3464,291 @@ status: todo
 	})
 }
 
+// Phase 10: Output & Feedback Tests
+
+func TestDisplayWorkItemProgress(t *testing.T) {
+	captureStdout := func(fn func()) string {
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+		fn()
+		_ = w.Close()
+		os.Stdout = oldStdout
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		return buf.String()
+	}
+
+	t.Run("success assign", func(t *testing.T) {
+		result := WorkItemUpdateResult{
+			WorkItemID: "001",
+			Success:    true,
+			Operation:  "assign",
+		}
+		output := captureStdout(func() { displayWorkItemProgress(result) })
+		assert.Contains(t, output, "✓ Work item 001: assign successfully")
+	})
+
+	t.Run("success unassign", func(t *testing.T) {
+		result := WorkItemUpdateResult{
+			WorkItemID: "001",
+			Success:    true,
+			Operation:  "unassign",
+		}
+		output := captureStdout(func() { displayWorkItemProgress(result) })
+		assert.Contains(t, output, "✓ Work item 001: unassign successfully")
+	})
+
+	t.Run("success append", func(t *testing.T) {
+		result := WorkItemUpdateResult{
+			WorkItemID: "002",
+			Success:    true,
+			Operation:  "append",
+		}
+		output := captureStdout(func() { displayWorkItemProgress(result) })
+		assert.Contains(t, output, "✓ Work item 002: append successfully")
+	})
+
+	t.Run("success validate", func(t *testing.T) {
+		result := WorkItemUpdateResult{
+			WorkItemID: "001",
+			Success:    true,
+			Operation:  "validate",
+		}
+		output := captureStdout(func() { displayWorkItemProgress(result) })
+		assert.Contains(t, output, "✓ Work item 001: validated successfully")
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		err := fmt.Errorf("failed to parse")
+		result := WorkItemUpdateResult{
+			WorkItemID: "002",
+			Success:    false,
+			Error:      err,
+			Operation:  "assign",
+		}
+		output := captureStdout(func() { displayWorkItemProgress(result) })
+		assert.Contains(t, output, "✗ Work item 002: failed -")
+		assert.Contains(t, output, "failed to parse")
+	})
+}
+
+func TestDisplaySingleSuccessMessage(t *testing.T) {
+	captureStdout := func(fn func()) string {
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+		fn()
+		_ = w.Close()
+		os.Stdout = oldStdout
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		return buf.String()
+	}
+
+	user := &UserInfo{Email: "alice@example.com", Name: "Alice", Number: 1}
+
+	t.Run("assign default field", func(t *testing.T) {
+		result := WorkItemUpdateResult{WorkItemID: "001", Success: true, Operation: "assign"}
+		flags := AssignFlags{Field: "assigned"}
+		output := captureStdout(func() { displaySingleSuccessMessage(result, user, flags) })
+		assert.Equal(t, "Assigned work item 001 to Alice <alice@example.com>\n", output)
+	})
+
+	t.Run("assign custom field", func(t *testing.T) {
+		result := WorkItemUpdateResult{WorkItemID: "002", Success: true, Operation: "assign"}
+		flags := AssignFlags{Field: "reviewer"}
+		output := captureStdout(func() { displaySingleSuccessMessage(result, user, flags) })
+		assert.Equal(t, "Assigned reviewer for work item 002 to Alice <alice@example.com>\n", output)
+	})
+
+	t.Run("unassign", func(t *testing.T) {
+		result := WorkItemUpdateResult{WorkItemID: "001", Success: true, Operation: "unassign"}
+		flags := AssignFlags{Field: "assigned"}
+		output := captureStdout(func() { displaySingleSuccessMessage(result, nil, flags) })
+		assert.Equal(t, "Unassigned work item 001\n", output)
+	})
+
+	t.Run("append", func(t *testing.T) {
+		result := WorkItemUpdateResult{WorkItemID: "002", Success: true, Operation: "append"}
+		flags := AssignFlags{Field: "reviewer"}
+		output := captureStdout(func() { displaySingleSuccessMessage(result, user, flags) })
+		assert.Equal(t, "Added Alice <alice@example.com> to reviewer for work item 002\n", output)
+	})
+
+	t.Run("already_assigned", func(t *testing.T) {
+		result := WorkItemUpdateResult{WorkItemID: "001", Success: true, Operation: "already_assigned"}
+		flags := AssignFlags{Field: "assigned"}
+		output := captureStdout(func() { displaySingleSuccessMessage(result, user, flags) })
+		assert.Equal(t, "Work item 001 is already assigned to Alice <alice@example.com>. Use --unassign to clear or specify a different user.\n", output)
+	})
+}
+
+func TestProcessWorkItemInDryRun(t *testing.T) {
+	t.Run("valid work item file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePathPhase5, []byte(testWorkItemContentPhase5), 0o600))
+
+		absPath, err := filepath.Abs(testFilePathPhase5)
+		require.NoError(t, err)
+
+		result := processWorkItemInDryRun(absPath)
+
+		assert.True(t, result.Success)
+		assert.Equal(t, "validate", result.Operation)
+		assert.Equal(t, "001", result.WorkItemID)
+	})
+
+	t.Run("invalid path or unreadable file", func(t *testing.T) {
+		// Use a path that does not exist and is not under .work so parseWorkItemFrontMatter fails
+		result := processWorkItemInDryRun("/nonexistent/path/to/work-item.md")
+
+		assert.False(t, result.Success)
+		require.NotNil(t, result.Error)
+		assert.Contains(t, result.Error.Error(), "dry-run")
+		assert.Contains(t, result.Error.Error(), "parse")
+	})
+}
+
+func TestProcessWorkItemUpdatesDryRunOutput(t *testing.T) {
+	testFilePath := testFilePathPhase5
+	content := testWorkItemContentWithAssigned
+
+	t.Run("dry-run prints Would assign and does not modify file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		absPath, err := filepath.Abs(testFilePath)
+		require.NoError(t, err)
+
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		user := &UserInfo{Email: "bob@example.com", Name: "Bob", Number: 1}
+		flags := AssignFlags{Field: "assigned", DryRun: true}
+		results := processWorkItemUpdates([]string{absPath}, user, flags, []UserInfo{})
+
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		require.Len(t, results, 1)
+		assert.True(t, results[0].Success)
+		assert.Contains(t, output, "Would assign work item 001 to Bob <bob@example.com>")
+
+		// File must be unchanged
+		readBack, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		assert.Contains(t, string(readBack), "assigned: user@example.com")
+		assert.NotContains(t, string(readBack), "bob@example.com")
+	})
+
+	t.Run("dry-run prints Would unassign and does not modify file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		absPath, err := filepath.Abs(testFilePath)
+		require.NoError(t, err)
+
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		flags := AssignFlags{Field: "assigned", Unassign: true, DryRun: true}
+		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{})
+
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		require.Len(t, results, 1)
+		assert.True(t, results[0].Success)
+		assert.Contains(t, output, "Would unassign work item 001")
+
+		readBack, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		assert.Contains(t, string(readBack), "assigned: user@example.com")
+	})
+}
+
+func TestProcessAssignWorkItemAlreadyAssigned(t *testing.T) {
+	testFilePath := testFilePathPhase5
+	content := testWorkItemContentWithAssigned // assigned: user@example.com
+
+	t.Run("when current assignment equals user skips write and returns already_assigned", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		absPath, err := filepath.Abs(testFilePath)
+		require.NoError(t, err)
+
+		// User with same email as current assignment
+		user := &UserInfo{Email: "user@example.com", Name: "Current User", Number: 1}
+		result := processAssignWorkItem(absPath, "001", "assigned", user, false)
+
+		require.True(t, result.Success)
+		assert.Equal(t, "already_assigned", result.Operation)
+
+		// File must be unchanged (no timestamp update, same assigned value)
+		readBack, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		readStr := string(readBack)
+		assert.Contains(t, readStr, "assigned: user@example.com")
+		// updated timestamp should not be present in original content; if we had skipped write, it stays absent
+		assert.NotRegexp(t, `updated: \d{4}-\d{2}-\d{2}T`, readStr)
+	})
+
+	t.Run("when current assignment differs updates file and returns assign", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(content), 0o600))
+
+		absPath, err := filepath.Abs(testFilePath)
+		require.NoError(t, err)
+
+		user := &UserInfo{Email: "other@example.com", Name: "Other", Number: 2}
+		result := processAssignWorkItem(absPath, "001", "assigned", user, false)
+
+		require.True(t, result.Success)
+		assert.Equal(t, "assign", result.Operation)
+
+		readBack, err := os.ReadFile(testFilePath)
+		require.NoError(t, err)
+		assert.Contains(t, string(readBack), "assigned: other@example.com")
+	})
+}
+
 func TestDisplayBatchSummary(t *testing.T) {
 	t.Run("displays summary for successful operations", func(t *testing.T) {
 		// Capture output
@@ -3498,6 +3784,7 @@ func TestDisplayBatchSummary(t *testing.T) {
 		assert.Contains(t, output, "001")
 		assert.Contains(t, output, "002")
 		assert.Contains(t, output, "Summary: 2 succeeded, 0 failed")
+		assert.Contains(t, output, "✓")
 	})
 
 	t.Run("displays summary with failures", func(t *testing.T) {
@@ -3536,6 +3823,49 @@ func TestDisplayBatchSummary(t *testing.T) {
 		assert.Contains(t, output, "Failed work items:")
 		assert.Contains(t, output, "002")
 		assert.Contains(t, output, "test error")
+		assert.Contains(t, output, "✓")
+		assert.Contains(t, output, "✗")
+	})
+
+	t.Run("displays summary when all operations fail", func(t *testing.T) {
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		results := []WorkItemUpdateResult{
+			{
+				WorkItemPath: "/path/to/001",
+				WorkItemID:   "001",
+				Success:      false,
+				Error:        fmt.Errorf("failed to assign"),
+				Operation:    "assign",
+			},
+			{
+				WorkItemPath: "/path/to/002",
+				WorkItemID:   "002",
+				Success:      false,
+				Error:        fmt.Errorf("permission denied"),
+				Operation:    "assign",
+			},
+		}
+
+		displayBatchSummary(results)
+
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		assert.Contains(t, output, "Operation Results:")
+		assert.Contains(t, output, "Summary: 0 succeeded, 2 failed")
+		assert.Contains(t, output, "Failed work items:")
+		assert.Contains(t, output, "001")
+		assert.Contains(t, output, "002")
+		assert.Contains(t, output, "failed to assign")
+		assert.Contains(t, output, "permission denied")
+		assert.Contains(t, output, "✗")
 	})
 
 	t.Run("handles empty results", func(t *testing.T) {
