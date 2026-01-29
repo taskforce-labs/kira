@@ -1,7 +1,7 @@
 ---
 id: 028
 title: latest-on-trunk
-status: backlog
+status: todo
 kind: prd
 assigned:
 estimate: 0
