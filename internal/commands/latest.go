@@ -21,8 +21,12 @@ import (
 
 var latestCmd = &cobra.Command{
 	Use:   "latest",
-	Short: "Update feature branches with latest trunk changes through iterative conflict resolution",
-	Long: `A command that keeps feature branches updated with trunk changes through iterative conflict resolution.
+	Short: "Update branches with latest trunk (on trunk: update from remote; on feature: rebase onto trunk)",
+	Long: `Keeps your branch updated with trunk. Works on both trunk and feature branches.
+
+When you are on a feature branch: fetches and rebases your branch onto trunk.
+When you are on trunk: fetches and updates local trunk from remote (e.g. pull --rebase).
+In polyrepo setups, each repository is handled according to its own current branch.
 
 The command first checks for existing merge conflicts, displays them for external LLM resolution,
 and only performs fetch/rebase when conflicts are resolved. Since kira supports polyrepo workflows
@@ -31,12 +35,11 @@ simultaneously, ensuring consistency and coordination between related repositori
 
 The command can be called repeatedly to work through conflicts progressively.
 
-If uncommitted changes are detected, they will be automatically stashed before rebase
-and popped after successful rebase (unless --no-pop-stash is specified).
+If uncommitted changes are detected, they will be automatically stashed before update
+and popped after successful update (unless --no-pop-stash is specified).
 
-By default, when a rebase encounters conflicts, kira leaves the repository in the conflicted
-rebase state so you can resolve conflicts and continue the rebase yourself (or by re-running
-kira latest).`,
+By default, when a rebase or trunk update encounters conflicts, kira leaves the repository
+in the conflicted state so you can resolve conflicts and continue (or re-run kira latest).`,
 	Args:         cobra.NoArgs,
 	RunE:         runLatest,
 	SilenceUsage: true, // Don't show usage on errors - error messages are clear enough
@@ -247,7 +250,13 @@ func handleUpdateResults(results []RepositoryOperationResult) error {
 func displayDiscoveredRepositories(repos []RepositoryInfo) {
 	fmt.Printf("Discovered %d repository(ies) for current work item:\n", len(repos))
 	for _, repo := range repos {
-		fmt.Printf("  - %s: %s (trunk: %s, remote: %s)\n", repo.Name, repo.Path, repo.TrunkBranch, repo.Remote)
+		branchNote := ""
+		if onTrunk, err := isOnTrunkBranch(repo); err == nil && onTrunk {
+			branchNote = " [on trunk]"
+		} else if err == nil {
+			branchNote = " [on feature branch]"
+		}
+		fmt.Printf("  - %s: %s (trunk: %s, remote: %s)%s\n", repo.Name, repo.Path, repo.TrunkBranch, repo.Remote, branchNote)
 	}
 }
 

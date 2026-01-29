@@ -1918,6 +1918,68 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir("/") }()
+
+	require.NoError(t, exec.Command("git", "init").Run())
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	require.NoError(t, os.WriteFile("f", []byte("a"), 0o600))
+	require.NoError(t, exec.Command("git", "add", "f").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "A").Run())
+	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+	_ = exec.Command("git", "branch", "-M", "main").Run()
+
+	remoteDir := t.TempDir()
+	// #nosec G204 - remoteDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
+	require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+
+	// Divergent commit on remote
+	cloneDir := t.TempDir()
+	// #nosec G204 - paths from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "clone", remoteDir, cloneDir).Run())
+	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "f"), []byte("b"), 0o600))
+	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", cloneDir, "add", "f").Run())
+	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.email", "test@example.com").Run())
+	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.name", "Test User").Run())
+	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", cloneDir, "commit", "-m", "B").Run())
+	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
+	require.NoError(t, exec.Command("git", "-C", cloneDir, "push", "origin", "main").Run())
+
+	// Local divergent commit so rebase will conflict
+	require.NoError(t, os.WriteFile("f", []byte("c"), 0o600))
+	require.NoError(t, exec.Command("git", "add", "f").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "C").Run())
+
+	require.NoError(t, os.WriteFile("g", []byte("g"), 0o600))
+
+	repo := RepositoryInfo{Name: "test", Path: tmpDir, TrunkBranch: "main", Remote: "origin"}
+	var mu sync.Mutex
+	result := processRepositoryUpdate(repo, true, false, &mu) // abortOnConflict=true
+
+	require.Error(t, result.Error)
+	assert.True(t, result.HadStash)
+	assert.True(t, result.RebaseAborted)
+	assert.True(t, result.StashPopped)
+	// No rebase in progress
+	// #nosec G304 - path under tmpDir from t.TempDir(), safe for test use
+	_, err := os.Stat(filepath.Join(tmpDir, ".git", "rebase-merge"))
+	require.True(t, os.IsNotExist(err))
+	// Uncommitted file restored from stash
+	// #nosec G304 - path under tmpDir from t.TempDir(), safe for test use
+	_, err = os.Stat(filepath.Join(tmpDir, "g"))
+	require.NoError(t, err)
+}
+
 func TestPerformFetchAndRebase(t *testing.T) {
 	t.Run("successful fetch and rebase", func(t *testing.T) {
 		tmpDir := t.TempDir()
