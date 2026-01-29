@@ -208,12 +208,29 @@ func formatCommandPreview(name string, args []string) string {
 	return fmt.Sprintf("[DRY RUN] %s %s", name, strings.Join(args, " "))
 }
 
+// gitConfigEnv returns env vars so git subprocesses see GIT_CONFIG_GLOBAL when set (e.g. in CI tests).
+// This ensures temp repos are trusted (safe.directory) when tests set GIT_CONFIG_GLOBAL.
+func gitConfigEnv() []string {
+	if v := os.Getenv("GIT_CONFIG_GLOBAL"); v != "" {
+		return []string{"GIT_CONFIG_GLOBAL=" + v}
+	}
+	return nil
+}
+
 // executeCommand executes a command with context and optional dry-run support.
 // If dryRun is true, it prints what would be executed and returns empty string and nil.
 // If dryRun is false, it executes the command and returns stdout output.
 // If dir is non-empty, the command is executed in that directory.
 // Errors include stderr output for debugging.
+// Git commands inherit GIT_CONFIG_GLOBAL when set (for CI).
 func executeCommand(ctx context.Context, name string, args []string, dir string, dryRun bool) (string, error) {
+	env := gitConfigEnv()
+	return executeCommandWithEnv(ctx, name, args, dir, env, dryRun)
+}
+
+// executeCommandWithEnv is like executeCommand but allows passing extra environment variables
+// (e.g. GIT_CONFIG_GLOBAL for CI). When extraEnv is nil or empty, behavior matches executeCommand.
+func executeCommandWithEnv(ctx context.Context, name string, args []string, dir string, extraEnv []string, dryRun bool) (string, error) {
 	if dryRun {
 		preview := formatCommandPreview(name, args)
 		if dir != "" {
@@ -226,6 +243,9 @@ func executeCommand(ctx context.Context, name string, args []string, dir string,
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
+	}
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -261,6 +281,9 @@ func executeCommandCombinedOutput(ctx context.Context, name string, args []strin
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	if env := gitConfigEnv(); len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -292,8 +315,8 @@ func executeCommandCombinedOutputWithEnv(ctx context.Context, name string, args 
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
+	if len(env) > 0 || len(gitConfigEnv()) > 0 {
+		cmd.Env = append(os.Environ(), append(gitConfigEnv(), env...)...)
 	}
 
 	output, err := cmd.CombinedOutput()
