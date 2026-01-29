@@ -4,8 +4,7 @@ title: <!--input-string:title:"Spike title"-->
 status: <!--input-string[backlog,todo,doing,review,done,released,abandoned,archived]:status:"Current status"-->
 kind: spike
 assigned: <!--input-string:assigned:"Assigned to (email)"-->
-estimate: <!--input-number:estimate:"Estimate in days"-->
-created: <!--input-datetime[yyyy-mm-dd]:created:"Creation date"-->
+created: <!--input-datetime[yyyy-mm-dd]:created:"Created (auto-set)"-->
 tags: <!--input-strings[research,discovery,investigation]:tags:"Tags"-->
 ---
 
