@@ -2925,7 +2925,7 @@ func TestProcessWorkItemUpdatesUnassign(t *testing.T) {
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		results := processWorkItemUpdates([]string{absPath}, nil, flags)
+		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{})
 		require.Len(t, results, 1)
 		assert.True(t, results[0].Success)
 
@@ -2965,7 +2965,7 @@ reviewer: reviewer@example.com
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		results := processWorkItemUpdates([]string{absPath}, nil, flags)
+		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{})
 		require.Len(t, results, 1)
 		assert.True(t, results[0].Success)
 
@@ -3021,7 +3021,7 @@ assigned: user2@example.com
 		absPath2, err := filepath.Abs(filePath2)
 		require.NoError(t, err)
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags)
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags, []UserInfo{})
 		require.Len(t, results, 2)
 		assert.True(t, results[0].Success)
 		assert.True(t, results[1].Success)
@@ -3056,7 +3056,7 @@ assigned: user2@example.com
 		absPath, err := filepath.Abs(testFilePath)
 		require.NoError(t, err)
 
-		results := processWorkItemUpdates([]string{absPath}, nil, flags)
+		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{})
 		require.Len(t, results, 1)
 		assert.True(t, results[0].Success)
 
@@ -3089,7 +3089,7 @@ assigned: user2@example.com
 		require.NoError(t, err)
 
 		// Should not error even if field doesn't exist
-		results := processWorkItemUpdates([]string{absPath}, nil, flags)
+		results := processWorkItemUpdates([]string{absPath}, nil, flags, []UserInfo{})
 		require.Len(t, results, 1)
 		assert.True(t, results[0].Success)
 
@@ -3160,7 +3160,7 @@ created: 2024-01-01
 			Append: false,
 		}
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2, absPath3}, user, flags)
+		results := processWorkItemUpdates([]string{absPath1, absPath2, absPath3}, user, flags, []UserInfo{})
 
 		require.Len(t, results, 3)
 		assert.True(t, results[0].Success)
@@ -3221,7 +3221,7 @@ invalid: [unclosed bracket
 			Append: false,
 		}
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2}, user, flags)
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, user, flags, []UserInfo{})
 
 		require.Len(t, results, 2)
 		assert.True(t, results[0].Success, "first work item should succeed")
@@ -3266,7 +3266,7 @@ invalid: [unclosed bracket
 			DryRun: true,
 		}
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags)
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags, []UserInfo{})
 
 		require.Len(t, results, 2)
 		assert.True(t, results[0].Success, "first work item should validate")
@@ -3323,7 +3323,7 @@ assigned: user2@example.com
 			Unassign: true,
 		}
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags)
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, nil, flags, []UserInfo{})
 
 		require.Len(t, results, 2)
 		assert.True(t, results[0].Success)
@@ -3388,7 +3388,7 @@ created: 2024-01-01
 			Append: true,
 		}
 
-		results := processWorkItemUpdates([]string{absPath1, absPath2}, user, flags)
+		results := processWorkItemUpdates([]string{absPath1, absPath2}, user, flags, []UserInfo{})
 
 		require.Len(t, results, 2)
 		assert.True(t, results[0].Success)
@@ -3555,5 +3555,303 @@ func TestDisplayBatchSummary(t *testing.T) {
 
 		// Should not output anything for empty results
 		assert.Empty(t, output)
+	})
+}
+
+// Phase 9: Interactive Mode Tests
+
+func TestGetCurrentAssignment(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir("/") }()
+
+	// Initialize kira workspace
+	require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+	t.Run("returns current assignment when field exists", func(t *testing.T) {
+		workItemContent := `---
+id: 001
+title: Test Feature
+status: todo
+kind: prd
+assigned: user@example.com
+created: 2024-01-01
+---
+
+# Test Feature
+`
+		filePath := ".work/1_todo/001-test.prd.md"
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		assignment, err := getCurrentAssignment(filePath, "assigned")
+		require.NoError(t, err)
+		assert.Equal(t, "user@example.com", assignment)
+	})
+
+	t.Run("returns empty string when field does not exist", func(t *testing.T) {
+		workItemContent := `---
+id: 002
+title: Test Feature
+status: todo
+kind: prd
+created: 2024-01-01
+---
+
+# Test Feature
+`
+		filePath := ".work/1_todo/002-test.prd.md"
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		assignment, err := getCurrentAssignment(filePath, "assigned")
+		require.NoError(t, err)
+		assert.Empty(t, assignment)
+	})
+
+	t.Run("returns empty string when field is empty", func(t *testing.T) {
+		workItemContent := `---
+id: 003
+title: Test Feature
+status: todo
+kind: prd
+assigned: ""
+created: 2024-01-01
+---
+
+# Test Feature
+`
+		filePath := ".work/1_todo/003-test.prd.md"
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		assignment, err := getCurrentAssignment(filePath, "assigned")
+		require.NoError(t, err)
+		assert.Empty(t, assignment)
+	})
+
+	t.Run("works with custom field", func(t *testing.T) {
+		workItemContent := `---
+id: 004
+title: Test Feature
+status: todo
+kind: prd
+reviewer: reviewer@example.com
+created: 2024-01-01
+---
+
+# Test Feature
+`
+		filePath := ".work/1_todo/004-test.prd.md"
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		assignment, err := getCurrentAssignment(filePath, "reviewer")
+		require.NoError(t, err)
+		assert.Equal(t, "reviewer@example.com", assignment)
+	})
+
+	t.Run("handles array field values", func(t *testing.T) {
+		workItemContent := `---
+id: 005
+title: Test Feature
+status: todo
+kind: prd
+assigned: [user1@example.com, user2@example.com]
+created: 2024-01-01
+---
+
+# Test Feature
+`
+		filePath := ".work/1_todo/005-test.prd.md"
+		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
+
+		assignment, err := getCurrentAssignment(filePath, "assigned")
+		require.NoError(t, err)
+		assert.Contains(t, assignment, "user1@example.com")
+		assert.Contains(t, assignment, "user2@example.com")
+	})
+
+	t.Run("returns error for invalid file path", func(t *testing.T) {
+		_, err := getCurrentAssignment("nonexistent.md", "assigned")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse work item")
+	})
+}
+
+func TestShowInteractiveSelection(t *testing.T) {
+	users := []UserInfo{
+		{Email: "user1@example.com", Name: "User One", Number: 1},
+		{Email: "user2@example.com", Name: "User Two", Number: 2},
+		{Email: "user3@example.com", Name: "", Number: 3},
+	}
+
+	t.Run("displays users in correct format", func(t *testing.T) {
+		// Capture output
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		// Create input with valid selection
+		input := strings.NewReader("1\n")
+
+		// Run function in goroutine to avoid blocking
+		done := make(chan struct{})
+		var selection int
+		var err error
+		go func() {
+			selection, err = showInteractiveSelection(users, "", "assigned", input)
+			close(done)
+		}()
+
+		// Wait a bit for output
+		time.Sleep(100 * time.Millisecond)
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		// Read output
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		// Wait for function to complete
+		<-done
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, selection)
+		assert.Contains(t, output, "Available users:")
+		assert.Contains(t, output, "1. User One <user1@example.com>")
+		assert.Contains(t, output, "2. User Two <user2@example.com>")
+		assert.Contains(t, output, "3. user3@example.com")
+		assert.Contains(t, output, "0. Unassign")
+	})
+
+	t.Run("shows current assignment when provided", func(t *testing.T) {
+		// Capture output
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		input := strings.NewReader("2\n")
+
+		done := make(chan struct{})
+		var selection int
+		var err error
+		go func() {
+			selection, err = showInteractiveSelection(users, "current@example.com", "assigned", input)
+			close(done)
+		}()
+
+		time.Sleep(100 * time.Millisecond)
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		<-done
+
+		require.NoError(t, err)
+		assert.Equal(t, 2, selection)
+		assert.Contains(t, output, "Current assignment (assigned): current@example.com")
+	})
+
+	t.Run("returns unassign selection (0)", func(t *testing.T) {
+		oldStdout := os.Stdout
+		_, w, _ := os.Pipe()
+		os.Stdout = w
+
+		input := strings.NewReader("0\n")
+
+		done := make(chan struct{})
+		var selection int
+		var err error
+		go func() {
+			selection, err = showInteractiveSelection(users, "", "assigned", input)
+			close(done)
+		}()
+
+		time.Sleep(100 * time.Millisecond)
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		<-done
+
+		require.NoError(t, err)
+		assert.Equal(t, 0, selection)
+	})
+
+	t.Run("handles invalid input and retries", func(t *testing.T) {
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		// First invalid input, then valid
+		input := strings.NewReader("invalid\n1\n")
+
+		done := make(chan struct{})
+		var selection int
+		var err error
+		go func() {
+			selection, err = showInteractiveSelection(users, "", "assigned", input)
+			close(done)
+		}()
+
+		time.Sleep(200 * time.Millisecond)
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		<-done
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, selection)
+		assert.Contains(t, output, "Invalid input")
+	})
+
+	t.Run("handles out of range selection", func(t *testing.T) {
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		// Out of range, then valid
+		input := strings.NewReader("99\n1\n")
+
+		done := make(chan struct{})
+		var selection int
+		var err error
+		go func() {
+			selection, err = showInteractiveSelection(users, "", "assigned", input)
+			close(done)
+		}()
+
+		time.Sleep(200 * time.Millisecond)
+		_ = w.Close()
+		os.Stdout = oldStdout
+
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		output := buf.String()
+
+		<-done
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, selection)
+		assert.Contains(t, output, "Invalid selection")
+	})
+
+	t.Run("returns error for empty users list", func(t *testing.T) {
+		_, err := showInteractiveSelection([]UserInfo{}, "", "assigned", strings.NewReader("1\n"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no users available")
+	})
+
+	t.Run("returns error after too many invalid attempts", func(t *testing.T) {
+		// Provide 3 invalid inputs
+		input := strings.NewReader("invalid1\ninvalid2\ninvalid3\n")
+
+		_, err := showInteractiveSelection(users, "", "assigned", input)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "too many invalid input attempts")
 	})
 }
