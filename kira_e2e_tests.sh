@@ -2496,6 +2496,158 @@ else
   exit 1
 fi
 
+# Test 33: Assign command workflow (switch, append, unassign, field, dry-run, interactive, batch)
+echo ""
+echo "👤 Test 33: Assign command workflow"
+
+# Use deterministic users (don't rely on git history)
+cat > kira.yml << 'EOF'
+version: "1.0"
+templates:
+  prd: templates/template.prd.md
+  issue: templates/template.issue.md
+  spike: templates/template.spike.md
+  task: templates/template.task.md
+status_folders:
+  backlog: 0_backlog
+  todo: 1_todo
+  doing: 2_doing
+  review: 3_review
+  done: 4_done
+  archived: z_archive
+default_status: backlog
+validation:
+  required_fields:
+    - id
+    - title
+    - status
+    - kind
+    - created
+  id_format: "^\\d{3}$"
+  status_values:
+    - backlog
+    - todo
+    - doing
+    - review
+    - done
+    - released
+    - abandoned
+    - archived
+fields:
+  assigned:
+    type: email
+    required: false
+users:
+  use_git_history: false
+  saved_users:
+    - name: Alice Example
+      email: alice@example.com
+    - name: Bob Example
+      email: bob@example.com
+EOF
+
+# Create work items for assignment tests
+cat > .work/1_todo/019-assign-e2e.prd.md << 'EOF'
+---
+id: 019
+title: Assign E2E
+status: todo
+kind: prd
+created: 2025-01-01
+---
+
+# Assign E2E
+EOF
+
+cat > .work/1_todo/020-assign-e2e-batch-a.prd.md << 'EOF'
+---
+id: 020
+title: Assign E2E Batch A
+status: todo
+kind: prd
+created: 2025-01-01
+---
+
+# Assign E2E Batch A
+EOF
+
+cat > .work/1_todo/021-assign-e2e-batch-b.prd.md << 'EOF'
+---
+id: 021
+title: Assign E2E Batch B
+status: todo
+kind: prd
+created: 2025-01-01
+---
+
+# Assign E2E Batch B
+EOF
+
+# Switch mode (numeric identifier)
+"$KIRA_BIN" assign 019 1
+if grep -q "^assigned: alice@example.com$" .work/1_todo/019-assign-e2e.prd.md; then
+  echo "  ✅ Switch mode assigns by user number"
+else
+  echo "  ❌ Switch mode assignment failed"
+  exit 1
+fi
+
+# Append mode (convert string -> list, avoid duplicates)
+"$KIRA_BIN" assign 019 2 --append
+if grep -q "alice@example.com" .work/1_todo/019-assign-e2e.prd.md && \
+   grep -q "bob@example.com" .work/1_todo/019-assign-e2e.prd.md; then
+  echo "  ✅ Append mode adds user without losing existing"
+else
+  echo "  ❌ Append mode failed"
+  exit 1
+fi
+
+# Custom field (reviewer)
+"$KIRA_BIN" assign 019 2 --field reviewer
+if grep -q "^reviewer: bob@example.com$" .work/1_todo/019-assign-e2e.prd.md; then
+  echo "  ✅ Custom field assignment works (--field reviewer)"
+else
+  echo "  ❌ Custom field assignment failed"
+  exit 1
+fi
+
+# Unassign clears the field
+"$KIRA_BIN" assign 019 --unassign
+if grep -q "^assigned:" .work/1_todo/019-assign-e2e.prd.md; then
+  echo "  ❌ Unassign should remove assigned field"
+  exit 1
+else
+  echo "  ✅ Unassign removes assigned field"
+fi
+
+# Dry-run should not modify the file (no assigned field should appear)
+"$KIRA_BIN" assign 019 1 --dry-run > /dev/null
+if grep -q "^assigned:" .work/1_todo/019-assign-e2e.prd.md; then
+  echo "  ❌ Dry-run should not write changes"
+  exit 1
+else
+  echo "  ✅ Dry-run makes no changes"
+fi
+
+# Interactive selection (choose user 1)
+printf "1\n" | "$KIRA_BIN" assign 019 --interactive > /dev/null
+if grep -q "^assigned: alice@example.com$" .work/1_todo/019-assign-e2e.prd.md; then
+  echo "  ✅ Interactive mode assigns selected user"
+else
+  echo "  ❌ Interactive mode assignment failed"
+  exit 1
+fi
+
+# Batch assignment (multiple work items)
+"$KIRA_BIN" assign 020 021 2 > /dev/null
+if grep -q "^assigned: bob@example.com$" .work/1_todo/020-assign-e2e-batch-a.prd.md && \
+   grep -q "^assigned: bob@example.com$" .work/1_todo/021-assign-e2e-batch-b.prd.md; then
+  echo "  ✅ Batch assignment works"
+else
+  echo "  ❌ Batch assignment failed"
+  exit 1
+fi
+
 # Cleanup
 echo ""
 if [ "$KEEP" -eq 1 ] || [ "${KEEP_TEST_DIR:-0}" -ne 0 ]; then
