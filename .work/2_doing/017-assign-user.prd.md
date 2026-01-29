@@ -267,11 +267,11 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add interactive mode)
 
 **Acceptance Criteria**:
-- [ ] Displays users in consistent format
-- [ ] Shows current assignment
-- [ ] Gets valid user selection
-- [ ] Handles invalid input gracefully
-- [ ] Supports unassign option
+- [x] Displays users in consistent format
+- [x] Shows current assignment
+- [x] Gets valid user selection
+- [x] Handles invalid input gracefully
+- [x] Supports unassign option
 
 **Deliverable**: Interactive mode working
 
@@ -292,11 +292,11 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add output functions)
 
 **Acceptance Criteria**:
-- [ ] Shows clear success messages
-- [ ] Shows helpful error messages
-- [ ] Dry-run mode works correctly
-- [ ] Progress indicators are clear
-- [ ] Batch summaries are informative
+- [x] Shows clear success messages
+- [x] Shows helpful error messages
+- [x] Dry-run mode works correctly
+- [x] Progress indicators are clear
+- [x] Batch summaries are informative
 
 **Deliverable**: Polished output and feedback
 
