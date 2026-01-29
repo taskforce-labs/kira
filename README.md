@@ -150,12 +150,11 @@ kira new prd "Feature"                                # Status omitted → defau
 kira new prd backlog "Feature"                        # Explicit status
 kira new prd "Feature" --interactive                  # Enable prompts for missing fields
 kira new prd "Feature" -I                            # Shorthand for --interactive
-kira new prd "Feature" --input due=2025-01-01        # Provide inputs (key=value)
-kira new prd "Feature" --input assigned=me@acme.com  # Multiple --input allowed
+kira new prd "Feature" --input assigned=me@acme.com  # Provide inputs (key=value)
 ```
 
 Notes:
-- By default, only provided values are filled; missing template fields use defaults
+- By default, only provided values are filled; missing template fields use defaults. The `created` field is set automatically to today when creating work items with `kira new`.
 - Use `--interactive` (or `-I`) to enable prompts for missing template fields
 
 ### `kira users`
@@ -391,6 +390,7 @@ workspace:
 By default, kira uses the `.work` directory for status folders, templates, and IDEAS.md. You can override this with `workspace.work_folder` in `kira.yml`. Examples: `work`, `tasks`, or a relative path like `../shared-work`. The path is resolved relative to the directory containing `kira.yml`. Existing repos that do not set `work_folder` continue to use `.work` (backward compatible).
 
 # Field Configuration (optional)
+# Default templates do not include due or estimate; add them here and in custom templates if needed.
 # Define custom fields with validation rules, defaults, and metadata
 fields:
   assigned:
@@ -519,7 +519,7 @@ fields:
 
 ## Work Item Format
 
-Work items are markdown files with YAML front matter:
+Work items are markdown files with YAML front matter. The default template includes `id`, `title`, `status`, `kind`, `created`, `assigned`, and `tags`. Optional fields such as `due` and `estimate` can be added via `kira.yml` `fields:` and custom templates.
 
 ```yaml
 ---
@@ -529,9 +529,7 @@ status: todo
 kind: prd
 assigned: user@example.com
 priority: high
-estimate: 5
 created: 2024-01-15
-due: 2024-01-20
 tags: [auth, security, frontend]
 ---
 
