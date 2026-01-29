@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"kira/internal/config"
 )
 
 // Idea represents a parsed idea from IDEAS.md
@@ -73,10 +75,11 @@ func parseMultiLineIdea(lines []string, startIndex int, initialText string, idea
 }
 
 // parseIdeasFile reads and parses IDEAS.md, extracting ideas under the ## List header
-func parseIdeasFile() (*IdeasFile, error) {
-	ideasPath := filepath.Join(".work", "IDEAS.md")
+func parseIdeasFile(cfg *config.Config) (*IdeasFile, error) {
+	workFolder := config.GetWorkFolderPath(cfg)
+	ideasPath := filepath.Join(workFolder, "IDEAS.md")
 
-	content, err := safeReadFile(ideasPath)
+	content, err := safeReadFile(ideasPath, cfg)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("IDEAS.md not found. Run 'kira init' first")
@@ -157,8 +160,8 @@ func parseIdeasFile() (*IdeasFile, error) {
 }
 
 // getIdeaByNumber retrieves a specific idea by number
-func getIdeaByNumber(number int) (*Idea, error) {
-	ideasFile, err := parseIdeasFile()
+func getIdeaByNumber(number int, cfg *config.Config) (*Idea, error) {
+	ideasFile, err := parseIdeasFile(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -172,8 +175,8 @@ func getIdeaByNumber(number int) (*Idea, error) {
 }
 
 // getNextIdeaNumber finds the highest numbered idea and returns the next number
-func getNextIdeaNumber() (int, error) {
-	ideasFile, err := parseIdeasFile()
+func getNextIdeaNumber(cfg *config.Config) (int, error) {
+	ideasFile, err := parseIdeasFile(cfg)
 	if err != nil {
 		// If file doesn't exist or has no ideas, start at 1
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "No ideas found") {
@@ -193,8 +196,9 @@ func getNextIdeaNumber() (int, error) {
 }
 
 // writeIdeasFile writes ideas back to IDEAS.md preserving file structure
-func writeIdeasFile(ideasFile *IdeasFile) error {
-	ideasPath := filepath.Join(".work", "IDEAS.md")
+func writeIdeasFile(ideasFile *IdeasFile, cfg *config.Config) error {
+	workFolder := config.GetWorkFolderPath(cfg)
+	ideasPath := filepath.Join(workFolder, "IDEAS.md")
 
 	var result strings.Builder
 
@@ -421,8 +425,8 @@ func parseIdeaTitleDescription(ideaText string) IdeaTitleDescription {
 }
 
 // removeIdeaByNumber removes an idea by number and renumbers remaining ideas
-func removeIdeaByNumber(number int) error {
-	ideasFile, err := parseIdeasFile()
+func removeIdeaByNumber(number int, cfg *config.Config) error {
+	ideasFile, err := parseIdeasFile(cfg)
 	if err != nil {
 		return err
 	}
@@ -442,7 +446,7 @@ func removeIdeaByNumber(number int) error {
 	}
 
 	// Write back to file
-	if err := writeIdeasFile(ideasFile); err != nil {
+	if err := writeIdeasFile(ideasFile, cfg); err != nil {
 		return fmt.Errorf("failed to write IDEAS.md: %w", err)
 	}
 

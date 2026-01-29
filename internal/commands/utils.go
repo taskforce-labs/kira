@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"kira/internal/config"
 )
 
 // gitCommandTimeout is the default timeout for git commands
@@ -27,36 +29,27 @@ func getCurrentBranch(dir string) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
-// validateWorkPath ensures a path is safe and within the .work directory
-func validateWorkPath(path string) error {
-	// Clean the path to remove .. and other traversal attempts
+// validateWorkPath ensures a path is safe and within the work directory (from config).
+func validateWorkPath(path string, cfg *config.Config) error {
 	cleanPath := filepath.Clean(path)
-
-	// Resolve to absolute path
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
 		return fmt.Errorf("invalid path: %w", err)
 	}
-
-	// Get absolute path of .work directory
-	workDir, err := filepath.Abs(".work")
+	workDir, err := config.GetWorkFolderAbsPath(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to resolve .work directory: %w", err)
+		return fmt.Errorf("failed to resolve work directory: %w", err)
 	}
-
-	// Ensure the path is within .work directory
-	// Use separator to prevent partial matches (e.g., .work-backup)
 	workDirWithSep := workDir + string(filepath.Separator)
 	if !strings.HasPrefix(absPath+string(filepath.Separator), workDirWithSep) && absPath != workDir {
-		return fmt.Errorf("path outside .work directory: %s", path)
+		return fmt.Errorf("path outside work directory: %s", path)
 	}
-
 	return nil
 }
 
-// safeReadFile reads a file after validating the path is within .work/
-func safeReadFile(filePath string) ([]byte, error) {
-	if err := validateWorkPath(filePath); err != nil {
+// safeReadFile reads a file after validating the path is within the work directory.
+func safeReadFile(filePath string, cfg *config.Config) ([]byte, error) {
+	if err := validateWorkPath(filePath, cfg); err != nil {
 		return nil, err
 	}
 	// #nosec G304 - path has been validated by validateWorkPath above
@@ -96,11 +89,12 @@ func safeReadProjectFile(filePath string) ([]byte, error) {
 	return os.ReadFile(filePath)
 }
 
-// findWorkItemFile searches for a work item file by ID
-func findWorkItemFile(workItemID string) (string, error) {
+// findWorkItemFile searches for a work item file by ID in the configured work folder.
+func findWorkItemFile(workItemID string, cfg *config.Config) (string, error) {
 	var foundPath string
+	workFolder := config.GetWorkFolderPath(cfg)
 
-	err := filepath.Walk(".work", func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(workFolder, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -112,7 +106,7 @@ func findWorkItemFile(workItemID string) (string, error) {
 		// Check if this is a work item file with the matching ID
 		if strings.HasSuffix(path, ".md") && !strings.Contains(path, "template") && !strings.HasSuffix(path, "IDEAS.md") {
 			// Read the file to check the ID
-			content, err := safeReadFile(path)
+			content, err := safeReadFile(path, cfg)
 			if err != nil {
 				return err
 			}
@@ -138,8 +132,8 @@ func findWorkItemFile(workItemID string) (string, error) {
 }
 
 // updateWorkItemStatus updates the status field in a work item file
-func updateWorkItemStatus(filePath, newStatus string) error {
-	content, err := safeReadFile(filePath)
+func updateWorkItemStatus(filePath, newStatus string, cfg *config.Config) error {
+	content, err := safeReadFile(filePath, cfg)
 	if err != nil {
 		return err
 	}
@@ -178,11 +172,11 @@ func getWorkItemFiles(sourcePath string) ([]string, error) {
 	return files, err
 }
 
-// archiveWorkItems archives work items to the archive directory
-func archiveWorkItems(workItems []string, sourcePath string) (string, error) {
-	// Create archive directory
+// archiveWorkItems archives work items to the archive directory in the configured work folder.
+func archiveWorkItems(workItems []string, sourcePath string, cfg *config.Config) (string, error) {
+	workFolder := config.GetWorkFolderPath(cfg)
 	date := time.Now().Format("2006-01-02")
-	archiveDir := filepath.Join(".work", "z_archive", date, filepath.Base(sourcePath))
+	archiveDir := filepath.Join(workFolder, "z_archive", date, filepath.Base(sourcePath))
 
 	if err := os.MkdirAll(archiveDir, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create archive directory: %w", err)
@@ -193,7 +187,7 @@ func archiveWorkItems(workItems []string, sourcePath string) (string, error) {
 		filename := filepath.Base(workItem)
 		archivePath := filepath.Join(archiveDir, filename)
 
-		content, err := safeReadFile(workItem)
+		content, err := safeReadFile(workItem, cfg)
 		if err != nil {
 			return "", fmt.Errorf("failed to read work item: %w", err)
 		}

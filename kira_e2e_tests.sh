@@ -259,6 +259,78 @@ else
   exit 1
 fi
 
+# Test 11b: Custom work folder (workspace.work_folder)
+echo ""
+echo "🧪 Test 11b: Custom work folder (workspace.work_folder)"
+CUSTOM_WORK_DIR="$TEST_DIR/custom-work"
+mkdir -p "$CUSTOM_WORK_DIR"
+cd "$CUSTOM_WORK_DIR"
+cat > kira.yml << 'EOF'
+version: "1.0"
+templates:
+  prd: templates/template.prd.md
+  issue: templates/template.issue.md
+  spike: templates/template.spike.md
+  task: templates/template.task.md
+status_folders:
+  backlog: 0_backlog
+  todo: 1_todo
+  doing: 2_doing
+  review: 3_review
+  done: 4_done
+  archived: z_archive
+default_status: backlog
+validation:
+  required_fields: [id, title, status, kind, created]
+  id_format: "^\\d{3}$"
+  status_values: [backlog, todo, doing, review, done, released, abandoned, archived]
+workspace:
+  work_folder: work
+EOF
+"$KIRA_BIN" init
+if [ -d "work" ] && [ ! -d ".work" ]; then
+  echo "✅ Custom work folder 'work' created (no .work)"
+else
+  echo "❌ Custom work folder 'work' missing or .work incorrectly present"
+  exit 1
+fi
+for dir in 0_backlog 1_todo 2_doing 3_review 4_done z_archive templates; do
+  if [ -d "work/$dir" ]; then
+    echo "✅ work/$dir exists"
+  else
+    echo "❌ work/$dir missing"
+    exit 1
+  fi
+done
+if [ -f "work/IDEAS.md" ]; then
+  echo "✅ work/IDEAS.md exists"
+else
+  echo "❌ work/IDEAS.md missing"
+  exit 1
+fi
+"$KIRA_BIN" new prd backlog "E2E Custom"
+if [ -n "$(find work -maxdepth 2 -name '*.prd.md' -type f)" ]; then
+  echo "✅ Work item created under work/"
+else
+  echo "❌ Work item not found under work/"
+  exit 1
+fi
+"$KIRA_BIN" move 001 doing
+if [ -n "$(find work/2_doing -maxdepth 1 -type f -name '*.prd.md' 2>/dev/null)" ]; then
+  echo "✅ Move with custom work folder succeeded"
+else
+  echo "❌ Move with custom work folder failed"
+  exit 1
+fi
+if "$KIRA_BIN" lint && "$KIRA_BIN" doctor; then
+  echo "✅ Lint and doctor work with custom work folder"
+else
+  echo "❌ Lint or doctor failed with custom work folder"
+  exit 1
+fi
+cd "$TEST_DIR_ABS"
+echo "✅ Custom work folder e2e passed"
+
 # Test 12: Release command
 echo ""
 echo "🧪 Test 12: release command"

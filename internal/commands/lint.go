@@ -18,13 +18,12 @@ var lintCmd = &cobra.Command{
 	SilenceUsage:  true, // Don't show usage on error
 	SilenceErrors: true, // Don't show error message (main.go handles it)
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := checkWorkDir(); err != nil {
-			return err
-		}
-
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := checkWorkDir(cfg); err != nil {
+			return err
 		}
 
 		// Override strict mode if flag is set

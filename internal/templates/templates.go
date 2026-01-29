@@ -88,30 +88,35 @@ func ParseTemplateInputs(content string) (*TemplateInput, error) {
 	return &TemplateInput{Inputs: inputs}, nil
 }
 
-// validateTemplatePath ensures a template path is safe and within .work/templates/
-func validateTemplatePath(path string) error {
+// validateTemplatePath ensures a template path is safe and within workDirAbs/templates/
+func validateTemplatePath(
+	path string,
+	workDirAbs string,
+) error {
 	cleanPath := filepath.Clean(path)
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
 		return fmt.Errorf("invalid path: %w", err)
 	}
 
-	templatesDir, err := filepath.Abs(".work/templates")
+	templatesDir := filepath.Join(workDirAbs, "templates")
+	templatesDirAbs, err := filepath.Abs(templatesDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve templates directory: %w", err)
 	}
 
-	templatesDirWithSep := templatesDir + string(filepath.Separator)
-	if !strings.HasPrefix(absPath+string(filepath.Separator), templatesDirWithSep) && absPath != templatesDir {
-		return fmt.Errorf("template path outside .work/templates/: %s", path)
+	templatesDirWithSep := templatesDirAbs + string(filepath.Separator)
+	if !strings.HasPrefix(absPath+string(filepath.Separator), templatesDirWithSep) && absPath != templatesDirAbs {
+		return fmt.Errorf("template path outside work directory templates: %s", path)
 	}
 
 	return nil
 }
 
 // ProcessTemplate processes a template file with provided input values.
-func ProcessTemplate(templatePath string, inputs map[string]string) (string, error) {
-	if err := validateTemplatePath(templatePath); err != nil {
+// workDirAbs is the absolute path to the work directory (used to validate templatePath is under workDirAbs/templates).
+func ProcessTemplate(templatePath string, inputs map[string]string, workDirAbs string) (string, error) {
+	if err := validateTemplatePath(templatePath, workDirAbs); err != nil {
 		return "", err
 	}
 	// #nosec G304 - path has been validated by validateTemplatePath above
@@ -156,8 +161,12 @@ func replaceRemainingInputs(content string) string {
 }
 
 // GetTemplateInputs extracts input definitions from a template file.
-func GetTemplateInputs(templatePath string) ([]Input, error) {
-	if err := validateTemplatePath(templatePath); err != nil {
+// workDirAbs is the absolute path to the work directory (used to validate templatePath is under workDirAbs/templates).
+func GetTemplateInputs(
+	templatePath string,
+	workDirAbs string,
+) ([]Input, error) {
+	if err := validateTemplatePath(templatePath, workDirAbs); err != nil {
 		return nil, err
 	}
 	// #nosec G304 - path has been validated by validateTemplatePath above

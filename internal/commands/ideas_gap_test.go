@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 
+	"kira/internal/config"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,7 +41,10 @@ func TestFillGapsInIdeas(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o600))
 
-		ideasFile, err := parseIdeasFile()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		ideasFile, err := parseIdeasFile(cfg)
 		require.NoError(t, err)
 
 		// Fill gaps
@@ -63,11 +68,11 @@ func TestFillGapsInIdeas(t *testing.T) {
 		assert.Contains(t, ideasFile.Ideas[16].Text, "Twenty-second idea")
 
 		// Now test that writing and reading preserves the renumbering
-		err = writeIdeasFile(ideasFile)
+		err = writeIdeasFile(ideasFile, cfg)
 		require.NoError(t, err)
 
 		// Re-parse and verify
-		ideasFile2, err := parseIdeasFile()
+		ideasFile2, err := parseIdeasFile(cfg)
 		require.NoError(t, err)
 
 		// Verify the renumbered ideas are still there

@@ -2,6 +2,7 @@ package validation
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,16 @@ import (
 )
 
 const testWorkItemPath = ".work/1_todo/001-test-feature.prd.md"
+
+// defaultTestConfig returns a config with ConfigDir set to current directory (for tests using .work).
+func defaultTestConfig(t *testing.T) *config.Config {
+	t.Helper()
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	abs, err := filepath.Abs(cwd)
+	require.NoError(t, err)
+	return &config.Config{ConfigDir: abs}
+}
 
 const minimalWorkItemContent = `---
 id: 001
@@ -99,7 +110,8 @@ func TestGetNextID(t *testing.T) {
 
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 
-		id, err := GetNextID()
+		cfg := defaultTestConfig(t)
+		id, err := GetNextID(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "001", id)
 	})
@@ -126,7 +138,8 @@ created: 2024-01-01
 
 		require.NoError(t, os.WriteFile(".work/1_todo/001-test-feature.prd.md", []byte(workItemContent), 0o600))
 
-		id, err := GetNextID()
+		cfg := defaultTestConfig(t)
+		id, err := GetNextID(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "002", id)
 	})
@@ -167,7 +180,8 @@ created: 2024-01-02
 		require.NoError(t, os.WriteFile(".work/1_todo/001-first-feature.prd.md", []byte(workItemContent1), 0o600))
 		require.NoError(t, os.WriteFile(".work/1_todo/001-second-feature.prd.md", []byte(workItemContent2), 0o600))
 
-		result, err := FixDuplicateIDs()
+		cfg := defaultTestConfig(t)
+		result, err := FixDuplicateIDs(cfg)
 		require.NoError(t, err)
 
 		// Should not have errors (duplicates should be fixed)
@@ -1140,7 +1154,8 @@ This is a test feature with body content.
 		filePath := testWorkItemPath
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
-		result, err := FixHardcodedDateFormats()
+		cfg := defaultTestConfig(t)
+		result, err := FixHardcodedDateFormats(cfg)
 		require.NoError(t, err)
 		assert.True(t, result.HasErrors()) // Should have a fix message
 
@@ -1175,7 +1190,8 @@ created: 2024-01-15T10:30:00-05:00
 		filePath := testWorkItemPath
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
-		result, err := FixHardcodedDateFormats()
+		cfg := defaultTestConfig(t)
+		result, err := FixHardcodedDateFormats(cfg)
 		require.NoError(t, err)
 		assert.True(t, result.HasErrors()) // Should have a fix message
 
@@ -1205,7 +1221,8 @@ created: 2024/01/15
 		filePath := testWorkItemPath
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
-		result, err := FixHardcodedDateFormats()
+		cfg := defaultTestConfig(t)
+		result, err := FixHardcodedDateFormats(cfg)
 		require.NoError(t, err)
 		assert.True(t, result.HasErrors()) // Should have a fix message
 
@@ -1235,7 +1252,8 @@ created: 2024-01-15
 		filePath := testWorkItemPath
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
-		result, err := FixHardcodedDateFormats()
+		cfg := defaultTestConfig(t)
+		result, err := FixHardcodedDateFormats(cfg)
 		require.NoError(t, err)
 		assert.False(t, result.HasErrors()) // Should not have any fixes
 
@@ -1275,7 +1293,8 @@ Some important notes here.
 		filePath := testWorkItemPath
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
-		result, err := FixHardcodedDateFormats()
+		cfg := defaultTestConfig(t)
+		result, err := FixHardcodedDateFormats(cfg)
 		require.NoError(t, err)
 		assert.True(t, result.HasErrors()) // Should have a fix message
 
@@ -1510,8 +1529,11 @@ tags: [urgent, critical]
 		filePath := testWorkItemPath
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
+		cfg := defaultTestConfig(t)
+		workDirAbs, err := config.GetWorkFolderAbsPath(cfg)
+		require.NoError(t, err)
 		// Parse the work item
-		workItem, err := parseWorkItemFile(filePath)
+		workItem, err := parseWorkItemFile(filePath, workDirAbs)
 		require.NoError(t, err)
 
 		// Modify fields to include special characters
@@ -1520,7 +1542,7 @@ tags: [urgent, critical]
 		workItem.Fields["tags"] = []interface{}{"urgent", "critical", "high:priority"}
 
 		// Write it back
-		err = writeWorkItemFile(filePath, workItem)
+		err = writeWorkItemFile(filePath, workItem, workDirAbs)
 		require.NoError(t, err)
 
 		// Read and parse again to verify it's valid YAML
@@ -1576,8 +1598,11 @@ created: 2024-01-15
 		filePath := testWorkItemPath
 		require.NoError(t, os.WriteFile(filePath, []byte(workItemContent), 0o600))
 
+		cfg := defaultTestConfig(t)
+		workDirAbs, err := config.GetWorkFolderAbsPath(cfg)
+		require.NoError(t, err)
 		// Parse the work item
-		workItem, err := parseWorkItemFile(filePath)
+		workItem, err := parseWorkItemFile(filePath, workDirAbs)
 		require.NoError(t, err)
 
 		// Add fields with various special characters
@@ -1587,7 +1612,7 @@ created: 2024-01-15
 		workItem.Fields["multiline"] = "line1\nline2\nline3"
 
 		// Write it back
-		err = writeWorkItemFile(filePath, workItem)
+		err = writeWorkItemFile(filePath, workItem, workDirAbs)
 		require.NoError(t, err)
 
 		// Read and verify it parses correctly
@@ -1664,15 +1689,18 @@ func TestWriteYAMLFieldErrorPropagation(t *testing.T) {
 		filePath := testWorkItemPath
 		require.NoError(t, os.WriteFile(filePath, []byte(minimalWorkItemContent), 0o600))
 
+		cfg := defaultTestConfig(t)
+		workDirAbs, err := config.GetWorkFolderAbsPath(cfg)
+		require.NoError(t, err)
 		// Parse the work item
-		workItem, err := parseWorkItemFile(filePath)
+		workItem, err := parseWorkItemFile(filePath, workDirAbs)
 		require.NoError(t, err)
 
 		// Add an unmarshalable field
 		workItem.Fields["unmarshalable"] = make(chan int)
 
 		// Attempt to write it back - should fail
-		err = writeWorkItemFile(filePath, workItem)
+		err = writeWorkItemFile(filePath, workItem, workDirAbs)
 		require.Error(t, err, "writeWorkItemFile should return error when writeYAMLFrontMatter fails")
 		assert.Contains(t, err.Error(), "failed to write YAML front matter", "error should mention YAML front matter")
 		assert.Contains(t, err.Error(), "failed to write field 'unmarshalable'", "error should include field name in chain")

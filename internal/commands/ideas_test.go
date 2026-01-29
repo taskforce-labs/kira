@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 
+	"kira/internal/config"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +37,10 @@ func TestParseIdeasFile(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o600))
 
-		ideasFile, err := parseIdeasFile()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		ideasFile, err := parseIdeasFile(cfg)
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, len(ideasFile.Ideas))
@@ -63,7 +68,10 @@ This is some content before.
 `
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o600))
 
-		ideasFile, err := parseIdeasFile()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		ideasFile, err := parseIdeasFile(cfg)
 		require.NoError(t, err)
 
 		assert.Contains(t, ideasFile.BeforeIdeas, "# Ideas")
@@ -77,7 +85,10 @@ This is some content before.
 
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 
-		_, err := parseIdeasFile()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		_, err = parseIdeasFile(cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not found")
 	})
@@ -94,7 +105,10 @@ This is some content before.
 `
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o600))
 
-		_, err := parseIdeasFile()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		_, err = parseIdeasFile(cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "missing the '## List' header")
 	})
@@ -112,7 +126,10 @@ This is some content before.
 `
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o600))
 
-		ideasFile, err := parseIdeasFile()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		ideasFile, err := parseIdeasFile(cfg)
 		require.NoError(t, err)
 		assert.NotNil(t, ideasFile)
 		assert.Equal(t, 0, len(ideasFile.Ideas))
@@ -135,7 +152,10 @@ func TestGetIdeaByNumber(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o600))
 
-		idea, err := getIdeaByNumber(2)
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		idea, err := getIdeaByNumber(2, cfg)
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, idea.Number)
@@ -150,7 +170,10 @@ func TestGetIdeaByNumber(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderWithOneIdea), 0o600))
 
-		_, err := getIdeaByNumber(100)
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		_, err = getIdeaByNumber(100, cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "Idea 100 not found")
 	})
@@ -170,7 +193,10 @@ func TestGetNextIdeaNumber(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o600))
 
-		nextNumber, err := getNextIdeaNumber()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		nextNumber, err := getNextIdeaNumber(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, 1, nextNumber)
 	})
@@ -191,7 +217,10 @@ func TestGetNextIdeaNumber(t *testing.T) {
 `
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasContent), 0o600))
 
-		nextNumber, err := getNextIdeaNumber()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		nextNumber, err := getNextIdeaNumber(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, 6, nextNumber)
 	})
@@ -203,7 +232,10 @@ func TestGetNextIdeaNumber(t *testing.T) {
 
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 
-		nextNumber, err := getNextIdeaNumber()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		nextNumber, err := getNextIdeaNumber(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, 1, nextNumber)
 	})
@@ -262,12 +294,15 @@ func TestRemoveIdeaByNumber(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderWithIdeas), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Remove idea 2
-		err := removeIdeaByNumber(2)
+		err = removeIdeaByNumber(2, cfg)
 		require.NoError(t, err)
 
 		// Verify remaining ideas are renumbered
-		ideasFile, err := parseIdeasFile()
+		ideasFile, err := parseIdeasFile(cfg)
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, len(ideasFile.Ideas))
@@ -285,12 +320,15 @@ func TestRemoveIdeaByNumber(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderWithIdeas), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Remove idea 1
-		err := removeIdeaByNumber(1)
+		err = removeIdeaByNumber(1, cfg)
 		require.NoError(t, err)
 
 		// Verify remaining ideas are renumbered
-		ideasFile, err := parseIdeasFile()
+		ideasFile, err := parseIdeasFile(cfg)
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, len(ideasFile.Ideas))
@@ -308,12 +346,15 @@ func TestRemoveIdeaByNumber(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderWithIdeas), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Remove idea 3
-		err := removeIdeaByNumber(3)
+		err = removeIdeaByNumber(3, cfg)
 		require.NoError(t, err)
 
 		// Verify remaining ideas are renumbered
-		ideasFile, err := parseIdeasFile()
+		ideasFile, err := parseIdeasFile(cfg)
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, len(ideasFile.Ideas))
@@ -331,7 +372,10 @@ func TestRemoveIdeaByNumber(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderWithOneIdea), 0o600))
 
-		err := removeIdeaByNumber(100)
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		err = removeIdeaByNumber(100, cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "Idea 100 not found")
 	})
@@ -346,7 +390,10 @@ func TestWriteIdeasFile(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderWithOneIdea), 0o600))
 
-		ideasFile, err := parseIdeasFile()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		ideasFile, err := parseIdeasFile(cfg)
 		require.NoError(t, err)
 
 		// Add a new idea
@@ -357,7 +404,7 @@ func TestWriteIdeasFile(t *testing.T) {
 			LineIndex: 5,
 		}
 
-		err = writeIdeasFile(ideasFile)
+		err = writeIdeasFile(ideasFile, cfg)
 		require.NoError(t, err)
 
 		// Verify file was written correctly

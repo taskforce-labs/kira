@@ -23,13 +23,12 @@ var newCmd = &cobra.Command{
 All arguments are optional - will prompt for selection if not provided.`,
 	Args: cobra.MaximumNArgs(4),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := checkWorkDir(); err != nil {
-			return err
-		}
-
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := checkWorkDir(cfg); err != nil {
+			return err
 		}
 
 		interactive, _ := cmd.Flags().GetBool("interactive")
@@ -76,7 +75,7 @@ func createWorkItem(cfg *config.Config, args []string, interactive bool, inputVa
 		return err
 	}
 
-	nextID, err := validation.GetNextID()
+	nextID, err := validation.GetNextID(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to get next ID: %w", err)
 	}
@@ -362,8 +361,12 @@ func convertDefaultToString(defaultValue interface{}, fieldConfig *config.FieldC
 }
 
 func collectInteractiveInputs(cfg *config.Config, template string, inputs map[string]string) error {
-	templatePath := filepath.Join(".work", cfg.Templates[template])
-	templateInputs, err := templates.GetTemplateInputs(templatePath)
+	workDirAbs, err := config.GetWorkFolderAbsPath(cfg)
+	if err != nil {
+		return fmt.Errorf("work folder path: %w", err)
+	}
+	templatePath := filepath.Join(config.GetWorkFolderPath(cfg), cfg.Templates[template])
+	templateInputs, err := templates.GetTemplateInputs(templatePath, workDirAbs)
 	if err != nil {
 		return fmt.Errorf("failed to get template inputs: %w", err)
 	}
@@ -381,8 +384,12 @@ func collectInteractiveInputs(cfg *config.Config, template string, inputs map[st
 }
 
 func writeWorkItemFile(cfg *config.Config, template, nextID, title, status string, inputs map[string]string) error {
-	templatePath := filepath.Join(".work", cfg.Templates[template])
-	content, err := templates.ProcessTemplate(templatePath, inputs)
+	workDirAbs, err := config.GetWorkFolderAbsPath(cfg)
+	if err != nil {
+		return fmt.Errorf("work folder path: %w", err)
+	}
+	templatePath := filepath.Join(config.GetWorkFolderPath(cfg), cfg.Templates[template])
+	content, err := templates.ProcessTemplate(templatePath, inputs, workDirAbs)
 	if err != nil {
 		return fmt.Errorf("failed to process template: %w", err)
 	}
@@ -393,7 +400,7 @@ func writeWorkItemFile(cfg *config.Config, template, nextID, title, status strin
 		return fmt.Errorf("invalid status folder for status '%s'", status)
 	}
 
-	statusFolderPath := filepath.Join(".work", statusFolder)
+	statusFolderPath := filepath.Join(config.GetWorkFolderPath(cfg), statusFolder)
 	if err := os.MkdirAll(statusFolderPath, 0o700); err != nil {
 		return fmt.Errorf("failed to create status folder: %w", err)
 	}
@@ -434,8 +441,12 @@ func selectTemplate(cfg *config.Config) (string, error) {
 }
 
 func showTemplateInputs(cfg *config.Config, template string) error {
-	templatePath := filepath.Join(".work", cfg.Templates[template])
-	inputs, err := templates.GetTemplateInputs(templatePath)
+	workDirAbs, err := config.GetWorkFolderAbsPath(cfg)
+	if err != nil {
+		return fmt.Errorf("work folder path: %w", err)
+	}
+	templatePath := filepath.Join(config.GetWorkFolderPath(cfg), cfg.Templates[template])
+	inputs, err := templates.GetTemplateInputs(templatePath, workDirAbs)
 	if err != nil {
 		return fmt.Errorf("failed to get template inputs: %w", err)
 	}
@@ -545,7 +556,7 @@ func kebabCase(s string) string {
 // convertIdeaToWorkItem converts an idea to a work item
 func convertIdeaToWorkItem(cfg *config.Config, ideaNumber int, template, status string, interactive bool, inputValues map[string]string, helpInputs bool) error {
 	// Get the idea by number
-	idea, err := getIdeaByNumber(ideaNumber)
+	idea, err := getIdeaByNumber(ideaNumber, cfg)
 	if err != nil {
 		return err
 	}
@@ -572,7 +583,7 @@ func convertIdeaToWorkItem(cfg *config.Config, ideaNumber int, template, status 
 	}
 
 	// Get next work item ID
-	nextID, err := validation.GetNextID()
+	nextID, err := validation.GetNextID(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to get next ID: %w", err)
 	}
@@ -596,7 +607,7 @@ func convertIdeaToWorkItem(cfg *config.Config, ideaNumber int, template, status 
 	}
 
 	// Remove idea from IDEAS.md and renumber remaining ideas
-	if err := removeIdeaByNumber(ideaNumber); err != nil {
+	if err := removeIdeaByNumber(ideaNumber, cfg); err != nil {
 		// Log warning but don't fail - work item was created successfully
 		fmt.Printf("Warning: Work item created but failed to remove idea %d: %v\n", ideaNumber, err)
 		return nil

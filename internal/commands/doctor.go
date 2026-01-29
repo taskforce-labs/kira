@@ -24,13 +24,12 @@ var doctorCmd = &cobra.Command{
 	Short: "Check for and fix duplicate work item IDs and field issues",
 	Long:  `Checks for and fixes duplicate work item IDs and field validation issues.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		if err := checkWorkDir(); err != nil {
-			return err
-		}
-
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := checkWorkDir(cfg); err != nil {
+			return err
 		}
 
 		// Override strict mode if flag is set
@@ -94,11 +93,11 @@ func runAutoFixes(cfg *config.Config) int {
 	fmt.Println("\nAttempting to fix issues...")
 	fixedCount := 0
 
-	if count := fixDuplicateIDs(); count > 0 {
+	if count := fixDuplicateIDs(cfg); count > 0 {
 		fixedCount += count
 	}
 
-	if count := fixHardcodedDateFormats(); count > 0 {
+	if count := fixHardcodedDateFormats(cfg); count > 0 {
 		fixedCount += count
 	}
 
@@ -109,8 +108,8 @@ func runAutoFixes(cfg *config.Config) int {
 	return fixedCount
 }
 
-func fixDuplicateIDs() int {
-	idResult, err := validation.FixDuplicateIDs()
+func fixDuplicateIDs(cfg *config.Config) int {
+	idResult, err := validation.FixDuplicateIDs(cfg)
 	if err != nil {
 		return 0
 	}
@@ -125,8 +124,8 @@ func fixDuplicateIDs() int {
 	return 0
 }
 
-func fixHardcodedDateFormats() int {
-	dateResult, err := validation.FixHardcodedDateFormats()
+func fixHardcodedDateFormats(cfg *config.Config) int {
+	dateResult, err := validation.FixHardcodedDateFormats(cfg)
 	if err != nil {
 		return 0
 	}

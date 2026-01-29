@@ -20,13 +20,12 @@ var releaseCmd = &cobra.Command{
 Updates work item status to "released" before archival.`,
 	Args: cobra.MaximumNArgs(2),
 	RunE: func(_ *cobra.Command, args []string) error {
-		if err := checkWorkDir(); err != nil {
-			return err
-		}
-
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := checkWorkDir(cfg); err != nil {
+			return err
 		}
 
 		var targetPath string
@@ -47,18 +46,19 @@ Updates work item status to "released" before archival.`,
 }
 
 func releaseWorkItems(cfg *config.Config, targetPath, subfolder string) error {
+	workFolder := config.GetWorkFolderPath(cfg)
 	// Determine the source path
 	var sourcePath string
 	if strings.Contains(targetPath, "/") {
 		// Direct path provided
-		sourcePath = filepath.Join(".work", targetPath)
+		sourcePath = filepath.Join(workFolder, targetPath)
 	} else {
 		// Status name provided
 		statusFolder, exists := cfg.StatusFolders[targetPath]
 		if !exists {
 			return fmt.Errorf("invalid status: %s", targetPath)
 		}
-		sourcePath = filepath.Join(".work", statusFolder)
+		sourcePath = filepath.Join(workFolder, statusFolder)
 	}
 
 	// Add subfolder if provided
@@ -83,20 +83,20 @@ func releaseWorkItems(cfg *config.Config, targetPath, subfolder string) error {
 	}
 
 	// Generate release notes
-	releaseNotes, err := generateReleaseNotes(workItems)
+	releaseNotes, err := generateReleaseNotes(workItems, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to generate release notes: %w", err)
 	}
 
 	// Update work item statuses to "released"
 	for _, workItem := range workItems {
-		if err := updateWorkItemStatus(workItem, "released"); err != nil {
+		if err := updateWorkItemStatus(workItem, "released", cfg); err != nil {
 			return fmt.Errorf("failed to update work item status: %w", err)
 		}
 	}
 
 	// Archive work items
-	archivePath, err := archiveWorkItems(workItems, sourcePath)
+	archivePath, err := archiveWorkItems(workItems, sourcePath, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to archive work items: %w", err)
 	}
@@ -117,11 +117,11 @@ func releaseWorkItems(cfg *config.Config, targetPath, subfolder string) error {
 	return nil
 }
 
-func generateReleaseNotes(workItems []string) (string, error) {
+func generateReleaseNotes(workItems []string, cfg *config.Config) (string, error) {
 	var releaseNotes []string
 
 	for _, workItem := range workItems {
-		content, err := safeReadFile(workItem)
+		content, err := safeReadFile(workItem, cfg)
 		if err != nil {
 			return "", err
 		}

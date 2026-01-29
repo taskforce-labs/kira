@@ -37,7 +37,10 @@ func TestExtractWorkItemMetadata(t *testing.T) {
 
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
 
-		workItemType, id, title, currentStatus, err := extractWorkItemMetadata(testFilePath)
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		workItemType, id, title, currentStatus, err := extractWorkItemMetadata(testFilePath, cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "prd", workItemType)
 		assert.Equal(t, "001", id)
@@ -61,7 +64,10 @@ id: 001
 `
 		require.NoError(t, os.WriteFile(testFilePath, []byte(workItemContent), 0o600))
 
-		workItemType, id, title, currentStatus, err := extractWorkItemMetadata(testFilePath)
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		workItemType, id, title, currentStatus, err := extractWorkItemMetadata(testFilePath, cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "unknown", workItemType)
 		assert.Equal(t, "001", id)
@@ -74,7 +80,10 @@ id: 001
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
 
-		_, _, _, _, err := extractWorkItemMetadata(".work/nonexistent.md")
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		_, _, _, _, err = extractWorkItemMetadata(".work/nonexistent.md", cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read work item file")
 	})

@@ -70,7 +70,10 @@ func TestCheckExternalChanges(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/test.md", []byte("test"), 0o600))
 
-		hasExternal, err := checkExternalChanges()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		hasExternal, err := checkExternalChanges(cfg)
 		require.NoError(t, err)
 		assert.False(t, hasExternal)
 	})
@@ -81,7 +84,10 @@ func TestCheckExternalChanges(t *testing.T) {
 		defer func() { _ = os.Chdir("/") }()
 
 		// Don't initialize git repo
-		hasExternal, err := checkExternalChanges()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		hasExternal, err := checkExternalChanges(cfg)
 		require.NoError(t, err)
 		assert.False(t, hasExternal)
 	})
@@ -102,8 +108,11 @@ func TestStageWorkChanges(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/test.md", []byte("test"), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Stage changes
-		err := stageWorkChanges(false)
+		err = stageWorkChanges(cfg, false)
 		require.NoError(t, err)
 
 		// Verify file is staged
@@ -127,8 +136,11 @@ func TestStageWorkChanges(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/test.md", []byte("test"), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Stage with dry run
-		err := stageWorkChanges(true)
+		err = stageWorkChanges(cfg, true)
 		require.NoError(t, err)
 
 		// Verify file is NOT staged
@@ -281,8 +293,11 @@ updated: 2024-01-01T00:00:00Z
 		filePath := filepath.Join(".work", "test.md")
 		require.NoError(t, os.WriteFile(filePath, []byte(content), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Update timestamp
-		err := updateFileTimestamp(filePath, "2024-12-25T12:00:00Z")
+		err = updateFileTimestamp(filePath, "2024-12-25T12:00:00Z", cfg)
 		require.NoError(t, err)
 
 		// Verify timestamp was updated
@@ -311,8 +326,11 @@ created: 2024-01-01
 		filePath := filepath.Join(".work", "test.md")
 		require.NoError(t, os.WriteFile(filePath, []byte(content), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Update timestamp
-		err := updateFileTimestamp(filePath, "2024-12-25T12:00:00Z")
+		err = updateFileTimestamp(filePath, "2024-12-25T12:00:00Z", cfg)
 		require.NoError(t, err)
 
 		// Verify timestamp was added

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"kira/internal/config"
 )
 
 var ideaCmd = &cobra.Command{
@@ -21,12 +23,15 @@ var ideaAddCmd = &cobra.Command{
 	Long:  `Adds an idea with a timestamp to the IDEAS.md file in numbered format.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(_ *cobra.Command, args []string) error {
-		if err := checkWorkDir(); err != nil {
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := checkWorkDir(cfg); err != nil {
 			return err
 		}
-
 		description := args[0]
-		return addIdeaWithNumber(description)
+		return addIdeaWithNumber(cfg, description)
 	},
 }
 
@@ -36,11 +41,14 @@ var ideaListCmd = &cobra.Command{
 	Long:  `Lists all ideas from IDEAS.md with their numbers and timestamps.`,
 	Args:  cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		if err := checkWorkDir(); err != nil {
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := checkWorkDir(cfg); err != nil {
 			return err
 		}
-
-		return listIdeas()
+		return listIdeas(cfg)
 	},
 }
 
@@ -49,20 +57,24 @@ func init() {
 	ideaCmd.AddCommand(ideaListCmd)
 	// Support legacy "idea <description>" syntax
 	ideaCmd.RunE = func(_ *cobra.Command, args []string) error {
-		if err := checkWorkDir(); err != nil {
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := checkWorkDir(cfg); err != nil {
 			return err
 		}
 		if len(args) == 0 {
 			return ideaCmd.Help()
 		}
-		return addIdeaWithNumber(args[0])
+		return addIdeaWithNumber(cfg, args[0])
 	}
 	ideaCmd.Args = cobra.MaximumNArgs(1)
 }
 
-func addIdeaWithNumber(description string) error {
+func addIdeaWithNumber(cfg *config.Config, description string) error {
 	// Parse existing file or create new structure
-	ideasFile, err := parseIdeasFile()
+	ideasFile, err := parseIdeasFile(cfg)
 	if err != nil {
 		// If file doesn't exist, create basic structure
 		if strings.Contains(err.Error(), "not found") {
@@ -92,18 +104,18 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 			return fmt.Errorf("failed to fill gaps in ideas: %w", err)
 		}
 		// Write back to file after renumbering
-		if err := writeIdeasFile(ideasFile); err != nil {
+		if err := writeIdeasFile(ideasFile, cfg); err != nil {
 			return fmt.Errorf("failed to write IDEAS.md after renumbering: %w", err)
 		}
 		// Re-parse to get updated structure
-		ideasFile, err = parseIdeasFile()
+		ideasFile, err = parseIdeasFile(cfg)
 		if err != nil {
 			return fmt.Errorf("failed to re-parse IDEAS.md: %w", err)
 		}
 	}
 
 	// Get next idea number (after gaps are filled)
-	nextNumber, err := getNextIdeaNumber()
+	nextNumber, err := getNextIdeaNumber(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to get next idea number: %w", err)
 	}
@@ -121,7 +133,7 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 	ideasFile.Ideas[nextNumber] = newIdea
 
 	// Write back to file
-	if err := writeIdeasFile(ideasFile); err != nil {
+	if err := writeIdeasFile(ideasFile, cfg); err != nil {
 		return fmt.Errorf("failed to write IDEAS.md: %w", err)
 	}
 
@@ -129,8 +141,8 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 	return nil
 }
 
-func listIdeas() error {
-	ideasFile, err := parseIdeasFile()
+func listIdeas(cfg *config.Config) error {
+	ideasFile, err := parseIdeasFile(cfg)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			fmt.Println("No ideas found.")

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"kira/internal/config"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,8 +43,11 @@ func TestAddIdeaWithNumber(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderContent), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Add an idea
-		err := addIdeaWithNumber("Test idea for testing")
+		err = addIdeaWithNumber(cfg, "Test idea for testing")
 		require.NoError(t, err)
 
 		// Check that the idea was added
@@ -64,9 +69,12 @@ func TestAddIdeaWithNumber(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderContent), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Add an idea
 		beforeTime := time.Now()
-		err := addIdeaWithNumber("Timestamped idea")
+		err = addIdeaWithNumber(cfg, "Timestamped idea")
 		require.NoError(t, err)
 		afterTime := time.Now()
 
@@ -113,8 +121,11 @@ func TestAddIdeaWithNumber(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderWithOneIdea), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Add second idea
-		err := addIdeaWithNumber("Second idea")
+		err = addIdeaWithNumber(cfg, "Second idea")
 		require.NoError(t, err)
 
 		// Check that the idea was numbered correctly
@@ -134,8 +145,11 @@ func TestAddIdeaWithNumber(t *testing.T) {
 		// Create .work directory but no IDEAS.md
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// Add an idea
-		err := addIdeaWithNumber("New idea")
+		err = addIdeaWithNumber(cfg, "New idea")
 		require.NoError(t, err)
 
 		// Check that IDEAS.md was created
@@ -157,8 +171,11 @@ func TestListIdeas(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderWithTwoIdeas), 0o600))
 
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
 		// This test would need to capture stdout, so we'll test the parsing instead
-		ideasFile, err := parseIdeasFile()
+		ideasFile, err := parseIdeasFile(cfg)
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, len(ideasFile.Ideas))
@@ -177,7 +194,10 @@ func TestListIdeas(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 		require.NoError(t, os.WriteFile(".work/IDEAS.md", []byte(ideasHeaderContent), 0o600))
 
-		err := listIdeas()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		err = listIdeas(cfg)
 		require.NoError(t, err)
 	})
 
@@ -189,7 +209,10 @@ func TestListIdeas(t *testing.T) {
 		// Create .work directory but no IDEAS.md
 		require.NoError(t, os.MkdirAll(".work", 0o700))
 
-		err := listIdeas()
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		err = listIdeas(cfg)
 		require.NoError(t, err)
 	})
 }

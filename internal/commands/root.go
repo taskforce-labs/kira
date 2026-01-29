@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	"kira/internal/config"
+
 	"github.com/spf13/cobra"
 )
 
@@ -37,9 +39,10 @@ func init() {
 	rootCmd.AddCommand(latestCmd)
 }
 
-func checkWorkDir() error {
-	if _, err := os.Stat(".work"); os.IsNotExist(err) {
-		return fmt.Errorf("not a kira workspace (no .work directory found). Run 'kira init' first")
+func checkWorkDir(cfg *config.Config) error {
+	workPath := config.GetWorkFolderPath(cfg)
+	if _, err := os.Stat(workPath); os.IsNotExist(err) {
+		return fmt.Errorf("not a kira workspace (no %s directory found). Run 'kira init' first", workPath)
 	}
 	return nil
 }

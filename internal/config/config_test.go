@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -669,5 +671,115 @@ fields:
 		require.True(t, exists)
 		require.NotNil(t, priorityField.CaseSensitive, "CaseSensitive should be set to true by default")
 		assert.True(t, *priorityField.CaseSensitive, "CaseSensitive should default to true when not specified")
+	})
+}
+
+func TestGetWorkFolderPath(t *testing.T) {
+	t.Run("returns default when config is nil", func(t *testing.T) {
+		assert.Equal(t, ".work", GetWorkFolderPath(nil))
+	})
+
+	t.Run("returns default when workspace is nil", func(t *testing.T) {
+		cfg := &Config{Workspace: nil}
+		assert.Equal(t, ".work", GetWorkFolderPath(cfg))
+	})
+
+	t.Run("returns default when work_folder is empty", func(t *testing.T) {
+		cfg := &Config{Workspace: &WorkspaceConfig{WorkFolder: ""}}
+		assert.Equal(t, ".work", GetWorkFolderPath(cfg))
+	})
+
+	t.Run("returns custom work_folder", func(t *testing.T) {
+		cfg := &Config{Workspace: &WorkspaceConfig{WorkFolder: "work"}}
+		assert.Equal(t, "work", GetWorkFolderPath(cfg))
+	})
+
+	t.Run("returns trimmed work_folder", func(t *testing.T) {
+		cfg := &Config{Workspace: &WorkspaceConfig{WorkFolder: "  tasks  "}}
+		assert.Equal(t, "tasks", GetWorkFolderPath(cfg))
+	})
+}
+
+func TestGetWorkFolderAbsPath(t *testing.T) {
+	t.Run("resolves relative path against ConfigDir", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{ConfigDir: tmpDir, Workspace: &WorkspaceConfig{WorkFolder: "work"}}
+		absPath, err := GetWorkFolderAbsPath(cfg)
+		require.NoError(t, err)
+		expected := filepath.Join(tmpDir, "work")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(absPath))
+	})
+
+	t.Run("resolves default .work when ConfigDir set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{ConfigDir: tmpDir}
+		absPath, err := GetWorkFolderAbsPath(cfg)
+		require.NoError(t, err)
+		expected := filepath.Join(tmpDir, ".work")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(absPath))
+	})
+
+	t.Run("uses current dir when ConfigDir empty", func(t *testing.T) {
+		cfg := &Config{ConfigDir: ""}
+		absPath, err := GetWorkFolderAbsPath(cfg)
+		require.NoError(t, err)
+		cwd, err := filepath.Abs(".")
+		require.NoError(t, err)
+		expected := filepath.Join(cwd, ".work")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(absPath))
+	})
+}
+
+func TestLoadConfigFromDir(t *testing.T) {
+	t.Run("returns default config when no file in dir", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg, err := LoadConfigFromDir(tmpDir)
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		assert.Equal(t, ".work", GetWorkFolderPath(cfg))
+		absDir, err := filepath.Abs(tmpDir)
+		require.NoError(t, err)
+		assert.Equal(t, absDir, cfg.ConfigDir)
+	})
+
+	t.Run("loads config from dir when kira.yml exists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		testConfig := `version: "1.0"
+workspace:
+  work_folder: work
+`
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte(testConfig), 0o600))
+		cfg, err := LoadConfigFromDir(tmpDir)
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		assert.Equal(t, "work", GetWorkFolderPath(cfg))
+		absDir, err := filepath.Abs(tmpDir)
+		require.NoError(t, err)
+		assert.Equal(t, absDir, cfg.ConfigDir)
+	})
+}
+
+func TestWorkFolderValidation(t *testing.T) {
+	t.Run("rejects work_folder that is only whitespace", func(t *testing.T) {
+		testConfig := `version: "1.0"
+workspace:
+  work_folder: "   "
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "work_folder")
+	})
+
+	t.Run("rejects work_folder containing null byte", func(t *testing.T) {
+		testConfig := "version: \"1.0\"\nworkspace:\n  work_folder: \"work\x00path\"\n"
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+		_, err := LoadConfig()
+		require.Error(t, err)
+		// YAML parser may reject control characters before we validate, or we reject in validateConfig
+		assert.True(t, strings.Contains(err.Error(), "null") || strings.Contains(err.Error(), "control characters"),
+			"expected error to mention null or control characters, got: %s", err.Error())
 	})
 }

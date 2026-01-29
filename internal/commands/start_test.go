@@ -1318,9 +1318,13 @@ status: backlog
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir(origDir) }()
 
+		// Use actual cwd so path resolution matches (avoids /var vs /private/var on macOS)
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+
 		// Create .work directory structure
-		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".work", "0_backlog"), 0o700))
-		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".work", "2_doing"), 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".work", "0_backlog"), 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".work", "2_doing"), 0o700))
 
 		// Create a work item file
 		workItemContent := `---
@@ -1331,27 +1335,28 @@ status: backlog
 ---
 # Test Task`
 		require.NoError(t, os.WriteFile(
-			filepath.Join(tmpDir, ".work", "0_backlog", "001-test-task.md"),
+			filepath.Join(cwd, ".work", "0_backlog", "001-test-task.md"),
 			[]byte(workItemContent),
 			0o600,
 		))
 
 		cfg := &config.Config{
+			ConfigDir: cwd,
 			StatusFolders: map[string]string{
 				"backlog": "0_backlog",
 				"doing":   "2_doing",
 			},
 		}
 
-		err := moveWorkItemWithoutCommit(cfg, "001", "doing")
+		err = moveWorkItemWithoutCommit(cfg, "001", "doing")
 		require.NoError(t, err)
 
 		// Verify file was moved (old location should not exist)
-		_, err = os.Stat(filepath.Join(tmpDir, ".work", "0_backlog", "001-test-task.md"))
+		_, err = os.Stat(filepath.Join(cwd, ".work", "0_backlog", "001-test-task.md"))
 		assert.True(t, os.IsNotExist(err))
 
 		// Read the moved file using safeReadFile (path is relative since we changed to tmpDir)
-		newContent, err := safeReadFile(".work/2_doing/001-test-task.md")
+		newContent, err := safeReadFile(".work/2_doing/001-test-task.md", cfg)
 		require.NoError(t, err)
 		assert.Contains(t, string(newContent), "status: doing")
 	})
