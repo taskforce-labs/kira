@@ -158,6 +158,58 @@ Notes:
 - By default, only provided values are filled; missing template fields use defaults
 - Use `--interactive` (or `-I`) to enable prompts for missing template fields
 
+### `kira users`
+Lists users discovered from git history and/or `kira.yml`, and assigns each user a **number** you can use with `kira assign`.
+
+```bash
+kira users                 # Table output (default)
+kira users --format list   # Plain list
+kira users --format json   # Machine-readable output
+
+# Limit git history processing (0 = no limit)
+kira users --limit 200
+```
+
+Workflow with `kira assign`:
+
+```bash
+# 1) List users and note the number you want (e.g. 5)
+kira users
+
+# 2) Assign using that number
+kira assign 001 5
+```
+
+### `kira assign <work-item-id...> [user-identifier]`
+Assigns one or more work items to a user by updating front matter (default field: `assigned`).
+
+```bash
+# Switch (replace) mode (default)
+kira assign 001 5                         # Assign work item 001 to user #5 (from `kira users`)
+kira assign 001 user@example.com          # Assign by email (case-insensitive)
+kira assign 001 "Jane Doe"                # Assign by name (exact/partial match if unique)
+kira assign 001 002 003 5                 # Batch assign multiple work items
+
+# Append mode (build a list; avoids duplicates)
+kira assign 001 5 --append
+kira assign 001 5 -a
+
+# Unassign (clears/removes the field)
+kira assign 001 --unassign
+kira assign 001 -u
+
+# Custom field (defaults to `assigned`)
+kira assign 001 5 --field reviewer
+kira assign 001 5 -f reviewer
+
+# Interactive selection (user identifier optional)
+kira assign 001 --interactive
+kira assign 001 -I
+
+# Dry run (no changes written)
+kira assign 001 5 --dry-run
+```
+
 ### `kira move <work-item-id> [target-status]`
 Moves a work item to a different status folder.
 

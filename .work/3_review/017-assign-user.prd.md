@@ -1,13 +1,14 @@
 ---
 id: 017
 title: assign-user
-status: doing
+status: review
 kind: prd
-assigned:
+created: 2026-01-21T00:00:00Z
+assigned: wkallan1984@gmail.com
+due: 2026-01-21T00:00:00Z
 estimate: 0
-created: 2026-01-21
-due: 2026-01-21
 tags: [cli, workflow, users]
+updated: "2026-01-29T05:25:13Z"
 ---
 
 # assign-user
@@ -60,12 +61,12 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/root.go` (register command)
 
 **Acceptance Criteria**:
-- [ ] `kira assign` command exists and shows help
-- [ ] Command validates work item ID format
-- [ ] Command rejects invalid flag combinations
-- [ ] Command shows clear error for missing required arguments
-- [ ] All flags are defined and accessible
-- [ ] Command structure follows existing Kira patterns
+- [x] `kira assign` command exists and shows help
+- [x] Command validates work item ID format
+- [x] Command rejects invalid flag combinations
+- [x] Command shows clear error for missing required arguments
+- [x] All flags are defined and accessible
+- [x] Command structure follows existing Kira patterns
 
 **Deliverable**: Command skeleton with input validation
 
@@ -85,12 +86,12 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add work item discovery functions)
 
 **Acceptance Criteria**:
-- [ ] Finds work item by numeric ID across all folders
-- [ ] Validates work item file exists
-- [ ] Handles multiple work item IDs
-- [ ] Returns clear error when work item not found
-- [ ] Works with work items in any status folder
-- [ ] Handles invalid work item paths gracefully
+- [x] Finds work item by numeric ID across all folders
+- [x] Validates work item file exists
+- [x] Handles multiple work item IDs
+- [x] Returns clear error when work item not found
+- [x] Works with work items in any status folder
+- [x] Handles invalid work item paths gracefully
 
 **Deliverable**: Work item lookup and validation working
 
@@ -113,13 +114,13 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - Reuse functions from `internal/commands/users.go`
 
 **Acceptance Criteria**:
-- [ ] Collects users using same logic as `kira users`
-- [ ] Resolves numeric user identifiers correctly
-- [ ] Resolves email addresses (case-insensitive)
-- [ ] Resolves names (case-insensitive)
-- [ ] Handles partial email/name matches
-- [ ] Shows clear error when user not found
-- [ ] Handles multiple matches appropriately
+- [x] Collects users using same logic as `kira users`
+- [x] Resolves numeric user identifiers correctly
+- [x] Resolves email addresses (case-insensitive)
+- [x] Resolves names (case-insensitive)
+- [x] Handles partial email/name matches
+- [x] Shows clear error when user not found
+- [x] Handles multiple matches appropriately
 
 **Deliverable**: User resolution working for all identifier types
 
@@ -142,13 +143,13 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - Reuse existing front matter utilities if available
 
 **Acceptance Criteria**:
-- [ ] Reads work item file successfully
-- [ ] Parses YAML front matter correctly
-- [ ] Accesses field values (default and custom)
-- [ ] Handles missing fields gracefully
-- [ ] Handles empty fields correctly
-- [ ] Preserves front matter structure
-- [ ] Handles malformed front matter with clear errors
+- [x] Reads work item file successfully
+- [x] Parses YAML front matter correctly
+- [x] Accesses field values (default and custom)
+- [x] Handles missing fields gracefully
+- [x] Handles empty fields correctly
+- [x] Preserves front matter structure
+- [x] Handles malformed front matter with clear errors
 
 **Deliverable**: Front matter reading and field access working
 
@@ -169,13 +170,13 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add field update functions)
 
 **Acceptance Criteria**:
-- [ ] Updates field value correctly
-- [ ] Creates field if it doesn't exist
-- [ ] Updates `updated` timestamp
-- [ ] Preserves other front matter fields
-- [ ] Writes file successfully
-- [ ] Handles write errors gracefully
-- [ ] Maintains front matter formatting
+- [x] Updates field value correctly
+- [x] Creates field if it doesn't exist
+- [x] Updates `updated` timestamp
+- [x] Preserves other front matter fields
+- [x] Writes file successfully
+- [x] Handles write errors gracefully
+- [x] Maintains front matter formatting
 
 **Deliverable**: Basic field update (switch mode) working
 
@@ -195,12 +196,12 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add append mode logic)
 
 **Acceptance Criteria**:
-- [ ] Appends to array fields correctly
-- [ ] Converts single value to array when needed
-- [ ] Prevents duplicate entries in arrays
-- [ ] Creates field if it doesn't exist (append mode)
-- [ ] Updates timestamp correctly
-- [ ] Preserves other front matter fields
+- [x] Appends to array fields correctly
+- [x] Converts single value to array when needed
+- [x] Prevents duplicate entries in arrays
+- [x] Creates field if it doesn't exist (append mode)
+- [x] Updates timestamp correctly
+- [x] Preserves other front matter fields
 
 **Deliverable**: Append mode working
 
@@ -219,11 +220,11 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add unassign logic)
 
 **Acceptance Criteria**:
-- [ ] Clears field value correctly
-- [ ] Works with default `assigned` field
-- [ ] Works with custom fields via `--field`
-- [ ] Updates timestamp
-- [ ] Handles non-existent fields gracefully
+- [x] Clears field value correctly
+- [x] Works with default `assigned` field
+- [x] Works with custom fields via `--field`
+- [x] Updates timestamp
+- [x] Handles non-existent fields gracefully
 
 **Deliverable**: Unassign functionality working
 
@@ -243,11 +244,11 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add batch processing)
 
 **Acceptance Criteria**:
-- [ ] Processes multiple work items correctly
-- [ ] Validates all work items before processing
-- [ ] Shows progress for each item
-- [ ] Handles partial failures gracefully
-- [ ] Provides clear summary of results
+- [x] Processes multiple work items correctly
+- [x] Validates all work items before processing
+- [x] Shows progress for each item
+- [x] Handles partial failures gracefully
+- [x] Provides clear summary of results
 
 **Deliverable**: Batch processing working
 
@@ -267,11 +268,11 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add interactive mode)
 
 **Acceptance Criteria**:
-- [ ] Displays users in consistent format
-- [ ] Shows current assignment
-- [ ] Gets valid user selection
-- [ ] Handles invalid input gracefully
-- [ ] Supports unassign option
+- [x] Displays users in consistent format
+- [x] Shows current assignment
+- [x] Gets valid user selection
+- [x] Handles invalid input gracefully
+- [x] Supports unassign option
 
 **Deliverable**: Interactive mode working
 
@@ -292,11 +293,11 @@ This feature will be implemented in vertical slices (by technical layer) to enab
 - `internal/commands/assign.go` (add output functions)
 
 **Acceptance Criteria**:
-- [ ] Shows clear success messages
-- [ ] Shows helpful error messages
-- [ ] Dry-run mode works correctly
-- [ ] Progress indicators are clear
-- [ ] Batch summaries are informative
+- [x] Shows clear success messages
+- [x] Shows helpful error messages
+- [x] Dry-run mode works correctly
+- [x] Progress indicators are clear
+- [x] Batch summaries are informative
 
 **Deliverable**: Polished output and feedback
 
@@ -503,90 +504,90 @@ No new configuration required. The command uses existing user configuration:
 ## Acceptance Criteria
 
 ### Core Command Functionality
-- [ ] `kira assign 001 5` assigns work item 001 to user number 5 (switch mode)
-- [ ] `kira assign 001 002 003 5` assigns multiple work items to user 5
-- [ ] `kira assign 001 user@example.com` assigns by email address
-- [ ] `kira assign 001 "John Doe"` assigns by name (if unique)
-- [ ] `kira assign 001 --interactive` shows interactive user selection
-- [ ] `kira assign 001 --unassign` clears the assigned field
-- [ ] `kira assign 001 -u` clears assignment (shorthand)
-- [ ] `kira assign 001 5 --field reviewer` assigns to reviewer field
-- [ ] `kira assign 001 5 --append` adds user to existing assignment
-- [ ] `kira assign 001 5 -a` appends user (shorthand)
-- [ ] Command updates specified field (default: `assigned`) in work item front matter
-- [ ] Command updates `updated` timestamp when assignment changes
-- [ ] Command preserves all other front matter fields
-- [ ] Command works with work items in any status folder
-- [ ] Command finds work items by numeric ID across all folders
-- [ ] Command processes multiple work items in batch
+- [x] `kira assign 001 5` assigns work item 001 to user number 5 (switch mode)
+- [x] `kira assign 001 002 003 5` assigns multiple work items to user 5
+- [x] `kira assign 001 user@example.com` assigns by email address
+- [x] `kira assign 001 "John Doe"` assigns by name (if unique)
+- [x] `kira assign 001 --interactive` shows interactive user selection
+- [x] `kira assign 001 --unassign` clears the assigned field
+- [x] `kira assign 001 -u` clears assignment (shorthand)
+- [x] `kira assign 001 5 --field reviewer` assigns to reviewer field
+- [x] `kira assign 001 5 --append` adds user to existing assignment
+- [x] `kira assign 001 5 -a` appends user (shorthand)
+- [x] Command updates specified field (default: `assigned`) in work item front matter
+- [x] Command updates `updated` timestamp when assignment changes
+- [x] Command preserves all other front matter fields
+- [x] Command works with work items in any status folder
+- [x] Command finds work items by numeric ID across all folders
+- [x] Command processes multiple work items in batch
 
 ### User Identification
-- [ ] Numeric identifiers resolve to correct user from `kira users`
-- [ ] Email addresses match case-insensitively
-- [ ] Partial email matches work when unique (e.g., `@example.com`)
-- [ ] Name matching works for exact matches
-- [ ] Partial name matches work when unique
-- [ ] Display name format "Name <email>" is recognized
-- [ ] Multiple matches show list and prompt for selection
-- [ ] Invalid user number shows helpful error with available range
+- [x] Numeric identifiers resolve to correct user from `kira users`
+- [x] Email addresses match case-insensitively
+- [x] Partial email matches work when unique (e.g., `@example.com`)
+- [x] Name matching works for exact matches
+- [x] Partial name matches work when unique
+- [x] Display name format "Name <email>" is recognized
+- [x] Multiple matches show list and prompt for selection
+- [x] Invalid user number shows helpful error with available range
 
 ### Interactive Mode
-- [ ] Interactive mode displays users in same format as `kira users`
-- [ ] Users are numbered consistently with `kira users` output
-- [ ] Selection by number works correctly
-- [ ] Option to unassign is available in interactive mode
-- [ ] Current assignment is shown if work item is already assigned
-- [ ] Invalid selection shows error and re-prompts
+- [x] Interactive mode displays users in same format as `kira users`
+- [x] Users are numbered consistently with `kira users` output
+- [x] Selection by number works correctly
+- [x] Option to unassign is available in interactive mode
+- [x] Current assignment is shown if work item is already assigned
+- [x] Invalid selection shows error and re-prompts
 
 ### Error Handling
-- [ ] Work item not found shows clear error message
-- [ ] Invalid work item ID format shows validation error
-- [ ] User not found shows error with suggestion to run `kira users`
-- [ ] Multiple user matches lists all options for selection
-- [ ] File read/write errors are handled gracefully
-- [ ] Front matter parsing errors provide clear feedback
-- [ ] Permission errors provide guidance
+- [x] Work item not found shows clear error message
+- [x] Invalid work item ID format shows validation error
+- [x] User not found shows error with suggestion to run `kira users`
+- [x] Multiple user matches lists all options for selection
+- [x] File read/write errors are handled gracefully
+- [x] Front matter parsing errors provide clear feedback
+- [x] Permission errors provide guidance
 
 ### Integration
-- [ ] Uses same user collection logic as `kira users`
-- [ ] Respects user configuration from `kira.yml`
-- [ ] Ignores emails/patterns as configured
-- [ ] Includes saved users from config
-- [ ] Maintains consistency with `kira users` numbering
+- [x] Uses same user collection logic as `kira users`
+- [x] Respects user configuration from `kira.yml`
+- [x] Ignores emails/patterns as configured
+- [x] Includes saved users from config
+- [x] Maintains consistency with `kira users` numbering
 
 ### Field Management
-- [ ] Default field is `assigned` when `--field` not specified
-- [ ] Custom fields work with `--field` flag (e.g., `reviewer`, `owner`)
-- [ ] Field is created if it doesn't exist in front matter
-- [ ] Switch mode replaces existing assignment (default behavior)
-- [ ] Append mode adds user to existing assignment
-- [ ] Append mode converts single value to array when needed
-- [ ] Append mode avoids duplicate users in array fields
-- [ ] Unassign works with custom fields via `--field` flag
+- [x] Default field is `assigned` when `--field` not specified
+- [x] Custom fields work with `--field` flag (e.g., `reviewer`, `owner`)
+- [x] Field is created if it doesn't exist in front matter
+- [x] Switch mode replaces existing assignment (default behavior)
+- [x] Append mode adds user to existing assignment
+- [x] Append mode converts single value to array when needed
+- [x] Append mode avoids duplicate users in array fields
+- [x] Unassign works with custom fields via `--field` flag
 
 ### Multiple Work Items
-- [ ] Multiple work items can be assigned in single command
-- [ ] All work items are validated before processing
-- [ ] Progress is shown for each work item assignment
-- [ ] Partial failures are reported clearly (which items succeeded/failed)
-- [ ] Batch operations are atomic where possible
+- [x] Multiple work items can be assigned in single command
+- [x] All work items are validated before processing
+- [x] Progress is shown for each work item assignment
+- [x] Partial failures are reported clearly (which items succeeded/failed)
+- [x] Batch operations are atomic where possible
 
 ### Edge Cases
-- [ ] Assigning to already-assigned work item updates assignment (switch mode)
-- [ ] Append mode adds to existing assignment without replacing
-- [ ] Unassigning unassigned work item shows appropriate message
-- [ ] Work items with missing field can be assigned (field created)
-- [ ] Work items with empty field can be assigned
-- [ ] Command works with work items that have complex front matter
-- [ ] Special characters in user names/emails are handled correctly
-- [ ] Array fields handle append mode correctly
-- [ ] Single value fields convert to arrays when appending
+- [x] Assigning to already-assigned work item updates assignment (switch mode)
+- [x] Append mode adds to existing assignment without replacing
+- [x] Unassigning unassigned work item shows appropriate message
+- [x] Work items with missing field can be assigned (field created)
+- [x] Work items with empty field can be assigned
+- [x] Command works with work items that have complex front matter
+- [x] Special characters in user names/emails are handled correctly
+- [x] Array fields handle append mode correctly
+- [x] Single value fields convert to arrays when appending
 
 ### Output and Feedback
-- [ ] Success messages show clear assignment information
-- [ ] Current assignment is shown when already assigned
-- [ ] Dry run mode shows what would change without making changes
-- [ ] Interactive mode provides clear prompts and feedback
+- [x] Success messages show clear assignment information
+- [x] Current assignment is shown when already assigned
+- [x] Dry run mode shows what would change without making changes
+- [x] Interactive mode provides clear prompts and feedback
 
 ## Implementation Notes
 
