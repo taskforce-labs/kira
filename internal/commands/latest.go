@@ -1562,6 +1562,37 @@ func continueRebase(repo RepositoryInfo) error {
 	return nil
 }
 
+// isOnTrunkBranch returns true if the repository's current branch equals its configured trunk branch.
+func isOnTrunkBranch(repo RepositoryInfo) (bool, error) {
+	currentBranch, err := getCurrentBranch(repo.Path)
+	if err != nil {
+		return false, fmt.Errorf("failed to determine current branch: %w", err)
+	}
+	return currentBranch == repo.TrunkBranch, nil
+}
+
+// updateTrunkFromRemote updates local trunk from remote (e.g. after fetch) by rebasing onto remote/trunk.
+// Use when the current branch is already trunk; uses the same timeout and error handling as rebaseOntoTrunk.
+func updateTrunkFromRemote(repo RepositoryInfo) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	remoteRef := fmt.Sprintf("%s/%s", repo.Remote, repo.TrunkBranch)
+	_, err := executeCommandCombinedOutput(ctx, "git", []string{"rebase", remoteRef}, repo.Path, false)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "CONFLICT") || strings.Contains(errStr, "conflict") {
+			return fmt.Errorf("trunk update failed due to conflicts. Resolve conflicts and run 'kira latest' again: %w", err)
+		}
+		if strings.Contains(errStr, "fatal:") && strings.Contains(errStr, "doesn't exist") {
+			return fmt.Errorf("trunk update failed: remote reference '%s' does not exist. Ensure fetch completed successfully", remoteRef)
+		}
+		return fmt.Errorf("trunk update failed: %w", err)
+	}
+
+	return nil
+}
+
 // rebaseOntoTrunk rebases the current branch onto the remote trunk branch
 func rebaseOntoTrunk(repo RepositoryInfo) error {
 	// Get current branch name
@@ -1736,17 +1767,42 @@ func performFetchStep(result *RepositoryOperationResult, repo RepositoryInfo, mu
 	return nil
 }
 
-// performRebaseStep performs the rebase operation
+// performRebaseStep performs the rebase or trunk-update operation depending on current branch
 func performRebaseStep(result *RepositoryOperationResult, repo RepositoryInfo, mu *sync.Mutex) error {
-	mu.Lock()
-	displayOperationProgress(repo.Name, "rebasing")
-	mu.Unlock()
+	onTrunk, err := isOnTrunkBranch(repo)
+	if err != nil {
+		result.Error = err
+		result.Steps = append(result.Steps, "branch-check (failed)")
+		return err
+	}
 
-	// Mark that we're attempting rebase (for rollback purposes)
+	if onTrunk {
+		mu.Lock()
+		displayOperationProgress(repo.Name, "updating trunk")
+		mu.Unlock()
+	} else {
+		mu.Lock()
+		displayOperationProgress(repo.Name, "rebasing")
+		mu.Unlock()
+	}
+
+	// Mark that we're attempting rebase/trunk-update (for rollback purposes)
 	result.RebaseAttempted = true
 
+	if onTrunk {
+		if err := updateTrunkFromRemote(repo); err != nil {
+			if strings.Contains(err.Error(), "trunk update failed due to conflicts") {
+				result.RebaseHadConflicts = true
+			}
+			result.Error = fmt.Errorf("trunk update failed: %w", err)
+			result.Steps = append(result.Steps, "trunk-update (failed)")
+			return err
+		}
+		result.Steps = append(result.Steps, "trunk-update")
+		return nil
+	}
+
 	if err := rebaseOntoTrunk(repo); err != nil {
-		// Detect conflict-driven failures so we can decide later whether to abort
 		if strings.Contains(err.Error(), "rebase failed due to conflicts") {
 			result.RebaseHadConflicts = true
 		}
