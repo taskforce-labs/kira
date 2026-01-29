@@ -117,8 +117,9 @@ func findWorkItemFile(workItemID string) (string, error) {
 				return err
 			}
 
-			// Simple check for ID in front matter
-			if strings.Contains(string(content), fmt.Sprintf("id: %s", workItemID)) {
+			s := string(content)
+			// Match both "id: 012" and "id: \"012\"" (quoted in YAML)
+			if strings.Contains(s, fmt.Sprintf("id: %s", workItemID)) || strings.Contains(s, fmt.Sprintf("id: \"%s\"", workItemID)) {
 				foundPath = path
 				return filepath.SkipDir
 			}

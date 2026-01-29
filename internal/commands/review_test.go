@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-github/v58/github"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,6 +22,17 @@ import (
 
 const (
 	testWorkItemPath = ".work/3_review/012-submit-for-review.prd.md"
+
+	// phase21WorkItemContent is minimal work item content for Phase 21 integration tests.
+	phase21WorkItemContent = `---
+id: "012"
+title: Submit for review
+status: doing
+kind: prd
+created: "2025-01-01"
+---
+# PRD
+`
 )
 
 func TestReviewCommandRegistration(t *testing.T) {
@@ -3253,4 +3265,139 @@ func TestPerformRebase(t *testing.T) {
 		assert.Contains(t, errStr, "git rebase --continue", "error should mention resolution step")
 		assert.Contains(t, errStr, "kira review", "error should mention re-run command")
 	})
+}
+
+// TestReviewCommandIntegration_Phase21 tests Phase 21: command integration and error handling.
+// These tests run the actual review command (RunE) and assert errors at each step.
+func TestReviewCommandIntegration_Phase21(t *testing.T) {
+	t.Run("fails on trunk branch with clear message", func(t *testing.T) {
+		_ = setupTestGitRepo(t, "main")
+
+		rootCmd.SetArgs([]string{"review"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot run 'kira review' on trunk branch", "error should mention trunk branch")
+	})
+
+	t.Run("fails when work item not found with clear message", func(t *testing.T) {
+		_ = setupTestGitRepo(t, "012-other-branch")
+		// No work item file - branch name doesn't match any work item in .work
+
+		rootCmd.SetArgs([]string{"review"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		errStr := err.Error()
+		assert.True(t,
+			strings.Contains(errStr, "work item") &&
+				(strings.Contains(errStr, "not found") || strings.Contains(errStr, "no such file") || strings.Contains(errStr, "failed to load")),
+			"error should mention work item not found: %s", errStr)
+	})
+
+	t.Run("fails on uncommitted changes with clear message", func(t *testing.T) {
+		_ = setupTestGitRepo(t, "main")
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/012-submit-for-review.prd.md", []byte(phase21WorkItemContent), 0o600))
+		require.NoError(t, exec.Command("git", "add", ".work").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "012-submit-for-review").Run())
+		// Uncommitted change
+		require.NoError(t, os.WriteFile("dirty.txt", []byte("dirty"), 0o600))
+
+		rootCmd.SetArgs([]string{"review", "--no-trunk-update", "--no-rebase"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "uncommitted changes", "error should mention uncommitted changes")
+	})
+
+	t.Run("fails without GitHub token when remote is GitHub", func(t *testing.T) {
+		_ = setupTestGitRepo(t, "main")
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/012-submit-for-review.prd.md", []byte(phase21WorkItemContent), 0o600))
+		require.NoError(t, exec.Command("git", "add", ".work").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "012-submit-for-review").Run())
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", "https://github.com/owner/repo.git").Run())
+
+		// Ensure token is unset so we hit the token step
+		origToken := os.Getenv("KIRA_GITHUB_TOKEN")
+		_ = os.Unsetenv("KIRA_GITHUB_TOKEN")
+		t.Cleanup(func() {
+			if origToken != "" {
+				_ = os.Setenv("KIRA_GITHUB_TOKEN", origToken)
+			}
+		})
+
+		rootCmd.SetArgs([]string{"review", "--no-trunk-update", "--no-rebase"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		errStr := err.Error()
+		// May fail at push (no token/network) or at token validation; either is acceptable
+		assert.True(t,
+			strings.Contains(errStr, "KIRA_GITHUB_TOKEN") ||
+				strings.Contains(errStr, "failed to push") ||
+				strings.Contains(errStr, "remote branch") ||
+				strings.Contains(errStr, "Username") ||
+				strings.Contains(errStr, "authentication"),
+			"error should mention token, push, or auth: %s", errStr)
+	})
+
+	t.Run("fails when GitHub remote not configured", func(t *testing.T) {
+		_ = setupTestGitRepo(t, "main")
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/012-submit-for-review.prd.md", []byte(phase21WorkItemContent), 0o600))
+		require.NoError(t, exec.Command("git", "add", ".work").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "012-submit-for-review").Run())
+		// No remote - validateRemoteExists fails
+
+		rootCmd.SetArgs([]string{"review", "--no-trunk-update", "--no-rebase"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.True(t,
+			strings.Contains(err.Error(), "remote") || strings.Contains(err.Error(), "GitHub"),
+			"error should mention remote or GitHub: %s", err.Error())
+	})
+}
+
+// TestUpdateGitHubPR tests the updateGitHubPR function (Phase 21 - create/update PR).
+func TestUpdateGitHubPR(t *testing.T) {
+	t.Run("returns error for nil client", func(t *testing.T) {
+		_, err := updateGitHubPR(nil, "owner", "repo", 1, "Title", "Body")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "client cannot be nil")
+	})
+
+	t.Run("returns error for empty owner", func(t *testing.T) {
+		_, err := updateGitHubPR(ghClientOrSkip(t), "", "repo", 1, "Title", "Body")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "owner cannot be empty")
+	})
+
+	t.Run("returns error for empty repo", func(t *testing.T) {
+		_, err := updateGitHubPR(ghClientOrSkip(t), "owner", "", 1, "Title", "Body")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "repo cannot be empty")
+	})
+
+	t.Run("returns error for invalid PR number", func(t *testing.T) {
+		_, err := updateGitHubPR(ghClientOrSkip(t), "owner", "repo", 0, "Title", "Body")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "PR number must be greater than 0")
+	})
+
+	t.Run("returns error for empty title", func(t *testing.T) {
+		_, err := updateGitHubPR(ghClientOrSkip(t), "owner", "repo", 1, "", "Body")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "title cannot be empty")
+	})
+}
+
+// ghClientOrSkip returns a minimal GitHub client for validation-only tests (no API calls).
+// Skip if go-github is not available; in practice it always is.
+func ghClientOrSkip(t *testing.T) *github.Client {
+	t.Helper()
+	// Return a real client with empty token - we only use it for nil/param validation
+	return github.NewClient(nil)
 }

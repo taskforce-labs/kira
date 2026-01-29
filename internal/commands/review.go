@@ -101,6 +101,110 @@ The command will:
 			return err
 		}
 
+		// Step 8: Get GitHub repo info
+		owner, repo, err := gh.GetGitHubRepoInfo(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to get GitHub repository info: %w", err)
+		}
+
+		// Step 9: Validate GitHub token
+		token, err := getGitHubToken(cfg)
+		if err != nil {
+			return err
+		}
+		if err := validateGitHubToken(token); err != nil {
+			return err
+		}
+
+		// Step 10: Create GitHub client
+		apiCtx := context.Background()
+		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
+		tc := oauth2.NewClient(apiCtx, ts)
+		client := github.NewClient(tc)
+
+		// Step 11: Check for existing PR
+		existingPR, err := findExistingPR(client, owner, repo, currentBranch)
+		if err != nil {
+			return err
+		}
+
+		// Step 12: Generate PR title and description (use flags if provided)
+		customTitle, _ := cmd.Flags().GetString("title")
+		customDesc, _ := cmd.Flags().GetString("description")
+		prTitle := customTitle
+		prDescription := customDesc
+		if prTitle == "" {
+			prTitle, err = generatePRTitle(workItem, cfg)
+			if err != nil {
+				return fmt.Errorf("failed to generate PR title: %w", err)
+			}
+		}
+		if prDescription == "" {
+			// Use current work item path (after move to review folder) for description URL
+			workItemPathForDesc, pathErr := findWorkItemFile(workItemID)
+			if pathErr != nil {
+				return fmt.Errorf("failed to find work item path for PR description: %w", pathErr)
+			}
+			prDescription, err = generatePRDescription(workItem, workItemPathForDesc, cfg)
+			if err != nil {
+				return fmt.Errorf("failed to generate PR description: %w", err)
+			}
+		}
+
+		isDraft, _ := cmd.Flags().GetBool("draft")
+
+		repoRoot, err := getRepoRoot()
+		if err != nil {
+			return fmt.Errorf("failed to get repository root: %w", err)
+		}
+		baseBranch, err := determineTrunkBranch(cfg, "", repoRoot, false)
+		if err != nil {
+			return fmt.Errorf("failed to determine base branch: %w", err)
+		}
+
+		// Step 13: Create or update PR
+		var createdOrUpdatedPR *github.PullRequest
+		if existingPR != nil {
+			createdOrUpdatedPR, err = updateGitHubPR(client, owner, repo, existingPR.GetNumber(), prTitle, prDescription)
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Pull request updated.")
+		} else {
+			createdOrUpdatedPR, err = createGitHubPR(client, owner, repo, currentBranch, baseBranch, prTitle, prDescription, isDraft)
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Pull request created.")
+		}
+
+		prURL := createdOrUpdatedPR.GetHTMLURL()
+		if prURL != "" {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), prURL)
+		}
+
+		prNumber := createdOrUpdatedPR.GetNumber()
+		if prNumber == 0 {
+			return fmt.Errorf("failed to get pull request number after create/update")
+		}
+
+		// Step 14: Add labels
+		if err := addPRLabels(client, owner, repo, prNumber, extractTagsFromWorkItem(workItem)); err != nil {
+			return fmt.Errorf("failed to add PR labels: %w", err)
+		}
+
+		// Step 15: Resolve reviewers
+		reviewerSpecs, _ := cmd.Flags().GetStringArray("reviewer")
+		reviewers, err := resolveReviewers(reviewerSpecs, cfg)
+		if err != nil {
+			return fmt.Errorf("failed to resolve reviewers: %w", err)
+		}
+
+		// Step 16: Request reviews
+		if err := requestPRReviews(client, owner, repo, prNumber, reviewers, cfg); err != nil {
+			return fmt.Errorf("failed to request reviews: %w", err)
+		}
+
 		// Step 17: Update trunk status (if enabled)
 		if trunkUpdateEnabled {
 			if err := updateTrunkStatus(workItemID, cfg); err != nil {
@@ -114,6 +218,11 @@ The command will:
 			}
 		} else {
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Work item moved to review on current branch.")
+		}
+
+		// Step 19: Update work item metadata with PR URL and reviewers
+		if err := updateWorkItemMetadata(workItemID, prURL, reviewers); err != nil {
+			return fmt.Errorf("failed to update work item metadata: %w", err)
 		}
 
 		return nil
@@ -1070,6 +1179,61 @@ func handlePRCreateError(err error, resp *github.Response, owner, repo, branchNa
 		return fmt.Errorf("failed to create pull request: validation error. Check that branch '%s' exists and base branch '%s' is valid", branchName, baseBranch)
 	default:
 		return fmt.Errorf("failed to create pull request: %w", err)
+	}
+}
+
+// updateGitHubPR updates an existing pull request's title and body.
+// Returns the updated PR or an error with a clear message.
+func updateGitHubPR(client *github.Client, owner, repo string, prNumber int, title, body string) (*github.PullRequest, error) {
+	if client == nil {
+		return nil, fmt.Errorf("GitHub client cannot be nil")
+	}
+	if strings.TrimSpace(owner) == "" {
+		return nil, fmt.Errorf("owner cannot be empty")
+	}
+	if strings.TrimSpace(repo) == "" {
+		return nil, fmt.Errorf("repo cannot be empty")
+	}
+	if prNumber <= 0 {
+		return nil, fmt.Errorf("PR number must be greater than 0")
+	}
+	if strings.TrimSpace(title) == "" {
+		return nil, fmt.Errorf("PR title cannot be empty")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	editPR := &github.PullRequest{
+		Title: &title,
+		Body:  &body,
+	}
+
+	pr, resp, err := client.PullRequests.Edit(ctx, owner, repo, prNumber, editPR)
+	if err != nil {
+		return nil, handlePRUpdateError(err, resp, owner, repo, prNumber)
+	}
+
+	return pr, nil
+}
+
+// handlePRUpdateError processes errors from the GitHub API PR update call.
+func handlePRUpdateError(err error, resp *github.Response, owner, repo string, prNumber int) error {
+	if resp == nil {
+		return fmt.Errorf("failed to update pull request: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return fmt.Errorf("failed to update pull request: authentication failed. Verify GitHub token has 'repo' scope")
+	case http.StatusForbidden:
+		return fmt.Errorf("failed to update pull request: access forbidden. Verify GitHub token has 'repo' scope")
+	case http.StatusNotFound:
+		return fmt.Errorf("failed to update pull request: pull request #%d not found in repository '%s/%s'", prNumber, owner, repo)
+	case http.StatusUnprocessableEntity:
+		return fmt.Errorf("failed to update pull request: validation error. Check title and description")
+	default:
+		return fmt.Errorf("failed to update pull request: %w", err)
 	}
 }
 
