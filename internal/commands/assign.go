@@ -960,12 +960,34 @@ func parseWorkItemFrontMatter(filePath string) (map[string]interface{}, []string
 	// Parse YAML front matter
 	frontMatter := make(map[string]interface{})
 	if len(yamlLines) > 0 {
+		// Preserve id as string from the raw line so YAML never interprets 017 as octal 15.
+		idRaw := extractIDFromYAMLLines(yamlLines)
 		if err := yaml.Unmarshal([]byte(strings.Join(yamlLines, "\n")), frontMatter); err != nil {
 			return nil, nil, fmt.Errorf("failed to parse front matter: %w", err)
+		}
+		if idRaw != "" {
+			frontMatter["id"] = idRaw
 		}
 	}
 
 	return frontMatter, bodyLines, nil
+}
+
+// extractIDFromYAMLLines finds the "id:" line in raw YAML and returns the value as string (unchanged).
+func extractIDFromYAMLLines(yamlLines []string) string {
+	const idKey = "id:"
+	for _, line := range yamlLines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, idKey) {
+			continue
+		}
+		val := strings.TrimSpace(trimmed[len(idKey):])
+		if len(val) >= 2 && (val[0] == '"' && val[len(val)-1] == '"' || val[0] == '\'' && val[len(val)-1] == '\'') {
+			val = val[1 : len(val)-1]
+		}
+		return val
+	}
+	return ""
 }
 
 // getFieldValue retrieves a field value from the front matter map.
