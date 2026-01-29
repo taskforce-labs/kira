@@ -81,17 +81,33 @@ The command will:
 			return err
 		}
 
-		// Extract flags to validate parsing (actual logic will be implemented in later phases)
-		_, _ = cmd.Flags().GetStringArray("reviewer")
-		_, _ = cmd.Flags().GetBool("draft")
-		_, _ = cmd.Flags().GetBool("no-trunk-update")
-		_, _ = cmd.Flags().GetBool("no-rebase")
-		_, _ = cmd.Flags().GetString("title")
-		_, _ = cmd.Flags().GetString("description")
+		noTrunkUpdate, _ := cmd.Flags().GetBool("no-trunk-update")
+		trunkUpdateEnabled := !noTrunkUpdate && (cfg.Review == nil || cfg.Review.UpdateTrunkStatus == nil || *cfg.Review.UpdateTrunkStatus)
 
-		// Placeholder: return help for now (will be replaced in later phases)
-		_ = workItemID // Suppress unused variable warning
-		return cmd.Help()
+		// Step 5: Update work item status on current branch (move to review)
+		if err := updateWorkItemStatusOnCurrentBranch(cfg, workItemID, statusReview); err != nil {
+			return fmt.Errorf("failed to move work item to review: %w", err)
+		}
+
+		// Steps 6-7: Validate remote and push branch if needed (before trunk update)
+		if err := validateRemoteExists(cfg); err != nil {
+			return err
+		}
+		if err := pushBranchIfNeeded(currentBranch, cfg); err != nil {
+			return err
+		}
+
+		// Step 17: Update trunk status (if enabled)
+		if trunkUpdateEnabled {
+			if err := updateTrunkStatus(workItemID, cfg); err != nil {
+				return fmt.Errorf("failed to update trunk status: %w", err)
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Work item moved to review on current branch. Trunk branch status updated.")
+		} else {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Work item moved to review on current branch.")
+		}
+
+		return nil
 	},
 }
 

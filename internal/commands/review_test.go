@@ -2890,6 +2890,45 @@ func TestUpdateTrunkStatus(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("restores stashed uncommitted changes after trunk update", func(t *testing.T) {
+		tmpDir := setupTestGitRepo(t, "main")
+		_ = tmpDir
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/012-test-feature.prd.md", []byte(testWorkItemContentForTrunkStatus), 0o600))
+		require.NoError(t, exec.Command("git", "add", ".work").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
+
+		require.NoError(t, exec.Command("git", "checkout", "-b", "012-test-feature").Run())
+
+		// Leave uncommitted change on feature branch
+		require.NoError(t, os.WriteFile("uncommitted.txt", []byte("stash me"), 0o600))
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			StatusFolders: map[string]string{
+				"doing":  "2_doing",
+				"review": "3_review",
+			},
+		}
+
+		err := updateTrunkStatus("012", cfg)
+		require.NoError(t, err)
+
+		currentBranch, err := getCurrentBranch("")
+		require.NoError(t, err)
+		assert.Equal(t, "012-test-feature", currentBranch)
+
+		// Stashed changes should be restored
+		content, err := os.ReadFile("uncommitted.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "stash me", string(content))
+	})
+
 	t.Run("switches branches correctly", func(t *testing.T) {
 		tmpDir := setupTestGitRepo(t, "main")
 		_ = tmpDir
