@@ -3,11 +3,12 @@ id: 017
 title: assign-user
 status: doing
 kind: prd
-assigned:
+created: 2026-01-21T00:00:00Z
+assigned: wkallan1984@gmail.com
+due: 2026-01-21T00:00:00Z
 estimate: 0
-created: 2026-01-21
-due: 2026-01-21
 tags: [cli, workflow, users]
+updated: "2026-01-29T05:25:13Z"
 ---
 
 # assign-user
