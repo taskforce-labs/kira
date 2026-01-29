@@ -35,6 +35,26 @@ func addSafeDirectory(t *testing.T, dir string) {
 	require.NoError(t, exec.Command("git", "config", "--global", "--add", "safe.directory", dir).Run())
 }
 
+// setupGitConfigForCI configures git to trust any directory (safe.directory=*), using a temp
+// config file so CI environments with read-only or missing ~/.gitconfig still allow repo operations.
+// Call at the start of tests that run git in t.TempDir() and restore env in defer.
+func setupGitConfigForCI(t *testing.T) {
+	t.Helper()
+	configDir := t.TempDir()
+	configPath := filepath.Join(configDir, "gitconfig")
+	// safe.directory=* so all temp repos are trusted (avoids "dubious ownership" in CI)
+	require.NoError(t, os.WriteFile(configPath, []byte("[safe]\n  directory = *\n"), 0o600))
+	oldVal := os.Getenv("GIT_CONFIG_GLOBAL")
+	require.NoError(t, os.Setenv("GIT_CONFIG_GLOBAL", configPath))
+	t.Cleanup(func() {
+		if oldVal == "" {
+			_ = os.Unsetenv("GIT_CONFIG_GLOBAL")
+		} else {
+			_ = os.Setenv("GIT_CONFIG_GLOBAL", oldVal)
+		}
+	})
+}
+
 func TestRunLatest(t *testing.T) {
 	t.Run("validates workspace exists", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -1726,6 +1746,7 @@ func TestIsOnTrunkBranch(t *testing.T) {
 
 func TestUpdateTrunkFromRemote(t *testing.T) {
 	t.Run("updates local trunk from remote", func(t *testing.T) {
+		setupGitConfigForCI(t)
 		tmpDir := t.TempDir()
 		addSafeDirectory(t, tmpDir)
 		require.NoError(t, os.Chdir(tmpDir))
@@ -1865,6 +1886,7 @@ func TestProcessRepositoryUpdateOnTrunk_noPopStash(t *testing.T) {
 }
 
 func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
+	setupGitConfigForCI(t)
 	tmpDir := t.TempDir()
 	addSafeDirectory(t, tmpDir)
 	require.NoError(t, os.Chdir(tmpDir))
@@ -1930,6 +1952,7 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 }
 
 func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) {
+	setupGitConfigForCI(t)
 	tmpDir := t.TempDir()
 	addSafeDirectory(t, tmpDir)
 	require.NoError(t, os.Chdir(tmpDir))
