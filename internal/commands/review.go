@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -82,7 +83,9 @@ The command will:
 		}
 
 		noTrunkUpdate, _ := cmd.Flags().GetBool("no-trunk-update")
+		noRebase, _ := cmd.Flags().GetBool("no-rebase")
 		trunkUpdateEnabled := !noTrunkUpdate && (cfg.Review == nil || cfg.Review.UpdateTrunkStatus == nil || *cfg.Review.UpdateTrunkStatus)
+		rebaseEnabled := trunkUpdateEnabled && !noRebase && (cfg.Review == nil || cfg.Review.RebaseAfterTrunkUpdate == nil || *cfg.Review.RebaseAfterTrunkUpdate)
 
 		// Step 5: Update work item status on current branch (move to review)
 		if err := updateWorkItemStatusOnCurrentBranch(cfg, workItemID, statusReview); err != nil {
@@ -103,6 +106,11 @@ The command will:
 				return fmt.Errorf("failed to update trunk status: %w", err)
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Work item moved to review on current branch. Trunk branch status updated.")
+			if rebaseEnabled {
+				if err := performRebase(cfg); err != nil {
+					return fmt.Errorf("failed to rebase onto trunk: %w", err)
+				}
+			}
 		} else {
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Work item moved to review on current branch.")
 		}
@@ -1657,6 +1665,39 @@ func ensureWorkItemOnTrunk(workItemID, featureBranch, repoRoot string) error {
 		if err := copyWorkItemFromFeatureBranch(workItemID, featureBranch, repoRoot); err != nil {
 			return fmt.Errorf("failed to copy work item to trunk: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// performRebase rebases the current branch onto the trunk branch.
+// It is called after trunk status update when rebase is enabled.
+// Returns a clear error with resolution instructions on conflict (exit code 1).
+func performRebase(cfg *config.Config) error {
+	if cfg == nil {
+		return fmt.Errorf("configuration cannot be nil")
+	}
+
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return fmt.Errorf("failed to get repository root: %w", err)
+	}
+
+	trunkBranch, err := determineTrunkBranch(cfg, "", repoRoot, false)
+	if err != nil {
+		return fmt.Errorf("failed to determine trunk branch: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	_, err = executeCommand(ctx, "git", []string{"rebase", trunkBranch}, repoRoot, false)
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return fmt.Errorf("rebase conflicts detected. Resolve conflicts manually, then run 'git rebase --continue' and re-run 'kira review'")
+		}
+		return fmt.Errorf("rebase failed: %w", err)
 	}
 
 	return nil

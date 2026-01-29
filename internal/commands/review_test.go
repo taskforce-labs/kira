@@ -3024,3 +3024,71 @@ func TestUpdateTrunkStatus(t *testing.T) {
 			"error should mention work item not found: %s", err.Error())
 	})
 }
+
+// TestPerformRebase tests the performRebase function.
+func TestPerformRebase(t *testing.T) {
+	t.Run("rebases successfully when no conflicts", func(t *testing.T) {
+		_ = setupTestGitRepo(t, "main")
+
+		require.NoError(t, exec.Command("git", "checkout", "-b", "012-test-feature").Run())
+		require.NoError(t, os.WriteFile("feature.txt", []byte("feature"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "feature.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Feature commit").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			StatusFolders: map[string]string{
+				"doing":  "2_doing",
+				"review": "3_review",
+			},
+		}
+
+		err := performRebase(cfg)
+		require.NoError(t, err)
+
+		currentBranch, err := getCurrentBranch("")
+		require.NoError(t, err)
+		assert.Equal(t, "012-test-feature", currentBranch)
+	})
+
+	t.Run("detects and reports conflicts with clear error message", func(t *testing.T) {
+		_ = setupTestGitRepo(t, "main")
+
+		require.NoError(t, os.WriteFile("conflict.txt", []byte("line1\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "conflict.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Add conflict file").Run())
+
+		require.NoError(t, exec.Command("git", "checkout", "-b", "012-test-feature").Run())
+		require.NoError(t, os.WriteFile("conflict.txt", []byte("line1\nfeature\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "conflict.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Feature change").Run())
+
+		require.NoError(t, exec.Command("git", "checkout", "main").Run())
+		require.NoError(t, os.WriteFile("conflict.txt", []byte("line1\nmain\n"), 0o600))
+		require.NoError(t, exec.Command("git", "add", "conflict.txt").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Main change").Run())
+
+		require.NoError(t, exec.Command("git", "checkout", "012-test-feature").Run())
+
+		cfg := &config.Config{
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+			StatusFolders: map[string]string{
+				"doing":  "2_doing",
+				"review": "3_review",
+			},
+		}
+
+		err := performRebase(cfg)
+		require.Error(t, err)
+		errStr := err.Error()
+		assert.Contains(t, errStr, "rebase conflicts detected", "error should mention conflicts")
+		assert.Contains(t, errStr, "git rebase --continue", "error should mention resolution step")
+		assert.Contains(t, errStr, "kira review", "error should mention re-run command")
+	})
+}
