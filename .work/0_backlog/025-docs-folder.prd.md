@@ -15,10 +15,9 @@ tags: []
 A folder for storing long lived project docs like product definitions, architecture diagrams, ADRs amongst many other useful information. The docs path is **configurable** in `kira.yml`, created by **`kira init`**, and used by kira when **placing documentation artifacts** produced by processes.
 
 ## Context
+Future features will use docs as inputs and outputs to complete specific tasks like agent guided product discovery, agent guided domain discovery, agent guided technical discovery, agent guided roadmap planning, agent guided work item elaboration, and agent guided RALF on work items.
 
-The kira project currently has minimal documentation structure. There is a `docs/security/` folder with `golang-secure-coding.md`; this PRD treats security as a guide (development/best-practice) and places it under the configured docs folder (e.g. `.docs/guides/security/`) so the top-level layout stays simple.
-
-As the project grows, we need a structured place to store:
+To make things easier to manage and discover for humans and agents, the docs folder needs a structured place to store:
 - Architecture Decision Records (ADRs)
 - Product definitions and specifications
 - Architecture diagrams and system designs
@@ -304,6 +303,20 @@ Since agents will be reading and potentially creating documentation:
 - Include examples where helpful
 - Cross-reference related documentation
 - Make navigation intuitive
+
+## Open Questions / Clarifications
+
+Resolve these before or during implementation so the PRD is unambiguous:
+
+1. **Init: one prompt or two?** When both `.work` and the docs folder already exist, should init prompt once (e.g. “workspace already exists: c/o/f” for both) or twice (once for `.work`, once for docs)? Recommendation: one combined prompt so the user chooses once for the whole workspace.
+
+2. **`docs_folder` path shape.** Can the value be a multi-segment path (e.g. `internal/docs` or `content/documentation`) or only a single path segment (e.g. `docs`, `.docs`)? Recommendation: allow any relative path that does not contain `..`; init creates that path and subfolders under it. Document the choice in the Implementation Notes.
+
+3. **Migration: init vs manual.** Should `kira init` automatically migrate an existing `docs/security/` (or other legacy docs) into the configured docs folder (e.g. copy into `.docs/guides/security/`), or is migration a one-time manual/script step for this repo only? Recommendation: init does not auto-migrate; migration is documented as a manual step (or separate task) so init stays simple and predictable.
+
+4. **Existing repos with `docs/`.** If the user already has a top-level `docs/` folder and runs init with default `.docs`, we create `.docs/` and leave `docs/` as-is. Should we document that users can set `docs_folder: docs` in `kira.yml` to adopt their existing folder, and that init with `--fill-missing` will then add only missing subfolders under `docs/`? Recommendation: add one sentence to Integration or Implementation Notes.
+
+5. **No current artifact writers.** There is no kira code today that writes to a docs path; the “use configured path” AC applies to future commands. Implementers should add a shared helper (e.g. `config.DocsRoot(targetDir string) (string, error)`) and use it in init and in any future feature that writes docs.
 
 ## Release Notes
 

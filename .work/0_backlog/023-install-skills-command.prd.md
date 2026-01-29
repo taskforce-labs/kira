@@ -26,14 +26,18 @@ Installs the skills and commands required for kira to leverage cursor agents to 
 
 This command installs Cursor Agent Skills and Commands that extend Cursor's AI agent capabilities to work seamlessly with Kira's workflow. Skills provide domain-specific knowledge and workflows, while commands provide reusable slash-command workflows that can be triggered with `/` prefix in chat.
 
-**Installation Location:** Skills and commands are installed globally in the user's home directory (`~/.cursor/skills/` and `~/.cursor/commands/`) to make them available across all projects. However, **Kira's project-specific configuration controls variations and behavior per project**, allowing different projects to use the same skills with different parameters, templates, or workflows.
+**Kira comes loaded with defaults:** Default skills and commands are bundled with Kira. Running `kira install cursor-skills` (and `kira install cursor-commands`) copies these into Cursor's global directories so they work across all projects. Users can optionally install additional skills/commands from a GitHub repository or local path.
+
+**Installation Location:** Skills and commands are installed globally in the user's home directory (`~/.cursor/skills/` and `~/.cursor/commands/`) to make them available across all projects. **Kira's project-specific configuration controls variations and behavior per project**, allowing different projects to use the same skills with different parameters, templates, or workflows.
 
 The installation process:
 1. Creates the appropriate directory structure in user's home directory (`~/.cursor/skills/` and `~/.cursor/commands/`)
-2. Installs skills from a curated repository or local source
+2. Installs default skills/commands bundled with Kira; optionally installs additional from GitHub or local path
 3. Installs commands as markdown files in `~/.cursor/commands/`
 4. Validates the installation and provides feedback
 5. Skills and commands are designed to read Kira project configuration to adapt behavior per project
+
+When a required skill or command is not present (e.g. another Kira command or workflow needs it), Kira detects the gap, asks the user if they want to install the missing skill(s)/command(s), and runs the install only if the user confirms.
 
 ## Context
 
@@ -121,7 +125,7 @@ Skills are automatically discovered by Cursor from `.cursor/skills/` and made av
 
 1. **Install Skills**
    - Create `.cursor/skills/` directory if it doesn't exist
-   - Install skills from a source (GitHub repository, local path, or bundled with Kira)
+   - Install default skills bundled with Kira; optionally install additional from GitHub repository or local path
    - Each skill should be installed as a folder with `SKILL.md` file
    - Support optional skill directories: `scripts/`, `references/`, `assets/`
    - Validate skill structure (must have `SKILL.md` with valid frontmatter)
@@ -136,7 +140,7 @@ Skills are automatically discovered by Cursor from `.cursor/skills/` and made av
 3. **Source Management**
    - Support installing from GitHub repository (public or private with auth)
    - Support installing from local directory
-   - Support installing bundled skills/commands from Kira installation
+   - Default: install Kira's bundled skills/commands; support installing additional from GitHub or local path
    - Track installed skills/commands and their sources
    - Support uninstalling skills/commands
 
@@ -145,6 +149,11 @@ Skills are automatically discovered by Cursor from `.cursor/skills/` and made av
    - List installed skills/commands
    - Show installation status and any errors
    - Support dry-run mode to preview what would be installed
+
+5. **Missing skills/commands**
+   - When a required skill or command is not present (e.g. a Kira workflow or command depends on it), detect the missing item(s) and prompt the user: offer to install (e.g. "Skill X is not installed. Install now? [y/n]").
+   - If the user confirms, run the appropriate install (`kira install cursor-skills` and/or `kira install cursor-commands`) for the missing items (or all defaults).
+   - Do not assume yes; require explicit user confirmation before installing.
 
 ### Technical Requirements
 
@@ -176,6 +185,7 @@ Skills are automatically discovered by Cursor from `.cursor/skills/` and made av
    - Handle permission errors when creating directories
    - Handle conflicts with existing skills/commands
    - Handle missing or invalid project configuration gracefully
+   - When a required skill or command is missing, prompt the user to install rather than failing silently; offer to run install on confirmation
    - Provide helpful error messages
 
 ## Acceptance Criteria
@@ -194,50 +204,45 @@ Skills are automatically discovered by Cursor from `.cursor/skills/` and made av
 12. ✅ User can list installed skills/commands
 13. ✅ User can uninstall skills/commands
 14. ✅ Skills read project-specific Kira configuration (`.kira/config.yaml`) to adapt behavior per project kira will manage sensible defaults for any config so skills and commands don't need to worry about it.
+15. ✅ When a required skill or command is not present, Kira prompts the user to install it (e.g. "Skill X is not installed. Install now? [y/n]") and runs the install on confirmation; no automatic install without user consent.
 
 ## Implementation Notes
 
 ### Installation Source Strategy
 
-**Option 1: GitHub Repository**
-- Skills and commands stored in a dedicated GitHub repository
-- Repository structure:
-  ```
-  kira-cursor-skills/
-  ├── skills/
-  │   ├── product-discovery/
-  │   │   ├── SKILL.md
-  │   │   └── scripts/
-  │   └── domain-discovery/
-  │       └── SKILL.md
-  └── commands/
-      ├── product-discovery.md
-      └── domain-modelling.md
-  ```
-- Installation clones or downloads from GitHub
-- Supports versioning via tags/branches
+Kira ships with default skills and commands. The install command:
 
-**Option 2: Bundled with Kira**
-- Skills and commands bundled in Kira installation
-- Stored in `kira/assets/cursor-skills/` or similar
-- Copied to `.cursor/` during installation
+- **Default:** Skills and commands bundled with Kira (e.g. in `kira/assets/cursor-skills/` or similar). Running `kira install cursor-skills` / `kira install cursor-commands` copies these into `~/.cursor/skills/` and `~/.cursor/commands/` so Cursor picks them up. Kira comes loaded with these defaults.
+- **Optional:** Install additional skills/commands from a GitHub repository (e.g. `owner/repo` or URL). Supports versioning via tags/branches.
+- **Optional:** Install from a local path (e.g. for development or custom skills).
 
-**Option 3: Hybrid**
-- Default skills/commands bundled with Kira
-- Option to install additional from GitHub
-- Option to install from local path
+Bundled structure (for reference):
+```
+kira/assets/cursor-skills/   (or similar)
+├── skills/
+│   ├── product-discovery/
+│   │   ├── SKILL.md
+│   │   └── scripts/
+│   └── domain-discovery/
+│       └── SKILL.md
+└── commands/
+    ├── product-discovery.md
+    └── domain-modelling.md
+```
 
 ### Command Implementation
 
 The `kira install cursor-skills` and `kira install cursor-commands` commands should:
 
 1. Check if `~/.cursor/` directory exists in user's home directory, create if needed
-2. Determine source (default to bundled, allow override with flag)
-3. Fetch skills/commands from source
+2. Determine source: default to Kira's bundled skills/commands; allow override with flags for GitHub repo or local path
+3. Copy or fetch skills/commands from the chosen source
 4. Validate structure
 5. Install to global directories (`~/.cursor/skills/` and `~/.cursor/commands/`)
 6. Report results
 7. Optionally create or update project `.kira/config.yaml` with default cursor configuration if it doesn't exist
+
+**When a skill or command is not present:** Any Kira command or workflow that depends on a skill or command should check `~/.cursor/skills/` and `~/.cursor/commands/` for required items before proceeding. If something is missing, prompt the user (e.g. "Skill X is not installed. Install now? [y/n]") and run the appropriate install only on confirmation. Do not install automatically without user consent.
 
 ### Skill Structure Example
 
@@ -472,10 +477,10 @@ This design allows:
 
 - Add `kira install cursor-skills` command
 - Add `kira install cursor-commands` command
+- Kira ships with default skills/commands (bundled); install command copies them to `~/.cursor/skills/` and `~/.cursor/commands/`
 - Install skills for: Product Discovery, Domain Discovery, Technical Discovery, Roadmap Planning, Work Item Elaboration, RALF on Work Items
 - Install commands for all workflow phases
-- Support GitHub repository as installation source
-- Support bundled skills/commands installation
+- Optional: install additional skills/commands from GitHub repository or local path
 - Validate skill and command structure
 - Provide installation feedback and error handling
 

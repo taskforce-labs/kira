@@ -67,7 +67,7 @@ Large work items (especially PRDs) often need to be broken down into smaller, ma
      - A unique identifier within the work item (e.g., `T001`, `T002`)
      - A description/title
      - A state: `open` or `done` (two-state toggle only)
-     - Optional: estimate, notes
+     - Optional: notes
    - Slices have:
      - A name/title
      - A list of tasks
@@ -94,7 +94,6 @@ Large work items (especially PRDs) often need to be broken down into smaller, ma
    - `kira slice task edit <work-item-id> <task-id> <new-description>` - Update a task's description
    - To move a task to another slice: remove it and add a new task to the target slice.
    - `kira slice task toggle <work-item-id> <task-id>` - Toggle task state (open ↔ done)
-   - `kira slice task estimate <work-item-id> <task-id> <estimate>` - Set task estimate
    - `kira slice task note <work-item-id> <task-id> <note>` - Add or update task notes
 
    **Viewing Operations:**
@@ -111,7 +110,7 @@ Large work items (especially PRDs) often need to be broken down into smaller, ma
    - `kira slice task next <work-item-id> <slice-name>` - Show the next task in a slice (first open task in order)
    - `kira slice commit <work-item-id> [commit-message]` - Commit slice/task changes:
      - With message: Commit changes with provided message
-     - Without message: Generate commit message based on completed/changed tasks (e.g., "Complete T001, T002: Implement OIDC login and JWT validation")
+     - Without message: Generate commit message from task state changes; if none detected, fall back to the name of the next slice (first with open tasks), or the work item title, or "Update slices for &lt;work-item-id&gt;"
 
    - Commands should:
      - Validate work item exists
@@ -163,7 +162,6 @@ Large work items (especially PRDs) often need to be broken down into smaller, ma
 
 9. **Task Metadata**
    - Tasks can have optional metadata (slices and tasks are not assignable):
-     - Estimate (time or story points)
      - Notes/description
    - Order implies sequence; no explicit dependency metadata. Metadata stored in task description or as YAML frontmatter within task.
 
@@ -187,13 +185,14 @@ Large work items (especially PRDs) often need to be broken down into smaller, ma
         - Or: "Reopen T003: Configure OIDC provider settings"
         - Or: "Add tasks T004-T006: User registration endpoints"
         - Includes task IDs and descriptions in the message
+        - **Fallback when no task changes detected:** Use the name of the next slice (first slice in order with open tasks), or the work item title, or "Update slices for &lt;work-item-id&gt;" so the commit always has a meaningful message
       - Only commits changes to `.work/` directory (slice/task updates)
       - Can be used by LLMs to provide context-aware commit messages
 
 11. **`kira slice lint` and Direct Edit Workflow**
     - `kira slice lint <work-item-id>` - Validates the Slices section and reports errors:
       - **Purpose**: Allow LLM skills to edit the work item markdown directly (add/change slices and tasks in one or few edits) instead of many CLI calls, then validate with lint.
-      - **Checks**: Same rules as Validation (section 12): unique task IDs, valid task states (open/done), no duplicate slice names, estimate format.
+      - **Checks**: Same rules as Validation (section 12): unique task IDs, valid task states (open/done), no duplicate slice names.
       - **Output**: Errors in a format the LLM can read and fix:
         - Human-readable (default): one error per line with file, line (if known), rule, message, and optional suggested fix.
         - Machine-readable: `--output json` emits a JSON array of `{ "location": "file:line or slice/task", "rule": "rule_id", "message": "...", "suggestion": "..." }`.
@@ -209,7 +208,6 @@ Large work items (especially PRDs) often need to be broken down into smaller, ma
     - Validate task IDs are unique within work item
     - Validate task state is open or done only
     - Validate slice names don't conflict
-    - Validate estimate format (if specified)
     - Order is sequential; no dependency validation (order implies sequence)
 
 ### Technical Requirements
@@ -217,7 +215,7 @@ Large work items (especially PRDs) often need to be broken down into smaller, ma
 1. **Command Implementation**
    - Add `kira slice` command with subcommands:
      - **Slice operations**: `add`, `remove` (rename = remove + add new slice)
-     - **Task operations** (nested under `task`): `task add`, `task remove`, `task edit`, `task toggle`, `task estimate`, `task note`, `task next` (move = remove + add to target slice)
+     - **Task operations** (nested under `task`): `task add`, `task remove`, `task edit`, `task toggle`, `task note`, `task next` (move = remove + add to target slice)
      - **Viewing operations**: `show`, `progress`, `next`
      - **Validation**: `lint` (with `--output json` for machine-readable errors)
      - **Workflow helpers**: `commit`
@@ -278,36 +276,35 @@ Large work items (especially PRDs) often need to be broken down into smaller, ma
 5. ✅ `kira slice task edit <work-item-id> <task-id> <new-description>` updates a task's description
 6. ✅ `kira slice task remove <work-item-id> <task-id>` removes task with confirmation
 7. ✅ `kira slice task toggle <work-item-id> <task-id>` toggles task state (open ↔ done) in work item markdown
-8. ✅ `kira slice task estimate <work-item-id> <task-id> <estimate>` sets task estimate
-9. ✅ `kira slice task note <work-item-id> <task-id> <note>` adds or updates task notes
-10. ✅ `kira slice show <work-item-id>` shows all slices and tasks with their state (open/done); single viewing command
-11. ✅ `kira slice show <work-item-id> <slice-name>` shows a specific slice with its tasks
-12. ✅ `kira slice show <work-item-id> <task-id>` shows details for a specific task
-13. ✅ `kira slice progress <work-item-id>` shows progress summary (total, done, open, percentage, per-slice)
-14. ✅ Order of slices and tasks is sequential (order implies work sequence); no explicit dependency tracking
-15. ✅ Task IDs are sequential and never reused (T001, T002, T003...)
-16. ✅ Slices section is properly formatted markdown and human-readable
-17. ✅ Commands preserve all other work item content (only modify Slices section)
-18. ✅ Task state is validated (open or done only)
-19. ✅ Work item markdown includes properly formatted Slices section
-20. ✅ Task IDs can be referenced in git commits and PRs
-21. ✅ Configuration in `kira.yml` controls task ID format and default state
-22. ✅ Commands auto-commit changes (unless `--no-commit` flag)
-23. ✅ Progress tracking shows per-slice and overall progress
-24. ✅ Integration with `kira start` optionally shows slice/task breakdown
-25. ✅ Integration with `kira review` checks if all tasks are done (if configured)
-26. ✅ Work item templates can include empty Slices section
-27. ✅ Task metadata (estimate, notes) is properly stored and displayed; slices and tasks are not assignable; order is sequential
-28. ✅ `kira slice next <work-item-id>` identifies the next slice (first in order with open tasks)
-29. ✅ `kira slice task next <work-item-id> <slice-name>` identifies the next task (first open task in order within slice)
-30. ✅ `kira slice commit <work-item-id> <commit-message>` commits changes with the provided message
-31. ✅ `kira slice commit <work-item-id>` generates a commit message based on task state changes (completed, reopened, added tasks)
-32. ✅ Commit message generation includes task IDs and descriptions in a clear format
-33. ✅ Commit only affects `.work/` directory changes (slice/task updates)
-34. ✅ `kira slice lint <work-item-id>` validates the Slices section and reports errors (unique task IDs, valid state open/done, no duplicate slice names, estimate format)
-35. ✅ Lint output is readable by LLMs (location, rule, message, optional suggestion) and supports `--output json` for machine-readable errors
-36. ✅ Lint exits with 0 when valid and non-zero when there are errors
-37. ✅ LLM skills can create/update slices by editing the work item markdown directly and then run `kira slice lint` to validate; skills/docs describe this direct-edit + lint workflow for bulk creation
+8. ✅ `kira slice task note <work-item-id> <task-id> <note>` adds or updates task notes
+9. ✅ `kira slice show <work-item-id>` shows all slices and tasks with their state (open/done); single viewing command
+10. ✅ `kira slice show <work-item-id> <slice-name>` shows a specific slice with its tasks
+11. ✅ `kira slice show <work-item-id> <task-id>` shows details for a specific task
+12. ✅ `kira slice progress <work-item-id>` shows progress summary (total, done, open, percentage, per-slice)
+13. ✅ Order of slices and tasks is sequential (order implies work sequence); no explicit dependency tracking
+14. ✅ Task IDs are sequential and never reused (T001, T002, T003...)
+15. ✅ Slices section is properly formatted markdown and human-readable
+16. ✅ Commands preserve all other work item content (only modify Slices section)
+17. ✅ Task state is validated (open or done only)
+18. ✅ Work item markdown includes properly formatted Slices section
+19. ✅ Task IDs can be referenced in git commits and PRs
+20. ✅ Configuration in `kira.yml` controls task ID format and default state
+21. ✅ Commands auto-commit changes (unless `--no-commit` flag)
+22. ✅ Progress tracking shows per-slice and overall progress
+23. ✅ Integration with `kira start` optionally shows slice/task breakdown
+24. ✅ Integration with `kira review` checks if all tasks are done (if configured)
+25. ✅ Work item templates can include empty Slices section
+26. ✅ Task metadata (notes) is properly stored and displayed; slices and tasks are not assignable; order is sequential
+27. ✅ `kira slice next <work-item-id>` identifies the next slice (first in order with open tasks)
+28. ✅ `kira slice task next <work-item-id> <slice-name>` identifies the next task (first open task in order within slice)
+29. ✅ `kira slice commit <work-item-id> <commit-message>` commits changes with the provided message
+30. ✅ `kira slice commit <work-item-id>` generates a commit message based on task state changes (completed, reopened, added tasks); when no task changes are detected, falls back to next slice name, work item title, or "Update slices for &lt;work-item-id&gt;"
+31. ✅ Commit message generation includes task IDs and descriptions in a clear format
+32. ✅ Commit only affects `.work/` directory changes (slice/task updates)
+33. ✅ `kira slice lint <work-item-id>` validates the Slices section and reports errors (unique task IDs, valid state open/done, no duplicate slice names)
+34. ✅ Lint output is readable by LLMs (location, rule, message, optional suggestion) and supports `--output json` for machine-readable errors
+35. ✅ Lint exits with 0 when valid and non-zero when there are errors
+36. ✅ LLM skills can create/update slices by editing the work item markdown directly and then run `kira slice lint` to validate; skills/docs describe this direct-edit + lint workflow for bulk creation
 
 ## Implementation Notes
 
@@ -358,7 +355,6 @@ type Task struct {
     ID           string     // T001, T002, etc.
     Description  string
     Done         bool       // true = done, false = open (two-state only)
-    Estimate     string     // Optional
     Notes        string     // Optional
     // Order is sequential; no Dependencies field—order implies sequence
 }
@@ -386,7 +382,7 @@ type Task struct {
 
 ### Authentication
 - [ ] T001: Implement OIDC login flow
-- [x] T002: Add JWT token validation (2h)
+- [x] T002: Add JWT token validation
   - Notes: Completed OIDC configuration for Auth0
 - [ ] T003: Configure OIDC provider settings
 
@@ -412,7 +408,6 @@ kira slice task remove 001 T003
 # Task state and metadata (slices and tasks are not assignable)
 kira slice task toggle 001 T001   # open → done
 kira slice task toggle 001 T002  # done → open (reopen)
-kira slice task estimate 001 T002 "2h"
 kira slice task note 001 T002 "Need to coordinate with backend team"
 
 # Viewing (show = single command; no list; progress kept)
@@ -441,6 +436,7 @@ kira slice commit 001 "Complete T001, T002: Implement OIDC login and JWT validat
 kira slice commit 001
 # Generates and commits with message like:
 # "Complete T001, T002: Implement OIDC login and JWT validation"
+# If no task changes detected, falls back to next slice name (e.g. "Authentication"), work item title, or "Update slices for 001"
 
 
 ### Parsing Strategy
@@ -491,11 +487,12 @@ kira slice commit 001
      - Mixed changes: "Complete T001, T002: Task1 and Task2\nReopen T003: Task3"
    - Include task IDs and descriptions
    - Keep message concise but informative
-   - Commit with generated message
+   - **Fallback when no task changes:** If no task state changes are detected (or generated message would be empty), use in order: (1) the name of the next slice (first slice in order with open tasks), e.g. "Authentication"; (2) the work item title from the file; (3) "Update slices for &lt;work-item-id&gt;". So the commit always has a meaningful message.
+   - Commit with generated or fallback message
 
 3. **Message generation algorithm:**
    ```go
-   func GenerateCommitMessage(changes TaskChanges) string {
+   func GenerateCommitMessage(changes TaskChanges, nextSliceName string, workItemTitle string, workItemID string) string {
        var parts []string
 
        if len(changes.Completed) > 0 {
@@ -508,7 +505,17 @@ kira slice commit 001
            parts = append(parts, formatTasks("Add tasks", changes.Added))
        }
 
-       return strings.Join(parts, "\n")
+       if len(parts) > 0 {
+           return strings.Join(parts, "\n")
+       }
+       // Fallback: slice name, work item title, or generic
+       if nextSliceName != "" {
+           return nextSliceName
+       }
+       if workItemTitle != "" {
+           return workItemTitle
+       }
+       return "Update slices for " + workItemID
    }
    ```
 
@@ -521,7 +528,6 @@ kira slice commit 001
    - Unique task IDs
    - Valid task state (open or done only)
    - No duplicate slice names
-   - Estimate format if present
    - Order is sequential; no dependency validation
 4. For each error, record: `location` (file path, optional line, slice name, task ID), `rule` (e.g. `duplicate-task-id`, `invalid-state`), `message` (human-readable), `suggestion` (optional fix).
 5. Output:
@@ -586,14 +592,14 @@ kira slice commit 001
 
 - Add `kira slice` command with comprehensive subcommands for managing slices and tasks:
   - Slice operations: `add`, `remove` (rename = remove + add new slice)
-  - Task operations (nested): `task add`, `task remove`, `task edit`, `task toggle`, `task estimate`, `task note`, `task next` (move = remove + add to target slice)
+  - Task operations (nested): `task add`, `task remove`, `task edit`, `task toggle`, `task note`, `task next` (move = remove + add to target slice)
   - Viewing operations: `show` (single command for list/detail), `progress`, `next`
   - Validation: `lint` (human-readable and `--output json` for LLM/script consumption)
   - Workflow helpers: `commit` (with automatic commit message generation)
 - Support for organizing tasks into logical slices (groupings)
 - Automatic task ID generation (T001, T002, etc.) with stable identifiers
 - Task state: two-state toggle only (open or done)
-- Task metadata (estimate, notes); slices and tasks are not assignable; order of slices and tasks is sequential
+- Task metadata (notes); slices and tasks are not assignable; order of slices and tasks is sequential
 - Progress tracking with per-slice and overall progress
 - Markdown-formatted Slices section in work items (human-readable and LLM-friendly)
 - Integration with `kira start` to show task breakdown
