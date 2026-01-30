@@ -119,6 +119,21 @@ func logGitDebug(t *testing.T, dir string) {
 	}
 }
 
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	// #nosec G204 - args are fixed in tests
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("git %s failed: %v", strings.Join(args, " "), err)
+		t.Logf("git output:\n%s", strings.TrimSpace(string(output)))
+	}
+	require.NoError(t, err)
+}
+
 func TestRunLatest(t *testing.T) {
 	t.Run("validates workspace exists", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -1821,45 +1836,43 @@ func TestUpdateTrunkFromRemote(t *testing.T) {
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
 
-		require.NoError(t, exec.Command("git", "init").Run())
-		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
-		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		runGit(t, "", "init")
+		runGit(t, "", "config", "user.email", "test@example.com")
+		runGit(t, "", "config", "user.name", "Test User")
 		require.NoError(t, os.WriteFile("a.txt", []byte("a"), 0o600))
-		require.NoError(t, exec.Command("git", "add", "a.txt").Run())
-		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+		runGit(t, "", "add", "a.txt")
+		runGit(t, "", "commit", "-m", "Initial")
 		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
 		_ = exec.Command("git", "branch", "-M", "main").Run()
 
 		remoteDir := t.TempDir()
 		addSafeDirectory(t, remoteDir)
 		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
-		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+		runGit(t, "", "init", "--bare", remoteDir)
 		// #nosec G204 - paths from t.TempDir(), safe for test use
-		require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
-		require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+		runGit(t, "", "remote", "add", "origin", remoteDir)
+		runGit(t, "", "push", "-u", "origin", "main")
 
 		// Add a commit on "remote" by cloning, committing, pushing
 		cloneDir := t.TempDir()
 		addSafeDirectory(t, cloneDir)
 		// #nosec G204 - paths from t.TempDir(), safe for test use
-		cloneCmd := exec.Command("git", "clone", remoteDir, cloneDir)
-		cloneCmd.Dir = filepath.Dir(cloneDir)
-		require.NoError(t, cloneCmd.Run())
+		runGit(t, filepath.Dir(cloneDir), "clone", remoteDir, cloneDir)
 		require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "b.txt"), []byte("b"), 0o600))
 		// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-		require.NoError(t, exec.Command("git", "-C", cloneDir, "add", "b.txt").Run())
+		runGit(t, cloneDir, "add", "b.txt")
 		// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-		require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.email", "test@example.com").Run())
+		runGit(t, cloneDir, "config", "user.email", "test@example.com")
 		// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-		require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.name", "Test User").Run())
+		runGit(t, cloneDir, "config", "user.name", "Test User")
 		// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-		require.NoError(t, exec.Command("git", "-C", cloneDir, "commit", "-m", "Second").Run())
+		runGit(t, cloneDir, "commit", "-m", "Second")
 		// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-		require.NoError(t, exec.Command("git", "-C", cloneDir, "push", "origin", "main").Run())
+		runGit(t, cloneDir, "push", "origin", "main")
 
 		// Back in original repo: fetch so origin/main is ahead
 		// #nosec G204 - tmpDir from t.TempDir(), safe for test use
-		require.NoError(t, exec.Command("git", "-C", tmpDir, "fetch", "origin", "main").Run())
+		runGit(t, tmpDir, "fetch", "origin", "main")
 
 		repo := RepositoryInfo{
 			Name:        "test-repo",
@@ -1969,42 +1982,42 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir("/") }()
 
-	require.NoError(t, exec.Command("git", "init").Run())
-	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
-	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	runGit(t, "", "init")
+	runGit(t, "", "config", "user.email", "test@example.com")
+	runGit(t, "", "config", "user.name", "Test User")
 	require.NoError(t, os.WriteFile("f", []byte("a"), 0o600))
-	require.NoError(t, exec.Command("git", "add", "f").Run())
-	require.NoError(t, exec.Command("git", "commit", "-m", "A").Run())
+	runGit(t, "", "add", "f")
+	runGit(t, "", "commit", "-m", "A")
 	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
 	_ = exec.Command("git", "branch", "-M", "main").Run()
 
 	remoteDir := t.TempDir()
 	// #nosec G204 - remoteDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+	runGit(t, "", "init", "--bare", remoteDir)
 	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
-	require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+	runGit(t, "", "remote", "add", "origin", remoteDir)
+	runGit(t, "", "push", "-u", "origin", "main")
 
 	// Divergent commit on remote (clone, change f, push)
 	cloneDir := t.TempDir()
 	// #nosec G204 - paths from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "clone", remoteDir, cloneDir).Run())
+	runGit(t, "", "clone", remoteDir, cloneDir)
 	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "f"), []byte("b"), 0o600))
 	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "-C", cloneDir, "add", "f").Run())
+	runGit(t, cloneDir, "add", "f")
 	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.email", "test@example.com").Run())
+	runGit(t, cloneDir, "config", "user.email", "test@example.com")
 	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.name", "Test User").Run())
+	runGit(t, cloneDir, "config", "user.name", "Test User")
 	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "-C", cloneDir, "commit", "-m", "B").Run())
+	runGit(t, cloneDir, "commit", "-m", "B")
 	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "-C", cloneDir, "push", "origin", "main").Run())
+	runGit(t, cloneDir, "push", "origin", "main")
 
 	// Local divergent commit (change f to c) so rebase will conflict
 	require.NoError(t, os.WriteFile("f", []byte("c"), 0o600))
-	require.NoError(t, exec.Command("git", "add", "f").Run())
-	require.NoError(t, exec.Command("git", "commit", "-m", "C").Run())
+	runGit(t, "", "add", "f")
+	runGit(t, "", "commit", "-m", "C")
 
 	// Uncommitted file so we get a stash
 	require.NoError(t, os.WriteFile("g", []byte("g"), 0o600))
@@ -2040,44 +2053,44 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir("/") }()
 
-	require.NoError(t, exec.Command("git", "init").Run())
-	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
-	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	runGit(t, "", "init")
+	runGit(t, "", "config", "user.email", "test@example.com")
+	runGit(t, "", "config", "user.name", "Test User")
 	require.NoError(t, os.WriteFile("f", []byte("a"), 0o600))
-	require.NoError(t, exec.Command("git", "add", "f").Run())
-	require.NoError(t, exec.Command("git", "commit", "-m", "A").Run())
+	runGit(t, "", "add", "f")
+	runGit(t, "", "commit", "-m", "A")
 	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
 	_ = exec.Command("git", "branch", "-M", "main").Run()
 
 	remoteDir := t.TempDir()
 	addSafeDirectory(t, remoteDir)
 	// #nosec G204 - remoteDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
+	runGit(t, "", "init", "--bare", remoteDir)
 	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
-	require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
+	runGit(t, "", "remote", "add", "origin", remoteDir)
+	runGit(t, "", "push", "-u", "origin", "main")
 
 	// Divergent commit on remote
 	cloneDir := t.TempDir()
 	addSafeDirectory(t, cloneDir)
 	// #nosec G204 - paths from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "clone", remoteDir, cloneDir).Run())
+	runGit(t, "", "clone", remoteDir, cloneDir)
 	require.NoError(t, os.WriteFile(filepath.Join(cloneDir, "f"), []byte("b"), 0o600))
 	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "-C", cloneDir, "add", "f").Run())
+	runGit(t, cloneDir, "add", "f")
 	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.email", "test@example.com").Run())
+	runGit(t, cloneDir, "config", "user.email", "test@example.com")
 	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "-C", cloneDir, "config", "user.name", "Test User").Run())
+	runGit(t, cloneDir, "config", "user.name", "Test User")
 	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "-C", cloneDir, "commit", "-m", "B").Run())
+	runGit(t, cloneDir, "commit", "-m", "B")
 	// #nosec G204 - cloneDir from t.TempDir(), safe for test use
-	require.NoError(t, exec.Command("git", "-C", cloneDir, "push", "origin", "main").Run())
+	runGit(t, cloneDir, "push", "origin", "main")
 
 	// Local divergent commit so rebase will conflict
 	require.NoError(t, os.WriteFile("f", []byte("c"), 0o600))
-	require.NoError(t, exec.Command("git", "add", "f").Run())
-	require.NoError(t, exec.Command("git", "commit", "-m", "C").Run())
+	runGit(t, "", "add", "f")
+	runGit(t, "", "commit", "-m", "C")
 
 	require.NoError(t, os.WriteFile("g", []byte("g"), 0o600))
 
