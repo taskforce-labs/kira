@@ -1,7 +1,7 @@
 ---
 id: 012
 title: submit for review
-status: review
+status: backlog
 kind: prd
 assigned:
 estimate: 3 days
