@@ -78,6 +78,7 @@ func logGitDebug(t *testing.T, dir string) {
 	header := fmt.Sprintf("GIT DEBUG (dir=%s)", dir)
 	t.Log(header)
 	fmt.Fprintln(os.Stderr, header)
+	_ = os.Stderr.Sync()
 
 	envLine := fmt.Sprintf(
 		"env GITHUB_ACTIONS=%q GIT_CONFIG_GLOBAL=%q HOME=%q XDG_CONFIG_HOME=%q",
@@ -88,6 +89,7 @@ func logGitDebug(t *testing.T, dir string) {
 	)
 	t.Log(envLine)
 	fmt.Fprintln(os.Stderr, envLine)
+	_ = os.Stderr.Sync()
 
 	commands := [][]string{
 		{"git", "--version"},
@@ -103,14 +105,17 @@ func logGitDebug(t *testing.T, dir string) {
 		output, err := cmd.CombinedOutput()
 		t.Log(cmdLine)
 		fmt.Fprintln(os.Stderr, cmdLine)
+		_ = os.Stderr.Sync()
 		if err != nil {
 			errLine := fmt.Sprintf("git err: %v", err)
 			t.Log(errLine)
 			fmt.Fprintln(os.Stderr, errLine)
+			_ = os.Stderr.Sync()
 		}
 		outLine := fmt.Sprintf("git out:\n%s", strings.TrimSpace(string(output)))
 		t.Log(outLine)
 		fmt.Fprintln(os.Stderr, outLine)
+		_ = os.Stderr.Sync()
 	}
 }
 
@@ -1808,6 +1813,11 @@ func TestUpdateTrunkFromRemote(t *testing.T) {
 		setupGitConfigForCISerial(t)
 		tmpDir := t.TempDir()
 		addSafeDirectory(t, tmpDir)
+		t.Cleanup(func() {
+			if t.Failed() {
+				logGitDebug(t, tmpDir)
+			}
+		})
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
 
@@ -1859,7 +1869,6 @@ func TestUpdateTrunkFromRemote(t *testing.T) {
 		}
 		err := updateTrunkFromRemote(repo)
 		if err != nil {
-			logGitDebug(t, tmpDir)
 			t.Logf("updateTrunkFromRemote full error: %v", err)
 		}
 		require.NoErrorf(t, err, "updateTrunkFromRemote: %v", err)
@@ -1952,6 +1961,11 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	setupGitConfigForCISerial(t)
 	tmpDir := t.TempDir()
 	addSafeDirectory(t, tmpDir)
+	t.Cleanup(func() {
+		if t.Failed() {
+			logGitDebug(t, tmpDir)
+		}
+	})
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir("/") }()
 
@@ -1999,9 +2013,6 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	var mu sync.Mutex
 	result := processRepositoryUpdate(repo, false, false, &mu) // abortOnConflict=false
 
-	if result.Error != nil {
-		logGitDebug(t, tmpDir)
-	}
 	require.Error(t, result.Error, "expected rebase conflict")
 	assert.True(t, result.HadStash)
 	assert.False(t, result.StashPopped)
@@ -2009,9 +2020,6 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	// Stash should still contain one entry
 	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
 	stashOut, err := exec.Command("git", "-C", tmpDir, "stash", "list").Output()
-	if err != nil {
-		logGitDebug(t, tmpDir)
-	}
 	require.NoErrorf(t, err, "git stash list: %v", err)
 	assert.Contains(t, string(stashOut), "kira latest")
 	// Rebase should be in progress
@@ -2024,6 +2032,11 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	setupGitConfigForCISerial(t)
 	tmpDir := t.TempDir()
 	addSafeDirectory(t, tmpDir)
+	t.Cleanup(func() {
+		if t.Failed() {
+			logGitDebug(t, tmpDir)
+		}
+	})
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir("/") }()
 
@@ -2072,9 +2085,6 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	var mu sync.Mutex
 	result := processRepositoryUpdate(repo, true, false, &mu) // abortOnConflict=true
 
-	if result.Error != nil {
-		logGitDebug(t, tmpDir)
-	}
 	require.Error(t, result.Error, "expected rebase conflict")
 	assert.True(t, result.HadStash)
 	assert.True(t, result.RebaseAborted)
@@ -2082,9 +2092,6 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	// No rebase in progress
 	// #nosec G304 - path under tmpDir from t.TempDir(), safe for test use
 	_, err := os.Stat(filepath.Join(tmpDir, ".git", "rebase-merge"))
-	if err != nil && !os.IsNotExist(err) {
-		logGitDebug(t, tmpDir)
-	}
 	require.True(t, os.IsNotExist(err))
 	// Uncommitted file restored from stash
 	// #nosec G304 - path under tmpDir from t.TempDir(), safe for test use
