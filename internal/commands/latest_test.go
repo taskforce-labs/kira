@@ -1850,6 +1850,8 @@ func TestUpdateTrunkFromRemote(t *testing.T) {
 		// #nosec G204 - paths from t.TempDir(), safe for test use
 		runGit(t, "", "remote", "add", "origin", remoteDir)
 		runGit(t, "", "push", "-u", "origin", "main")
+		// Ensure the bare repo HEAD points at main so clones check out main.
+		runGit(t, remoteDir, "symbolic-ref", "HEAD", "refs/heads/main")
 
 		// Add a commit on "remote" by cloning, committing, pushing
 		cloneDir := t.TempDir()
@@ -1993,6 +1995,8 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
 	runGit(t, "", "remote", "add", "origin", remoteDir)
 	runGit(t, "", "push", "-u", "origin", "main")
+	// Ensure the bare repo HEAD points at main so clones check out main.
+	runGit(t, remoteDir, "symbolic-ref", "HEAD", "refs/heads/main")
 
 	// Divergent commit on remote (clone, change f, push)
 	cloneDir := t.TempDir()
@@ -2063,6 +2067,8 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
 	runGit(t, "", "remote", "add", "origin", remoteDir)
 	runGit(t, "", "push", "-u", "origin", "main")
+	// Ensure the bare repo HEAD points at main so clones check out main.
+	runGit(t, remoteDir, "symbolic-ref", "HEAD", "refs/heads/main")
 
 	// Divergent commit on remote
 	cloneDir := t.TempDir()
