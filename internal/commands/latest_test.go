@@ -1836,14 +1836,12 @@ func TestUpdateTrunkFromRemote(t *testing.T) {
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
 
-		runGit(t, "", "init")
+		runGit(t, "", "init", "-b", "main")
 		runGit(t, "", "config", "user.email", "test@example.com")
 		runGit(t, "", "config", "user.name", "Test User")
 		require.NoError(t, os.WriteFile("a.txt", []byte("a"), 0o600))
 		runGit(t, "", "add", "a.txt")
 		runGit(t, "", "commit", "-m", "Initial")
-		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
-		_ = exec.Command("git", "branch", "-M", "main").Run()
 
 		remoteDir := t.TempDir()
 		addSafeDirectory(t, remoteDir)
@@ -1982,14 +1980,12 @@ func TestProcessRepositoryUpdateOnTrunk_conflict_doesNotPopStash(t *testing.T) {
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir("/") }()
 
-	runGit(t, "", "init")
+	runGit(t, "", "init", "-b", "main")
 	runGit(t, "", "config", "user.email", "test@example.com")
 	runGit(t, "", "config", "user.name", "Test User")
 	require.NoError(t, os.WriteFile("f", []byte("a"), 0o600))
 	runGit(t, "", "add", "f")
 	runGit(t, "", "commit", "-m", "A")
-	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
-	_ = exec.Command("git", "branch", "-M", "main").Run()
 
 	remoteDir := t.TempDir()
 	// #nosec G204 - remoteDir from t.TempDir(), safe for test use
@@ -2053,14 +2049,12 @@ func TestProcessRepositoryUpdateOnTrunk_abortOnConflict_popsStash(t *testing.T) 
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() { _ = os.Chdir("/") }()
 
-	runGit(t, "", "init")
+	runGit(t, "", "init", "-b", "main")
 	runGit(t, "", "config", "user.email", "test@example.com")
 	runGit(t, "", "config", "user.name", "Test User")
 	require.NoError(t, os.WriteFile("f", []byte("a"), 0o600))
 	runGit(t, "", "add", "f")
 	runGit(t, "", "commit", "-m", "A")
-	// #nosec G204 - tmpDir from t.TempDir(), safe for test use
-	_ = exec.Command("git", "branch", "-M", "main").Run()
 
 	remoteDir := t.TempDir()
 	addSafeDirectory(t, remoteDir)
