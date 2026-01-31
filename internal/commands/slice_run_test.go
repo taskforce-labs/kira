@@ -284,6 +284,30 @@ status: doing
 	})
 }
 
+func TestPrintSliceSummaryIfPresent(t *testing.T) {
+	t.Run("does not print when no Slices section", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		// Minimal work item without ## Slices (avoids goconst duplicate string)
+		noSlicesContent := "---\nid: 099\nstatus: doing\n---\n# Test\n## Requirements\n"
+		require.NoError(t, os.WriteFile(sliceTestWorkItemPath, []byte(noSlicesContent), 0o600))
+		cfg, _ := config.LoadConfig()
+		PrintSliceSummaryIfPresent(sliceTestWorkItemPath, cfg)
+	})
+	t.Run("prints when Slices section present", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		withSlices := "---\nid: 099\nstatus: doing\n---\n# Test\n## Slices\n### S1\n- [ ] T001: A\n- [x] T002: B\n"
+		require.NoError(t, os.WriteFile(sliceTestWorkItemPath, []byte(withSlices), 0o600))
+		cfg, _ := config.LoadConfig()
+		PrintSliceSummaryIfPresent(sliceTestWorkItemPath, cfg)
+	})
+}
+
 func TestSliceAddAndShow(t *testing.T) {
 	t.Run("slice add then show", func(t *testing.T) {
 		tmpDir := t.TempDir()

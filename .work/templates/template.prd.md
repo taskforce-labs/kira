@@ -20,6 +20,8 @@ tags: <!--input-strings[frontend,backend,database,api,ui,security]:tags:"Tags"--
 
 ## Acceptance Criteria
 
+## Slices
+
 ## Implementation Notes
 
 ## Release Notes
