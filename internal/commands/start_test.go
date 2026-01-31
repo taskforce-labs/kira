@@ -731,6 +731,82 @@ func TestPushBranch(t *testing.T) {
 	})
 }
 
+func TestPushBranchesForDraftPR_returnsErrorWhenTokenUnset(t *testing.T) {
+	tmpDir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "remote", "add", "origin", "https://github.com/owner/repo.git")
+	cmd.Dir = tmpDir
+	require.NoError(t, cmd.Run())
+
+	ctx := &StartContext{
+		Behavior:     WorkspaceBehaviorStandalone,
+		WorktreeRoot: tmpDir,
+		BranchName:   "001",
+		Config:       &config.Config{},
+		Metadata:     workItemMetadata{id: "001", title: "Test"},
+		Flags:        StartFlags{NoDraftPR: false},
+	}
+	saved := os.Getenv("KIRA_GITHUB_TOKEN")
+	require.NoError(t, os.Unsetenv("KIRA_GITHUB_TOKEN"))
+	defer func() {
+		if saved != "" {
+			_ = os.Setenv("KIRA_GITHUB_TOKEN", saved)
+		} else {
+			_ = os.Unsetenv("KIRA_GITHUB_TOKEN")
+		}
+	}()
+
+	err := pushBranchesForDraftPR(ctx, tmpDir, "main")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "KIRA_GITHUB_TOKEN is not set")
+	assert.Contains(t, err.Error(), "--no-draft-pr")
+}
+
+func TestWouldCreateDraftPRForAnyTarget_returnsFalseWhenDraftPRDisabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "remote", "add", "origin", "https://github.com/owner/repo.git")
+	cmd.Dir = tmpDir
+	require.NoError(t, cmd.Run())
+
+	draftPRFalse := false
+	ctx := &StartContext{
+		Behavior:     WorkspaceBehaviorStandalone,
+		WorktreeRoot: tmpDir,
+		BranchName:   "001",
+		Config: &config.Config{
+			Workspace: &config.WorkspaceConfig{DraftPR: &draftPRFalse},
+		},
+		Metadata: workItemMetadata{id: "001", title: "Test"},
+		Flags:    StartFlags{NoDraftPR: false},
+	}
+	assert.False(t, wouldCreateDraftPRForAnyTarget(ctx, tmpDir))
+}
+
+func TestWouldCreateDraftPRForAnyTarget_returnsFalseWhenNonGitHubRemote(t *testing.T) {
+	tmpDir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "remote", "add", "origin", "https://gitlab.com/owner/repo.git")
+	cmd.Dir = tmpDir
+	require.NoError(t, cmd.Run())
+
+	ctx := &StartContext{
+		Behavior:     WorkspaceBehaviorStandalone,
+		WorktreeRoot: tmpDir,
+		BranchName:   "001",
+		Config:       &config.Config{},
+		Metadata:     workItemMetadata{id: "001", title: "Test"},
+		Flags:        StartFlags{NoDraftPR: false},
+	}
+	assert.False(t, wouldCreateDraftPRForAnyTarget(ctx, tmpDir))
+}
+
 func TestResolveRemoteName(t *testing.T) {
 	t.Run("returns origin when no config", func(t *testing.T) {
 		cfg := &config.Config{}
