@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1004,6 +1005,67 @@ func checkRemoteExists(remoteName, dir string, dryRun bool) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// getRemoteURL returns the URL of the given remote in the repository at dir.
+func getRemoteURL(remoteName, dir string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	output, err := executeCommand(ctx, "git", []string{"remote", "get-url", remoteName}, dir, false)
+	if err != nil {
+		return "", fmt.Errorf("failed to get remote URL: %w", err)
+	}
+
+	return strings.TrimSpace(output), nil
+}
+
+// isGitHubRemote returns true if remoteURL is a GitHub or GitHub Enterprise URL.
+// baseURL is the optional workspace git_base_url (e.g. https://github.example.com); empty means github.com.
+func isGitHubRemote(remoteURL, baseURL string) bool {
+	if remoteURL == "" {
+		return false
+	}
+
+	// Handle git@host:path format
+	if strings.HasPrefix(remoteURL, "git@") {
+		rest := strings.TrimPrefix(remoteURL, "git@")
+		idx := strings.Index(rest, ":")
+		if idx == -1 {
+			return false
+		}
+		host := rest[:idx]
+		if host == "github.com" {
+			return true
+		}
+		if baseURL != "" {
+			u, err := url.Parse(baseURL)
+			if err != nil {
+				return false
+			}
+			return u.Host == host
+		}
+		return false
+	}
+
+	// Handle https:// or similar
+	u, err := url.Parse(remoteURL)
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSuffix(u.Host, ":443")
+	if host == "github.com" {
+		return true
+	}
+	if baseURL != "" {
+		base, err := url.Parse(baseURL)
+		if err != nil {
+			return false
+		}
+		baseHost := strings.TrimSuffix(base.Host, ":443")
+		return baseHost == host
+	}
+	return false
 }
 
 // checkUncommittedChanges checks if there are uncommitted changes in the repository
