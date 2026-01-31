@@ -125,6 +125,38 @@ start:
 	})
 }
 
+func TestSlicesConfigDefaults(t *testing.T) {
+	t.Run("applies default slices config when not specified", func(t *testing.T) {
+		_ = os.Remove("kira.yml")
+		_ = os.Remove(".work/kira.yml")
+
+		cfg, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Slices)
+		assert.Equal(t, "T%03d", cfg.Slices.TaskIDFormat)
+		assert.Equal(t, "open", cfg.Slices.DefaultState)
+		assert.False(t, cfg.Slices.AutoUpdateStatus)
+	})
+
+	t.Run("preserves custom slices config", func(t *testing.T) {
+		testConfig := `version: "1.0"
+slices:
+  auto_update_status: true
+  task_id_format: "T%04d"
+  default_state: "done"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		cfg, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Slices)
+		assert.True(t, cfg.Slices.AutoUpdateStatus)
+		assert.Equal(t, "T%04d", cfg.Slices.TaskIDFormat)
+		assert.Equal(t, "done", cfg.Slices.DefaultState)
+	})
+}
+
 func TestStartConfigValidation(t *testing.T) {
 	t.Run("rejects invalid move_to status", func(t *testing.T) {
 		testConfig := `version: "1.0"

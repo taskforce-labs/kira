@@ -28,8 +28,16 @@ type Config struct {
 	Workspace     *WorkspaceConfig       `yaml:"workspace"`
 	Users         UsersConfig            `yaml:"users"`
 	Fields        map[string]FieldConfig `yaml:"fields"`
+	Slices        *SlicesConfig          `yaml:"slices"`
 	// ConfigDir is the absolute path to the directory containing kira.yml (set at load time; not persisted).
 	ConfigDir string `yaml:"-"`
+}
+
+// SlicesConfig contains settings for slices and tasks in work items.
+type SlicesConfig struct {
+	AutoUpdateStatus bool   `yaml:"auto_update_status"` // default: false
+	TaskIDFormat     string `yaml:"task_id_format"`     // default: "T%03d"
+	DefaultState     string `yaml:"default_state"`      // default: "open" (only open or done)
 }
 
 // GitConfig contains git-related settings.
@@ -597,7 +605,21 @@ func mergeWithDefaults(config *Config) {
 	mergeStartDefaults(config)
 	mergeWorkspaceDefaults(config)
 	mergeUsersDefaults(config)
+	mergeSlicesDefaults(config)
 	mergeFieldDefaults(config)
+}
+
+func mergeSlicesDefaults(config *Config) {
+	if config.Slices == nil {
+		config.Slices = &SlicesConfig{}
+	}
+	if config.Slices.TaskIDFormat == "" {
+		config.Slices.TaskIDFormat = "T%03d"
+	}
+	if config.Slices.DefaultState == "" {
+		config.Slices.DefaultState = "open"
+	}
+	// AutoUpdateStatus defaults to false (zero value)
 }
 
 func mergeFieldDefaults(config *Config) {

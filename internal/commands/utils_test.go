@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,81 @@ func TestFindWorkItemFile(t *testing.T) {
 		_, err = findWorkItemFile("999", cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "work item with ID 999 not found")
+	})
+}
+
+func TestResolveSliceWorkItem(t *testing.T) {
+	workItemContentDoing := `---
+id: 001
+title: Test Feature
+status: doing
+kind: prd
+---
+# Test
+`
+	t.Run("resolves by work item ID when provided", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(".work/1_todo/001-test.prd.md", []byte(testWorkItemContent), 0o600))
+
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		path, err := resolveSliceWorkItem("001", cfg)
+		require.NoError(t, err)
+		assert.Equal(t, ".work/1_todo/001-test.prd.md", path)
+	})
+
+	t.Run("returns error when no work item in doing folder", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		_, err = resolveSliceWorkItem("", cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no work item in doing folder")
+	})
+
+	t.Run("returns path when exactly one work item in doing folder", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/001-test.prd.md", []byte(workItemContentDoing), 0o600))
+
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		path, err := resolveSliceWorkItem("", cfg)
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(".work", "2_doing", "001-test.prd.md"), path)
+	})
+
+	t.Run("returns error when multiple work items in doing folder", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/001-a.prd.md", []byte(workItemContentDoing), 0o600))
+		content2 := strings.Replace(workItemContentDoing, "id: 001", "id: 002", 1)
+		require.NoError(t, os.WriteFile(".work/2_doing/002-b.prd.md", []byte(content2), 0o600))
+
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		_, err = resolveSliceWorkItem("", cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "multiple work items in doing folder")
 	})
 }
 
