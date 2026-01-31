@@ -297,6 +297,13 @@ func createWorktreesAndFinalize(ctx *StartContext, trunkBranch string) error {
 		return err
 	}
 
+	// Push branch for draft PR (GitHub remotes) when not skipped
+	if !ctx.Flags.DryRun && !shouldSkipDraftPR(ctx.Flags) {
+		if err := pushBranchesForDraftPR(ctx, worktreePath); err != nil {
+			return err
+		}
+	}
+
 	displayPath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
 	fmt.Printf("\nSuccessfully started work on %s\n", ctx.WorkItemID)
 	fmt.Printf("  Worktree: %s\n", displayPath)
@@ -2134,6 +2141,104 @@ func pushStatusChange(dir, remoteName, branchName string) error {
 		return err
 	}
 
+	return nil
+}
+
+// pushBranch pushes the branch to the remote from the given directory.
+// On failure returns an error with a clear message suggesting network, remote access, or authentication.
+func pushBranch(remoteName, branchName, dir string, dryRun bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	_, err := executeCommand(ctx, "git", []string{"push", remoteName, branchName}, dir, dryRun)
+	if err != nil {
+		return fmt.Errorf("failed to push branch %s to %s: %w. Check network connectivity, remote repository access, or authentication (e.g. KIRA_GITHUB_TOKEN)", branchName, remoteName, err)
+	}
+
+	return nil
+}
+
+// pushBranchesForDraftPR pushes the branch to GitHub remotes for repos where draft PR is desired.
+func pushBranchesForDraftPR(ctx *StartContext, worktreePath string) error {
+	baseURL := ""
+	if ctx.Config.Workspace != nil {
+		baseURL = ctx.Config.Workspace.GitBaseURL
+	}
+	if ctx.Behavior == WorkspaceBehaviorPolyrepo {
+		return pushBranchesPolyrepo(ctx, baseURL)
+	}
+	return pushBranchStandalone(ctx, worktreePath, baseURL)
+}
+
+func pushBranchStandalone(ctx *StartContext, worktreePath, baseURL string) error {
+	remoteName := resolveRemoteName(ctx.Config, nil)
+	remoteURL, err := getRemoteURL(remoteName, worktreePath)
+	if err != nil || !isGitHubRemote(remoteURL, baseURL) || !shouldCreateDraftPR(ctx, "", nil) {
+		return nil
+	}
+	if err := pushBranch(remoteName, ctx.BranchName, worktreePath, false); err != nil {
+		return err
+	}
+	fmt.Printf("Pushed branch %s to %s\n", ctx.BranchName, remoteName)
+	return nil
+}
+
+func pushBranchesPolyrepo(ctx *StartContext, baseURL string) error {
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return fmt.Errorf("failed to get repository root: %w", err)
+	}
+	projects, err := resolvePolyrepoProjects(ctx.Config, repoRoot)
+	if err != nil {
+		return err
+	}
+	baseWorktreePath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
+	mainWorktreePath := filepath.Join(baseWorktreePath, "main")
+	worktreePaths := buildPolyrepoWorktreePaths(projects, baseWorktreePath, mainWorktreePath)
+
+	remoteName := resolveRemoteName(ctx.Config, nil)
+	mainRemoteURL, err := getRemoteURL(remoteName, mainWorktreePath)
+	if err == nil && isGitHubRemote(mainRemoteURL, baseURL) && shouldCreateDraftPR(ctx, "", nil) {
+		if err := pushBranch(remoteName, ctx.BranchName, mainWorktreePath, false); err != nil {
+			return err
+		}
+		fmt.Printf("Pushed branch %s to %s (main)\n", ctx.BranchName, remoteName)
+	}
+
+	for _, p := range projects {
+		if err := pushProjectBranchIfNeeded(ctx, p, worktreePaths, baseURL); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func pushProjectBranchIfNeeded(ctx *StartContext, p PolyrepoProject, worktreePaths map[string]string, baseURL string) error {
+	if p.Path == "" {
+		return nil
+	}
+	wp, ok := worktreePaths[p.Name]
+	if !ok {
+		return nil
+	}
+	remoteURL, err := getRemoteURL(p.Remote, p.Path)
+	if err != nil || !isGitHubRemote(remoteURL, baseURL) {
+		return nil
+	}
+	var projConfig *config.ProjectConfig
+	for i := range ctx.Config.Workspace.Projects {
+		if ctx.Config.Workspace.Projects[i].Name == p.Name {
+			projConfig = &ctx.Config.Workspace.Projects[i]
+			break
+		}
+	}
+	if !shouldCreateDraftPR(ctx, p.Name, projConfig) {
+		return nil
+	}
+	if err := pushBranch(p.Remote, ctx.BranchName, wp, false); err != nil {
+		return err
+	}
+	fmt.Printf("Pushed branch %s to %s (%s)\n", ctx.BranchName, p.Remote, p.Name)
 	return nil
 }
 

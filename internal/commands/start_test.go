@@ -699,6 +699,38 @@ func TestGetRemoteURL(t *testing.T) {
 	})
 }
 
+func TestPushBranch(t *testing.T) {
+	t.Run("dry run does not execute push", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		// pushBranch with dryRun true should not fail (no actual push)
+		err := pushBranch("origin", "main", tmpDir, true)
+		assert.NoError(t, err)
+	})
+
+	t.Run("push from non-existent remote returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		// Create a branch so we have something to push
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		cmd = exec.Command("git", "add", "f")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+
+		err := pushBranch("origin", "main", tmpDir, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to push branch")
+		assert.Contains(t, err.Error(), "KIRA_GITHUB_TOKEN")
+	})
+}
+
 func TestResolveRemoteName(t *testing.T) {
 	t.Run("returns origin when no config", func(t *testing.T) {
 		cfg := &config.Config{}
