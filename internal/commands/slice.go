@@ -166,4 +166,6 @@ func init() {
 	sliceTaskNoteCmd.Flags().Bool("no-commit", false, "Do not commit changes")
 	sliceTaskCurrentCmd.Flags().Bool("no-commit", false, "Do not commit when used with toggle")
 	sliceLintCmd.Flags().String("output", "", "Output format: json")
+	sliceCurrentCmd.Flags().String("output", "", "Output format: json")
+	sliceTaskCurrentCmd.Flags().String("output", "", "Output format: json")
 }

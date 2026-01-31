@@ -544,7 +544,30 @@ func firstOpenTaskInSlice(s *Slice) *Task {
 	return nil
 }
 
-func runSliceCurrent(_ *cobra.Command, args []string) error {
+// SliceCurrentJSON is the JSON output for slice current --output json.
+type SliceCurrentJSON struct {
+	WorkItemID    string        `json:"work_item_id"`
+	Slice         string        `json:"slice"`
+	OpenTaskCount int           `json:"open_task_count"`
+	OpenTasks     []TaskRefJSON `json:"open_tasks"`
+}
+
+// TaskRefJSON is a task reference for JSON output.
+type TaskRefJSON struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+
+// TaskCurrentJSON is the JSON output for slice task current --output json.
+type TaskCurrentJSON struct {
+	WorkItemID  string `json:"work_item_id"`
+	Slice       string `json:"slice"`
+	TaskID      string `json:"task_id"`
+	Description string `json:"description"`
+	Notes       string `json:"notes"`
+}
+
+func runSliceCurrent(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -560,14 +583,43 @@ func runSliceCurrent(_ *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	id := workItemIDFromPath(path, cfg)
+	if id == "" {
+		id = workItemID
+	}
 	_, slices, err := loadSlicesFromFile(path, cfg)
 	if err != nil {
 		return err
 	}
 	cur := firstSliceWithOpenTasks(slices)
+	outputFormat, _ := cmd.Flags().GetString("output")
+	if outputFormat == sliceLintOutputJSON {
+		return outputSliceCurrentJSON(id, cur)
+	}
+	printSliceCurrentHuman(cur)
+	return nil
+}
+
+func outputSliceCurrentJSON(workItemID string, cur *Slice) error {
+	out := SliceCurrentJSON{WorkItemID: workItemID}
+	if cur != nil {
+		out.Slice = cur.Name
+		for _, t := range cur.Tasks {
+			if !t.Done {
+				out.OpenTaskCount++
+				out.OpenTasks = append(out.OpenTasks, TaskRefJSON{ID: t.ID, Description: t.Description})
+			}
+		}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+func printSliceCurrentHuman(cur *Slice) {
 	if cur == nil {
 		fmt.Println("Current slice: (none - all tasks done)")
-		return nil
+		return
 	}
 	openCount := 0
 	for _, t := range cur.Tasks {
@@ -581,7 +633,6 @@ func runSliceCurrent(_ *cobra.Command, args []string) error {
 			fmt.Printf("  - %s: %s\n", t.ID, t.Description)
 		}
 	}
-	return nil
 }
 
 func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
@@ -607,6 +658,10 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	id := workItemIDFromPath(path, cfg)
+	if id == "" {
+		id = workItemID
+	}
 	_, slices, err := loadSlicesFromFile(path, cfg)
 	if err != nil {
 		return err
@@ -626,6 +681,19 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 	t := firstOpenTaskInSlice(s)
 	if t == nil {
 		return fmt.Errorf("no open tasks in slice %q", s.Name)
+	}
+	outputFormat, _ := cmd.Flags().GetString("output")
+	if outputFormat == sliceLintOutputJSON {
+		out := TaskCurrentJSON{
+			WorkItemID:  id,
+			Slice:       s.Name,
+			TaskID:      t.ID,
+			Description: t.Description,
+			Notes:       t.Notes,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
 	}
 	fmt.Printf("Current task: %s - %s\n", t.ID, t.Description)
 	if t.Notes != "" {
