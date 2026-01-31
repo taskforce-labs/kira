@@ -92,6 +92,7 @@ type StartFlags struct {
 	SkipStatusCheck bool
 	ReuseBranch     bool
 	NoIDE           bool
+	NoDraftPR       bool
 	IDECommand      string
 	TrunkBranch     string
 	StatusAction    string
@@ -139,6 +140,7 @@ func init() {
 	startCmd.Flags().Bool("skip-status-check", false, "Skip status validation (allow starting work item already in target status)")
 	startCmd.Flags().Bool("reuse-branch", false, "Checkout existing branch in new worktree if branch exists")
 	startCmd.Flags().Bool("no-ide", false, "Skip IDE opening (useful for agents)")
+	startCmd.Flags().Bool("no-draft-pr", false, "Skip pushing branch and creating draft PR")
 	startCmd.Flags().String("ide", "", "Override IDE command (e.g., --ide cursor)")
 	startCmd.Flags().String("trunk-branch", "", "Override trunk branch (e.g., --trunk-branch develop)")
 	startCmd.Flags().String("status-action", "", "Override status action (none|commit_only|commit_and_push|commit_only_branch)")
@@ -162,6 +164,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	flags.SkipStatusCheck, _ = cmd.Flags().GetBool("skip-status-check")
 	flags.ReuseBranch, _ = cmd.Flags().GetBool("reuse-branch")
 	flags.NoIDE, _ = cmd.Flags().GetBool("no-ide")
+	flags.NoDraftPR, _ = cmd.Flags().GetBool("no-draft-pr")
 	flags.IDECommand, _ = cmd.Flags().GetString("ide")
 	flags.TrunkBranch, _ = cmd.Flags().GetString("trunk-branch")
 	flags.StatusAction, _ = cmd.Flags().GetString("status-action")
@@ -1790,6 +1793,11 @@ func pullAllProjects(ctx *StartContext, mainTrunkBranch, mainRemoteName string) 
 // ============================================================================
 // Phase 3: Status Management
 // ============================================================================
+
+// shouldSkipDraftPR returns true when --no-draft-pr is set (skip push and draft PR for all repos).
+func shouldSkipDraftPR(flags StartFlags) bool {
+	return flags.NoDraftPR
+}
 
 // getEffectiveStatusAction returns the status action to use (flag overrides config)
 func getEffectiveStatusAction(ctx *StartContext) string {

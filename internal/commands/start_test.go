@@ -520,6 +520,23 @@ func TestStartContext(t *testing.T) {
 	})
 }
 
+func TestShouldSkipDraftPR(t *testing.T) {
+	t.Run("returns true when NoDraftPR is true", func(t *testing.T) {
+		flags := StartFlags{NoDraftPR: true}
+		assert.True(t, shouldSkipDraftPR(flags))
+	})
+
+	t.Run("returns false when NoDraftPR is false", func(t *testing.T) {
+		flags := StartFlags{NoDraftPR: false}
+		assert.False(t, shouldSkipDraftPR(flags))
+	})
+
+	t.Run("returns false when NoDraftPR is zero value", func(t *testing.T) {
+		flags := StartFlags{}
+		assert.False(t, shouldSkipDraftPR(flags))
+	})
+}
+
 // ============================================================================
 // Phase 2: Git Operations Tests
 // ============================================================================
