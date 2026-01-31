@@ -196,6 +196,94 @@ func TestFormatSliceCommitParts(t *testing.T) {
 	assert.Empty(t, formatSliceCommitParts(nil, nil, nil))
 }
 
+func TestLintSlicesSection(t *testing.T) {
+	t.Run("reports missing Slices section", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		content := `---
+id: 001
+status: doing
+---
+# Test
+## Requirements
+`
+		require.NoError(t, os.WriteFile(sliceTestWorkItemPath, []byte(content), 0o600))
+		cfg, _ := config.LoadConfig()
+		errs := lintSlicesSection(sliceTestWorkItemPath, cfg)
+		require.Len(t, errs, 1)
+		assert.Equal(t, "missing-section", errs[0].Rule)
+		assert.Contains(t, errs[0].Message, "Slices section missing")
+	})
+	t.Run("reports duplicate task ID", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		content := `---
+id: 001
+status: doing
+---
+# Test
+## Slices
+### S1
+- [ ] T001: A
+### S2
+- [ ] T001: B
+`
+		require.NoError(t, os.WriteFile(sliceTestWorkItemPath, []byte(content), 0o600))
+		cfg, _ := config.LoadConfig()
+		errs := lintSlicesSection(sliceTestWorkItemPath, cfg)
+		require.Len(t, errs, 1)
+		assert.Equal(t, "duplicate-task-id", errs[0].Rule)
+		assert.Contains(t, errs[0].Message, "T001")
+	})
+	t.Run("reports duplicate slice name", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		content := `---
+id: 001
+status: doing
+---
+# Test
+## Slices
+### X
+- [ ] T001: A
+### X
+- [ ] T002: B
+`
+		require.NoError(t, os.WriteFile(sliceTestWorkItemPath, []byte(content), 0o600))
+		cfg, _ := config.LoadConfig()
+		errs := lintSlicesSection(sliceTestWorkItemPath, cfg)
+		require.Len(t, errs, 1)
+		assert.Equal(t, "duplicate-slice-name", errs[0].Rule)
+		assert.Contains(t, errs[0].Message, "Duplicate slice name")
+	})
+	t.Run("valid section returns no errors", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		content := `---
+id: 001
+status: doing
+---
+# Test
+## Slices
+### S1
+- [ ] T001: A
+- [x] T002: B
+`
+		require.NoError(t, os.WriteFile(sliceTestWorkItemPath, []byte(content), 0o600))
+		cfg, _ := config.LoadConfig()
+		errs := lintSlicesSection(sliceTestWorkItemPath, cfg)
+		assert.Empty(t, errs)
+	})
+}
+
 func TestSliceAddAndShow(t *testing.T) {
 	t.Run("slice add then show", func(t *testing.T) {
 		tmpDir := t.TempDir()
