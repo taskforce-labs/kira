@@ -538,6 +538,87 @@ func TestShouldSkipDraftPR(t *testing.T) {
 	})
 }
 
+func TestShouldCreateDraftPR(t *testing.T) {
+	draftPRFalse := false
+	draftPRTrue := true
+
+	t.Run("flag NoDraftPR returns false", func(t *testing.T) {
+		ctx := &StartContext{
+			Flags: StartFlags{NoDraftPR: true},
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{
+					DraftPR: &draftPRTrue,
+				},
+			},
+		}
+		assert.False(t, shouldCreateDraftPR(ctx, "", nil))
+		assert.False(t, shouldCreateDraftPR(ctx, "frontend", &config.ProjectConfig{Name: "frontend"}))
+	})
+
+	t.Run("repos set and project in list returns true", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{DraftPR: &draftPRTrue},
+			},
+			Metadata: workItemMetadata{repos: []string{"frontend", "backend"}},
+		}
+		assert.True(t, shouldCreateDraftPR(ctx, "frontend", nil))
+		assert.True(t, shouldCreateDraftPR(ctx, "backend", nil))
+	})
+
+	t.Run("repos set and project not in list returns false", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{DraftPR: &draftPRTrue},
+			},
+			Metadata: workItemMetadata{repos: []string{"frontend", "backend"}},
+		}
+		assert.False(t, shouldCreateDraftPR(ctx, "infra", nil))
+		assert.False(t, shouldCreateDraftPR(ctx, "", nil)) // standalone not in list
+	})
+
+	t.Run("project draft_pr false returns false", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{DraftPR: &draftPRTrue},
+			},
+			Metadata: workItemMetadata{},
+		}
+		project := &config.ProjectConfig{Name: "frontend", DraftPR: &draftPRFalse}
+		assert.False(t, shouldCreateDraftPR(ctx, "frontend", project))
+	})
+
+	t.Run("workspace draft_pr false returns false", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{DraftPR: &draftPRFalse},
+			},
+			Metadata: workItemMetadata{},
+		}
+		assert.False(t, shouldCreateDraftPR(ctx, "", nil))
+		assert.False(t, shouldCreateDraftPR(ctx, "frontend", &config.ProjectConfig{Name: "frontend"}))
+	})
+
+	t.Run("defaults to true when no overrides", func(t *testing.T) {
+		ctx := &StartContext{
+			Config: &config.Config{
+				Workspace: &config.WorkspaceConfig{DraftPR: &draftPRTrue},
+			},
+			Metadata: workItemMetadata{},
+		}
+		assert.True(t, shouldCreateDraftPR(ctx, "", nil))
+		assert.True(t, shouldCreateDraftPR(ctx, "frontend", &config.ProjectConfig{Name: "frontend"}))
+	})
+
+	t.Run("workspace nil and no flag defaults to true", func(t *testing.T) {
+		ctx := &StartContext{
+			Config:   &config.Config{},
+			Metadata: workItemMetadata{},
+		}
+		assert.True(t, shouldCreateDraftPR(ctx, "", nil))
+	})
+}
+
 // ============================================================================
 // Phase 2: Git Operations Tests
 // ============================================================================

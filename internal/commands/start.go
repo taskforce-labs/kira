@@ -1861,6 +1861,33 @@ func shouldSkipDraftPR(flags StartFlags) bool {
 	return flags.NoDraftPR
 }
 
+// shouldCreateDraftPR returns true if draft PR should be created for the given project.
+// Priority: 1) --no-draft-pr flag 2) work item repos list 3) project draft_pr 4) workspace draft_pr 5) default true.
+// For standalone/monorepo pass projectName "" and project nil.
+func shouldCreateDraftPR(ctx *StartContext, projectName string, project *config.ProjectConfig) bool {
+	if ctx.Flags.NoDraftPR {
+		return false
+	}
+	// Work item repos: when set, only create for projects in the list
+	if len(ctx.Metadata.repos) > 0 {
+		for _, r := range ctx.Metadata.repos {
+			if r == projectName {
+				return true
+			}
+		}
+		return false
+	}
+	// Project-level draft_pr override
+	if project != nil && project.DraftPR != nil && !*project.DraftPR {
+		return false
+	}
+	// Workspace-level draft_pr
+	if ctx.Config.Workspace != nil && ctx.Config.Workspace.DraftPR != nil && !*ctx.Config.Workspace.DraftPR {
+		return false
+	}
+	return true
+}
+
 // getEffectiveStatusAction returns the status action to use (flag overrides config)
 func getEffectiveStatusAction(ctx *StartContext) string {
 	if ctx.Flags.StatusAction != "" {
