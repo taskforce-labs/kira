@@ -212,8 +212,87 @@ workspace:
 		assert.Equal(t, "../../repos", config.Workspace.Root)
 		assert.Equal(t, "../worktrees", config.Workspace.WorktreeRoot)
 		assert.Equal(t, "My workspace", config.Workspace.Description)
-		assert.True(t, config.Workspace.DraftPR)
+		require.NotNil(t, config.Workspace.DraftPR)
+		assert.True(t, *config.Workspace.DraftPR)
 		assert.Equal(t, "make setup", config.Workspace.Setup)
+	})
+}
+
+func TestWorkspaceDraftPRAndGitPlatform(t *testing.T) {
+	t.Run("workspace draft_pr nil defaults to true", func(t *testing.T) {
+		testConfig := `version: "1.0"
+workspace:
+  description: "Test"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Workspace)
+		require.NotNil(t, config.Workspace.DraftPR)
+		assert.True(t, *config.Workspace.DraftPR)
+	})
+
+	t.Run("workspace draft_pr true preserved", func(t *testing.T) {
+		testConfig := `version: "1.0"
+workspace:
+  draft_pr: true
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Workspace)
+		require.NotNil(t, config.Workspace.DraftPR)
+		assert.True(t, *config.Workspace.DraftPR)
+	})
+
+	t.Run("workspace draft_pr false preserved", func(t *testing.T) {
+		testConfig := `version: "1.0"
+workspace:
+  draft_pr: false
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Workspace)
+		require.NotNil(t, config.Workspace.DraftPR)
+		assert.False(t, *config.Workspace.DraftPR)
+	})
+
+	t.Run("workspace git_platform and git_base_url preserved", func(t *testing.T) {
+		testConfig := `version: "1.0"
+workspace:
+  git_platform: github
+  git_base_url: https://github.example.com
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, config.Workspace)
+		assert.Equal(t, "github", config.Workspace.GitPlatform)
+		assert.Equal(t, "https://github.example.com", config.Workspace.GitBaseURL)
+	})
+
+	t.Run("rejects invalid workspace git_platform", func(t *testing.T) {
+		testConfig := `version: "1.0"
+workspace:
+  git_platform: gitlab
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid workspace.git_platform")
+		assert.Contains(t, err.Error(), "github")
+		assert.Contains(t, err.Error(), "auto")
 	})
 }
 
