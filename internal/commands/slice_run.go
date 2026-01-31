@@ -16,6 +16,25 @@ import (
 
 const sliceLintOutputJSON = "json"
 
+// PrintSliceSummaryIfPresent prints a one-line slice/task summary if the work item has a Slices section.
+// Used by kira start when moving to doing.
+func PrintSliceSummaryIfPresent(path string, cfg *config.Config) {
+	_, slices, err := loadSlicesFromFile(path, cfg)
+	if err != nil || len(slices) == 0 {
+		return
+	}
+	var total, open int
+	for _, s := range slices {
+		for _, t := range s.Tasks {
+			total++
+			if !t.Done {
+				open++
+			}
+		}
+	}
+	fmt.Printf("Slices: %d slices, %d tasks (%d open)\n", len(slices), total, open)
+}
+
 func getSlicesConfig(cfg *config.Config) *config.SlicesConfig {
 	if cfg.Slices == nil {
 		return &config.SlicesConfig{TaskIDFormat: "T%03d", DefaultState: "open"}

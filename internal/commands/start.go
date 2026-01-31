@@ -2051,6 +2051,10 @@ func performStatusUpdate(ctx *StartContext, repoRoot, trunkBranch, remoteName st
 
 	fmt.Printf("Committed status change: %s\n", commitMsg)
 
+	if targetStatus == "doing" {
+		PrintSliceSummaryIfPresent(newPath, ctx.Config)
+	}
+
 	// Push if status_action is commit_and_push
 	if statusAction == statusActionCommitAndPush {
 		// Check if remote exists before attempting to push
@@ -2113,6 +2117,10 @@ func performStatusUpdateOnBranch(ctx *StartContext, worktreePath string) error {
 	}
 
 	fmt.Printf("Committed status change on branch: %s\n", commitMsg)
+
+	if targetStatus == "doing" {
+		PrintSliceSummaryIfPresent(newPath, ctx.Config)
+	}
 
 	return nil
 }

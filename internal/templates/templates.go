@@ -235,6 +235,8 @@ tags: <!--input-strings[frontend,backend,database,api,ui,security]:tags:"Tags"--
 - [ ] <!--input-string:criteria1:"First acceptance criterion"-->
 - [ ] <!--input-string:criteria2:"Second acceptance criterion"-->
 
+## Slices
+
 ## Implementation Notes
 <!--input-string:implementation:"Technical implementation details"-->
 
