@@ -1,7 +1,7 @@
 ---
 id: 011
 title: kira latest
-status: review
+status: done
 kind: prd
 assigned:
 estimate: 0
