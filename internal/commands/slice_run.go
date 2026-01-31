@@ -4,6 +4,7 @@ package commands
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +13,8 @@ import (
 
 	"kira/internal/config"
 )
+
+const sliceLintOutputJSON = "json"
 
 func getSlicesConfig(cfg *config.Config) *config.SlicesConfig {
 	if cfg.Slices == nil {
@@ -828,6 +831,112 @@ func fallbackSliceCommitMessage(path string, cfg *config.Config, workItemID stri
 	return "Update slices for " + workItemID
 }
 
-func runSliceLint(_ *cobra.Command, _ []string) error {
-	return fmt.Errorf("slice lint: not implemented yet")
+// SliceLintError represents a single lint error with location, rule, message, and optional suggestion.
+type SliceLintError struct {
+	Location   string `json:"location"`
+	Rule       string `json:"rule"`
+	Message    string `json:"message"`
+	Suggestion string `json:"suggestion,omitempty"`
+}
+
+func runSliceLint(cmd *cobra.Command, args []string) error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if err := checkWorkDir(cfg); err != nil {
+		return err
+	}
+	workItemID := ""
+	if len(args) > 0 {
+		workItemID = args[0]
+	}
+	path, err := resolveSliceWorkItem(workItemID, cfg)
+	if err != nil {
+		return err
+	}
+	errors := lintSlicesSection(path, cfg)
+	outputFormat, _ := cmd.Flags().GetString("output")
+	if outputFormat == sliceLintOutputJSON {
+		return outputSliceLintJSON(errors)
+	}
+	return outputSliceLintHuman(path, errors)
+}
+
+func lintSlicesSection(path string, cfg *config.Config) []SliceLintError {
+	content, err := safeReadFile(path, cfg)
+	if err != nil {
+		return []SliceLintError{{Location: path, Rule: "read", Message: err.Error()}}
+	}
+	slices, err := ParseSlicesSection(content)
+	if err != nil {
+		return []SliceLintError{{Location: path, Rule: "parse", Message: err.Error()}}
+	}
+	if slices == nil {
+		return []SliceLintError{{
+			Location:   path,
+			Rule:       "missing-section",
+			Message:    "Slices section missing",
+			Suggestion: "Add a ## Slices section with ### slice names and task list items",
+		}}
+	}
+	var errs []SliceLintError
+	seenTaskIDs := make(map[string]string) // id -> slice name
+	seenSliceNames := make(map[string]bool)
+	for _, s := range slices {
+		if seenSliceNames[s.Name] {
+			errs = append(errs, SliceLintError{
+				Location:   path + " (slice: " + s.Name + ")",
+				Rule:       "duplicate-slice-name",
+				Message:    "Duplicate slice name: " + s.Name,
+				Suggestion: "Use unique slice names",
+			})
+		}
+		seenSliceNames[s.Name] = true
+		for _, t := range s.Tasks {
+			if prev, ok := seenTaskIDs[t.ID]; ok {
+				errs = append(errs, SliceLintError{
+					Location:   path + " (task: " + t.ID + ")",
+					Rule:       "duplicate-task-id",
+					Message:    "Task ID " + t.ID + " appears more than once",
+					Suggestion: "Use unique task IDs (e.g. T001, T002, ...). Previously seen in slice: " + prev,
+				})
+			}
+			seenTaskIDs[t.ID] = s.Name
+			// State is always open or done from parser (checkbox [ ] or [x]); no other state possible
+			// So we don't need to validate "invalid state" if parser only produces open/done
+		}
+	}
+	return errs
+}
+
+func outputSliceLintHuman(path string, errs []SliceLintError) error {
+	for _, e := range errs {
+		line := path
+		if e.Location != path {
+			line = e.Location
+		}
+		fmt.Printf("%s [%s] %s", line, e.Rule, e.Message)
+		if e.Suggestion != "" {
+			fmt.Printf(" Suggestion: %s", e.Suggestion)
+		}
+		fmt.Println()
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("slice lint found %d error(s)", len(errs))
+	}
+	fmt.Println("Slices section is valid.")
+	return nil
+}
+
+func outputSliceLintJSON(errs []SliceLintError) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(errs); err != nil {
+		return fmt.Errorf("failed to encode JSON: %w", err)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("slice lint found %d error(s)", len(errs))
+	}
+	return nil
 }
