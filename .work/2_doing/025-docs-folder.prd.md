@@ -1,7 +1,7 @@
 ---
 id: 025
 title: docs folder
-status: todo
+status: doing
 kind: prd
 assigned:
 estimate: 0
