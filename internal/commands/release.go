@@ -13,6 +13,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const defaultReleaseStatus = "done"
+
 var releaseCmd = &cobra.Command{
 	Use:   "release [status|path] [subfolder]",
 	Short: "Generate release notes and archive completed work items",
@@ -34,7 +36,7 @@ Updates work item status to "released" before archival.`,
 		if len(args) > 0 {
 			targetPath = args[0]
 		} else {
-			targetPath = "done" // default
+			targetPath = defaultReleaseStatus
 		}
 
 		if len(args) > 1 {

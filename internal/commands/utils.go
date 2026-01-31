@@ -56,6 +56,15 @@ func safeReadFile(filePath string, cfg *config.Config) ([]byte, error) {
 	return os.ReadFile(filePath)
 }
 
+// safeWriteFile writes a file after validating the path is within the work directory.
+func safeWriteFile(filePath string, data []byte, cfg *config.Config) error {
+	if err := validateWorkPath(filePath, cfg); err != nil {
+		return err
+	}
+	// #nosec G306 - path has been validated by validateWorkPath above; 0o600 is intended
+	return os.WriteFile(filePath, data, 0o600)
+}
+
 // safeReadProjectFile reads a file from project root (like RELEASES.md, kira.yml)
 // It validates the file is in the current directory and doesn't contain path traversal
 func safeReadProjectFile(filePath string) ([]byte, error) {

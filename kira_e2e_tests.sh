@@ -2644,6 +2644,51 @@ else
   exit 1
 fi
 
+# Slice command (add slice, add task, show)
+echo ""
+echo "📋 Test 34: Slice command (add, task add, show)"
+cat > .work/1_todo/030-slice-e2e.prd.md << 'EOF'
+---
+id: 030
+title: Slice E2E
+status: todo
+kind: prd
+created: 2025-01-01
+---
+
+# Slice E2E
+## Requirements
+## Acceptance Criteria
+EOF
+"$KIRA_BIN" move 030 doing
+if ! "$KIRA_BIN" slice add 030 "E2ESlice" --no-commit 2>/dev/null; then
+  echo "  ❌ slice add failed"
+  exit 1
+fi
+if ! grep -q "### E2ESlice" .work/2_doing/030-slice-e2e.prd.md; then
+  echo "  ❌ slice add did not add E2ESlice to file"
+  exit 1
+fi
+echo "  ✅ slice add adds slice to work item"
+"$KIRA_BIN" slice task add 030 E2ESlice "E2E task one" --no-commit
+if ! grep -q "T001" .work/2_doing/030-slice-e2e.prd.md || ! grep -q "E2E task one" .work/2_doing/030-slice-e2e.prd.md; then
+  echo "  ❌ slice task add did not add task"
+  exit 1
+fi
+echo "  ✅ slice task add adds task with generated ID"
+"$KIRA_BIN" slice show 030 | grep -q "E2ESlice" && "$KIRA_BIN" slice show 030 | grep -q "T001"
+if [ $? -ne 0 ]; then
+  echo "  ❌ slice show did not show slice and task"
+  exit 1
+fi
+echo "  ✅ slice show displays slices and tasks"
+"$KIRA_BIN" slice progress 030 | grep -q "1 open"
+if [ $? -ne 0 ]; then
+  echo "  ❌ slice progress did not show progress"
+  exit 1
+fi
+echo "  ✅ slice progress shows summary"
+
 # Cleanup
 echo ""
 if [ "$KEEP" -eq 1 ] || [ "${KEEP_TEST_DIR:-0}" -ne 0 ]; then
@@ -2692,6 +2737,7 @@ echo "  ✅ Field defaults"
 echo "  ✅ Field error detection"
 echo "  ✅ Doctor field fixes"
 echo "  ✅ Backward compatibility"
+echo "  ✅ Slice command (add, task add, show)"
 echo ""
 echo "🚀 Kira is ready for use!"
 
