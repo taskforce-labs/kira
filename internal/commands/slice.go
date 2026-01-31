@@ -2,8 +2,6 @@
 package commands
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
@@ -156,69 +154,14 @@ func init() {
 	sliceTaskCmd.AddCommand(sliceTaskToggleCmd)
 	sliceTaskCmd.AddCommand(sliceTaskNoteCmd)
 	sliceTaskCmd.AddCommand(sliceTaskCurrentCmd)
-}
 
-func runSliceAdd(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice add: not implemented yet")
-}
-
-func runSliceRemove(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice remove: not implemented yet")
-}
-
-func runSliceTaskAdd(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice task add: not implemented yet")
-}
-
-func runSliceTaskRemove(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice task remove: not implemented yet")
-}
-
-func runSliceTaskEdit(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice task edit: not implemented yet")
-}
-
-func runSliceTaskToggle(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice task toggle: not implemented yet")
-}
-
-func runSliceTaskNote(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice task note: not implemented yet")
-}
-
-func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice task current: not implemented yet")
-}
-
-func runSliceShow(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice show: not implemented yet")
-}
-
-func runSliceProgress(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice progress: not implemented yet")
-}
-
-func runSliceCurrent(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice current: not implemented yet")
-}
-
-func runSliceLint(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice lint: not implemented yet")
-}
-
-func runSliceCommit(cmd *cobra.Command, args []string) error {
-	_, _ = cmd, args
-	return fmt.Errorf("slice commit: not implemented yet")
+	sliceAddCmd.Flags().Bool("no-commit", false, "Do not commit changes")
+	sliceRemoveCmd.Flags().Bool("no-commit", false, "Do not commit changes")
+	sliceRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
+	sliceTaskAddCmd.Flags().Bool("no-commit", false, "Do not commit changes")
+	sliceTaskRemoveCmd.Flags().Bool("no-commit", false, "Do not commit changes")
+	sliceTaskRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
+	sliceTaskEditCmd.Flags().Bool("no-commit", false, "Do not commit changes")
+	sliceTaskToggleCmd.Flags().Bool("no-commit", false, "Do not commit changes")
+	sliceTaskNoteCmd.Flags().Bool("no-commit", false, "Do not commit changes")
 }
