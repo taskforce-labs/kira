@@ -134,6 +134,43 @@ func findWorkItemFile(workItemID string, cfg *config.Config) (string, error) {
 	return foundPath, nil
 }
 
+// resolveSliceWorkItem resolves the work item path for slice commands.
+// When workItemID is non-empty, finds the work item by ID via findWorkItemFile.
+// When workItemID is empty, resolves from the doing folder with strict semantics:
+// zero work item files -> error "No work item in doing folder; specify work-item-id or start a work item";
+// more than one work item file -> error "Multiple work items in doing folder; specify work-item-id".
+func resolveSliceWorkItem(workItemID string, cfg *config.Config) (string, error) {
+	if workItemID != "" {
+		return findWorkItemFile(workItemID, cfg)
+	}
+	doingFolder := cfg.StatusFolders["doing"]
+	if doingFolder == "" {
+		doingFolder = "2_doing"
+	}
+	workFolder := config.GetWorkFolderPath(cfg)
+	doingPath := filepath.Join(workFolder, doingFolder)
+	entries, err := os.ReadDir(doingPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("no work item in doing folder; specify work-item-id or start a work item")
+		}
+		return "", fmt.Errorf("failed to read doing folder: %w", err)
+	}
+	var workItemFiles []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+			workItemFiles = append(workItemFiles, entry.Name())
+		}
+	}
+	if len(workItemFiles) == 0 {
+		return "", fmt.Errorf("no work item in doing folder; specify work-item-id or start a work item")
+	}
+	if len(workItemFiles) > 1 {
+		return "", fmt.Errorf("multiple work items in doing folder; specify work-item-id")
+	}
+	return filepath.Join(doingPath, workItemFiles[0]), nil
+}
+
 // updateWorkItemStatus updates the status field in a work item file
 func updateWorkItemStatus(filePath, newStatus string, cfg *config.Config) error {
 	content, err := safeReadFile(filePath, cfg)
