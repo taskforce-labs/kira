@@ -68,6 +68,24 @@ kira release
 # 4. Tags and pushes the release to trigger release workflow
 ```
 
+### Draft pull requests
+
+`kira start` can push the new branch and open a **draft pull request** on GitHub for the work item. This is enabled by default when your remote is GitHub.
+
+- **Enable:** Set the `KIRA_GITHUB_TOKEN` environment variable (e.g. a GitHub personal access token with `repo` scope). Draft PRs are created only for GitHub remotes.
+- **Skip:** Use `--no-draft-pr` to skip pushing and creating a draft PR.
+- **Config:** In `kira.yml`, use `workspace.draft_pr: false` to disable for the workspace, or `projects[].draft_pr: false` in polyrepo setups. Use `workspace.git_base_url` for GitHub Enterprise.
+
+Example `workspace` in `kira.yml`:
+
+```yaml
+workspace:
+  draft_pr: true          # default: true (create draft PRs for GitHub)
+  git_platform: auto      # github | auto (default)
+  git_base_url: ""        # optional; for GitHub Enterprise (e.g. https://ghe.example.com)
+  # projects[].draft_pr   # optional override per project (polyrepo)
+```
+
 ## Overview
 
 Kira uses a combination of plaintext markdown files, git, and a lightweight CLI to manage and coordinate work. This approach means clankers can directly read, write, and commit changes without complex APIs, while meatbags get full transparency into what the clankers are doing through git history.

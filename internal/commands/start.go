@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"kira/internal/config"
+	"kira/internal/git"
 )
 
 // BranchStatus represents the status of a branch
@@ -129,8 +131,13 @@ The command will:
 2. Pull latest changes from origin on trunk branch
 3. Optionally move the work item to "doing" status
 4. Create a git worktree and branch
-5. Open your IDE in the worktree (if configured)
-6. Run setup commands (if configured)`,
+5. Push the branch and create a draft pull request (GitHub only, when KIRA_GITHUB_TOKEN is set)
+6. Open your IDE in the worktree (if configured)
+7. Run setup commands (if configured)
+
+Draft PRs are created for GitHub remotes by default. Set KIRA_GITHUB_TOKEN to enable;
+use --no-draft-pr to skip push and draft PR creation. Configure workspace.draft_pr
+or projects[].draft_pr in kira.yml to disable per workspace or project.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runStart,
 }
@@ -299,7 +306,7 @@ func createWorktreesAndFinalize(ctx *StartContext, trunkBranch string) error {
 
 	// Push branch for draft PR (GitHub remotes) when not skipped
 	if !ctx.Flags.DryRun && !shouldSkipDraftPR(ctx.Flags) {
-		if err := pushBranchesForDraftPR(ctx, worktreePath); err != nil {
+		if err := pushBranchesForDraftPR(ctx, worktreePath, trunkBranch); err != nil {
 			return err
 		}
 	}
@@ -731,6 +738,7 @@ func printDryRunPreview(ctx *StartContext) error {
 	worktreePath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
 
 	printDryRunGitOps(ctx, trunkBranch, remoteName, worktreePath)
+	printDryRunDraftPR(ctx, worktreePath)
 	printDryRunPolyrepo(ctx, worktreePath)
 	printDryRunStatus(ctx)
 	printDryRunIDE(ctx)
@@ -777,6 +785,74 @@ func printDryRunGitOps(ctx *StartContext, trunkBranch, remoteName, worktreePath 
 	fmt.Printf("  [DRY RUN] git merge %s/%s\n", remoteName, trunkBranch)
 	fmt.Printf("  [DRY RUN] git worktree add -b %s %s %s\n", ctx.BranchName, worktreePath, trunkBranch)
 	fmt.Println()
+}
+
+func printDryRunDraftPR(ctx *StartContext, worktreePath string) {
+	if shouldSkipDraftPR(ctx.Flags) {
+		fmt.Printf("Draft PR: Would skip draft PR (--no-draft-pr)\n")
+		fmt.Println()
+		return
+	}
+	if wouldCreateDraftPRForAnyTarget(ctx, worktreePath) {
+		fmt.Printf("Draft PR: Would push branch and create draft PR\n")
+		fmt.Println()
+	}
+}
+
+// wouldCreateDraftPRForAnyTarget returns true if we would push and create a draft PR for at least one target.
+func wouldCreateDraftPRForAnyTarget(ctx *StartContext, worktreePath string) bool {
+	baseURL := ""
+	if ctx.Config.Workspace != nil {
+		baseURL = ctx.Config.Workspace.GitBaseURL
+	}
+	if ctx.Behavior == WorkspaceBehaviorPolyrepo {
+		return wouldCreateDraftPRForAnyTargetPolyrepo(ctx, baseURL)
+	}
+	remoteName := resolveRemoteName(ctx.Config, nil)
+	remoteURL, err := getRemoteURL(remoteName, worktreePath)
+	return err == nil && isGitHubRemote(remoteURL, baseURL) && shouldCreateDraftPR(ctx, "", nil)
+}
+
+func wouldCreateDraftPRForAnyTargetPolyrepo(ctx *StartContext, baseURL string) bool {
+	baseWorktreePath := filepath.Join(ctx.WorktreeRoot, ctx.BranchName)
+	mainWorktreePath := filepath.Join(baseWorktreePath, "main")
+	remoteName := resolveRemoteName(ctx.Config, nil)
+	mainRemoteURL, err := getRemoteURL(remoteName, mainWorktreePath)
+	if err == nil && isGitHubRemote(mainRemoteURL, baseURL) && shouldCreateDraftPR(ctx, "", nil) {
+		return true
+	}
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return false
+	}
+	projects, err := resolvePolyrepoProjects(ctx.Config, repoRoot)
+	if err != nil {
+		return false
+	}
+	worktreePaths := buildPolyrepoWorktreePaths(projects, baseWorktreePath, mainWorktreePath)
+	for _, p := range projects {
+		if p.Path == "" {
+			continue
+		}
+		if _, ok := worktreePaths[p.Name]; !ok {
+			continue
+		}
+		remoteURL, err := getRemoteURL(p.Remote, p.Path)
+		if err != nil || !isGitHubRemote(remoteURL, baseURL) {
+			continue
+		}
+		var projConfig *config.ProjectConfig
+		for i := range ctx.Config.Workspace.Projects {
+			if ctx.Config.Workspace.Projects[i].Name == p.Name {
+				projConfig = &ctx.Config.Workspace.Projects[i]
+				break
+			}
+		}
+		if shouldCreateDraftPR(ctx, p.Name, projConfig) {
+			return true
+		}
+	}
+	return false
 }
 
 func printDryRunPolyrepo(ctx *StartContext, worktreePath string) {
@@ -2158,19 +2234,84 @@ func pushBranch(remoteName, branchName, dir string, dryRun bool) error {
 	return nil
 }
 
-// pushBranchesForDraftPR pushes the branch to GitHub remotes for repos where draft PR is desired.
-func pushBranchesForDraftPR(ctx *StartContext, worktreePath string) error {
+// extractWorkItemBody returns the work item file content after the YAML front matter (body only).
+func extractWorkItemBody(filePath string, cfg *config.Config) (string, error) {
+	content, err := safeReadFile(filePath, cfg)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(string(content), "\n")
+	bodyStart := 0
+	dashes := 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == yamlSeparator {
+			dashes++
+			if dashes == 2 {
+				bodyStart = i + 1
+				break
+			}
+			continue
+		}
+	}
+	if bodyStart >= len(lines) {
+		return strings.TrimSpace(string(content)), nil
+	}
+	return strings.TrimSpace(strings.Join(lines[bodyStart:], "\n")), nil
+}
+
+// createDraftPRAfterPush creates a draft PR for the pushed branch using KIRA_GITHUB_TOKEN.
+// On success prints the PR URL; on failure logs a warning and returns nil (does not fail start).
+// Returns an error only when token is unset (caller should suggest setting token or --no-draft-pr).
+func createDraftPRAfterPush(ctx *StartContext, remoteURL, baseURL, trunkBranch string) error {
+	token := os.Getenv("KIRA_GITHUB_TOKEN")
+	if token == "" {
+		return fmt.Errorf("KIRA_GITHUB_TOKEN is not set. Set it to create draft PRs, or use --no-draft-pr to skip")
+	}
+	owner, repo, err := git.ParseGitHubOwnerRepo(remoteURL)
+	if err != nil {
+		log.Printf("Warning: could not parse GitHub remote %s: %v", remoteURL, err)
+		return nil
+	}
+	prCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := git.NewClient(prCtx, token, baseURL)
+	if err != nil {
+		log.Printf("Warning: failed to create GitHub client: %v", err)
+		return nil
+	}
+	title := fmt.Sprintf("%s: %s", ctx.Metadata.id, ctx.Metadata.title)
+	body, err := extractWorkItemBody(ctx.WorkItemPath, ctx.Config)
+	if err != nil {
+		body = ""
+	}
+	prURL, err := git.CreateDraftPR(prCtx, client, owner, repo, trunkBranch, ctx.BranchName, title, body)
+	if err != nil {
+		log.Printf("Warning: failed to create draft PR: %v", err)
+		return nil
+	}
+	fmt.Printf("Draft PR: %s\n", prURL)
+	return nil
+}
+
+// pushBranchesForDraftPR pushes the branch to GitHub remotes for repos where draft PR is desired,
+// then creates draft PRs when KIRA_GITHUB_TOKEN is set.
+// Returns a clear error before any push if draft PR would be created but KIRA_GITHUB_TOKEN is unset.
+func pushBranchesForDraftPR(ctx *StartContext, worktreePath, trunkBranch string) error {
+	if wouldCreateDraftPRForAnyTarget(ctx, worktreePath) && os.Getenv("KIRA_GITHUB_TOKEN") == "" {
+		return fmt.Errorf("KIRA_GITHUB_TOKEN is not set. Set it to create draft PRs, or use --no-draft-pr to skip")
+	}
 	baseURL := ""
 	if ctx.Config.Workspace != nil {
 		baseURL = ctx.Config.Workspace.GitBaseURL
 	}
 	if ctx.Behavior == WorkspaceBehaviorPolyrepo {
-		return pushBranchesPolyrepo(ctx, baseURL)
+		return pushBranchesPolyrepo(ctx, baseURL, trunkBranch)
 	}
-	return pushBranchStandalone(ctx, worktreePath, baseURL)
+	return pushBranchStandalone(ctx, worktreePath, baseURL, trunkBranch)
 }
 
-func pushBranchStandalone(ctx *StartContext, worktreePath, baseURL string) error {
+func pushBranchStandalone(ctx *StartContext, worktreePath, baseURL, trunkBranch string) error {
 	remoteName := resolveRemoteName(ctx.Config, nil)
 	remoteURL, err := getRemoteURL(remoteName, worktreePath)
 	if err != nil || !isGitHubRemote(remoteURL, baseURL) || !shouldCreateDraftPR(ctx, "", nil) {
@@ -2180,10 +2321,13 @@ func pushBranchStandalone(ctx *StartContext, worktreePath, baseURL string) error
 		return err
 	}
 	fmt.Printf("Pushed branch %s to %s\n", ctx.BranchName, remoteName)
+	if err := createDraftPRAfterPush(ctx, remoteURL, baseURL, trunkBranch); err != nil {
+		return err
+	}
 	return nil
 }
 
-func pushBranchesPolyrepo(ctx *StartContext, baseURL string) error {
+func pushBranchesPolyrepo(ctx *StartContext, baseURL, trunkBranch string) error {
 	repoRoot, err := getRepoRoot()
 	if err != nil {
 		return fmt.Errorf("failed to get repository root: %w", err)
@@ -2203,17 +2347,20 @@ func pushBranchesPolyrepo(ctx *StartContext, baseURL string) error {
 			return err
 		}
 		fmt.Printf("Pushed branch %s to %s (main)\n", ctx.BranchName, remoteName)
+		if err := createDraftPRAfterPush(ctx, mainRemoteURL, baseURL, trunkBranch); err != nil {
+			return err
+		}
 	}
 
 	for _, p := range projects {
-		if err := pushProjectBranchIfNeeded(ctx, p, worktreePaths, baseURL); err != nil {
+		if err := pushProjectBranchIfNeeded(ctx, p, worktreePaths, baseURL, trunkBranch); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func pushProjectBranchIfNeeded(ctx *StartContext, p PolyrepoProject, worktreePaths map[string]string, baseURL string) error {
+func pushProjectBranchIfNeeded(ctx *StartContext, p PolyrepoProject, worktreePaths map[string]string, baseURL, trunkBranch string) error {
 	if p.Path == "" {
 		return nil
 	}
@@ -2239,6 +2386,13 @@ func pushProjectBranchIfNeeded(ctx *StartContext, p PolyrepoProject, worktreePat
 		return err
 	}
 	fmt.Printf("Pushed branch %s to %s (%s)\n", ctx.BranchName, p.Remote, p.Name)
+	projBaseURL := baseURL
+	if projConfig != nil && projConfig.GitBaseURL != "" {
+		projBaseURL = projConfig.GitBaseURL
+	}
+	if err := createDraftPRAfterPush(ctx, remoteURL, projBaseURL, trunkBranch); err != nil {
+		return err
+	}
 	return nil
 }
 
