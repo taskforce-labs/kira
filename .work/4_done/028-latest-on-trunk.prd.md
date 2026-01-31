@@ -1,7 +1,7 @@
 ---
 id: 028
 title: latest-on-trunk
-status: doing
+status: done
 kind: prd
 assigned:
 estimate: 0
