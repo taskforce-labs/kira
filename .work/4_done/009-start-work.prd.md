@@ -1,7 +1,7 @@
 ---
 id: 009
 title: start work
-status: review
+status: done
 kind: prd
 assigned:
 estimate: 0
