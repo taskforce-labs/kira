@@ -1,9 +1,9 @@
 module kira
 
-// Note: Go 1.25.2+ is required to avoid GO-2025-4010 vulnerability in net/url.
-// The vulnerability affects URL validation functions used in field configuration.
-// See: https://pkg.go.dev/vuln/GO-2025-4010
-go 1.25.2
+// Note: Go 1.25.6+ is required to avoid standard library vulnerabilities (net/url,
+// crypto/tls, crypto/x509) reported by govulncheck. See GO-2025-4010, GO-2026-4341,
+// GO-2026-4340, GO-2025-4175, GO-2025-4155, GO-2025-4007.
+go 1.25.6
 
 require (
 	github.com/google/go-github/v61 v61.0.0
