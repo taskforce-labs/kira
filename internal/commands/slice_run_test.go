@@ -149,6 +149,53 @@ func TestFindSliceByName(t *testing.T) {
 	assert.Nil(t, s)
 }
 
+func TestFirstSliceWithOpenTasks(t *testing.T) {
+	slices := []Slice{
+		{Name: "A", Tasks: []Task{{ID: "T001", Done: true}}},
+		{Name: "B", Tasks: []Task{{ID: "T002", Done: false}}},
+		{Name: "C", Tasks: []Task{{ID: "T003", Done: false}}},
+	}
+	s := firstSliceWithOpenTasks(slices)
+	require.NotNil(t, s)
+	assert.Equal(t, "B", s.Name)
+	slices[0].Tasks[0].Done = false
+	s = firstSliceWithOpenTasks(slices)
+	require.NotNil(t, s)
+	assert.Equal(t, "A", s.Name)
+	allDone := []Slice{{Name: "X", Tasks: []Task{{ID: "T001", Done: true}}}}
+	assert.Nil(t, firstSliceWithOpenTasks(allDone))
+}
+
+func TestDetectTaskChanges(t *testing.T) {
+	current := []Slice{{Name: "S", Tasks: []Task{
+		{ID: "T001", Description: "A", Done: true},
+		{ID: "T002", Description: "B", Done: false},
+		{ID: "T003", Description: "C", Done: false},
+	}}}
+	previous := []Slice{{Name: "S", Tasks: []Task{
+		{ID: "T001", Description: "A", Done: false},
+		{ID: "T002", Description: "B", Done: true},
+	}}}
+	completed, reopened, added := detectTaskChanges(previous, current)
+	assert.Len(t, completed, 1)
+	assert.Equal(t, "T001", completed[0].ID)
+	assert.Len(t, reopened, 1)
+	assert.Equal(t, "T002", reopened[0].ID)
+	assert.Len(t, added, 1)
+	assert.Equal(t, "T003", added[0].ID)
+}
+
+func TestFormatSliceCommitParts(t *testing.T) {
+	completed := []Task{{ID: "T001", Description: "Done task"}}
+	reopened := []Task{{ID: "T002", Description: "Reopened"}}
+	added := []Task{{ID: "T003", Description: "New"}}
+	msg := formatSliceCommitParts(completed, reopened, added)
+	assert.Contains(t, msg, "Complete T001")
+	assert.Contains(t, msg, "Reopen T002")
+	assert.Contains(t, msg, "Add tasks T003")
+	assert.Empty(t, formatSliceCommitParts(nil, nil, nil))
+}
+
 func TestSliceAddAndShow(t *testing.T) {
 	t.Run("slice add then show", func(t *testing.T) {
 		tmpDir := t.TempDir()

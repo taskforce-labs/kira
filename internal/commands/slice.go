@@ -164,4 +164,5 @@ func init() {
 	sliceTaskEditCmd.Flags().Bool("no-commit", false, "Do not commit changes")
 	sliceTaskToggleCmd.Flags().Bool("no-commit", false, "Do not commit changes")
 	sliceTaskNoteCmd.Flags().Bool("no-commit", false, "Do not commit changes")
+	sliceTaskCurrentCmd.Flags().Bool("no-commit", false, "Do not commit when used with toggle")
 }

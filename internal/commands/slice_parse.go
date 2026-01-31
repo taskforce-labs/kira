@@ -88,7 +88,7 @@ func parseTaskLine(lines []string, i int, trimmed string) *Task {
 	if taskLineOpenDone.MatchString(trimmed) {
 		matches := taskLineOpenDone.FindStringSubmatch(trimmed)
 		if len(matches) >= 4 {
-			done := strings.ToLower(matches[1]) == "done"
+			done := strings.ToLower(matches[1]) == defaultReleaseStatus
 			return &Task{ID: matches[2], Description: strings.TrimSpace(matches[3]), Done: done}
 		}
 	}
