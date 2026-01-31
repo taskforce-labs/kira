@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -551,6 +552,69 @@ func TestBranchStatus(t *testing.T) {
 		assert.NotEqual(t, BranchNotExists, BranchPointsToTrunk)
 		assert.NotEqual(t, BranchNotExists, BranchHasCommits)
 		assert.NotEqual(t, BranchPointsToTrunk, BranchHasCommits)
+	})
+}
+
+func TestIsGitHubRemote(t *testing.T) {
+	t.Run("https github.com returns true", func(t *testing.T) {
+		assert.True(t, isGitHubRemote("https://github.com/owner/repo.git", ""))
+		assert.True(t, isGitHubRemote("https://github.com/owner/repo", ""))
+	})
+
+	t.Run("git@ github.com returns true", func(t *testing.T) {
+		assert.True(t, isGitHubRemote("git@github.com:owner/repo.git", ""))
+		assert.True(t, isGitHubRemote("git@github.com:owner/repo", ""))
+	})
+
+	t.Run("GHE with baseURL returns true", func(t *testing.T) {
+		assert.True(t, isGitHubRemote("https://github.example.com/org/repo.git", "https://github.example.com"))
+		assert.True(t, isGitHubRemote("git@github.example.com:org/repo.git", "https://github.example.com"))
+	})
+
+	t.Run("gitlab returns false", func(t *testing.T) {
+		assert.False(t, isGitHubRemote("https://gitlab.com/owner/repo.git", ""))
+		assert.False(t, isGitHubRemote("git@gitlab.com:owner/repo.git", ""))
+	})
+
+	t.Run("unknown host returns false", func(t *testing.T) {
+		assert.False(t, isGitHubRemote("https://other.com/owner/repo.git", ""))
+	})
+
+	t.Run("empty URL returns false", func(t *testing.T) {
+		assert.False(t, isGitHubRemote("", ""))
+	})
+}
+
+func TestGetRemoteURL(t *testing.T) {
+	t.Run("returns remote URL from git repo", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// Initialize git repo and add remote
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".git"), 0o700))
+		// Use a minimal git repo: we need git to be available and "git remote add" to work
+		// So we need to run git init first
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+
+		cmd = exec.Command("git", "remote", "add", "origin", "https://github.com/owner/repo.git")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+
+		url, err := getRemoteURL("origin", tmpDir)
+		require.NoError(t, err)
+		assert.Equal(t, "https://github.com/owner/repo.git", url)
+	})
+
+	t.Run("returns error for non-existent remote", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".git"), 0o700))
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+
+		_, err := getRemoteURL("nonexistent", tmpDir)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get remote URL")
 	})
 }
 
