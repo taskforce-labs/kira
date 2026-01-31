@@ -1,7 +1,7 @@
 ---
 id: 026
 title: slices and tasks
-status: backlog
+status: doing
 kind: prd
 assigned:
 estimate: 0
