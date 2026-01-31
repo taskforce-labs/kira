@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -2260,6 +2261,40 @@ func extractWorkItemBody(filePath string, cfg *config.Config) (string, error) {
 	return strings.TrimSpace(strings.Join(lines[bodyStart:], "\n")), nil
 }
 
+// branchHasCommitsAheadOf returns true if the current branch in dir has at least one commit
+// that is not in remoteName/trunkBranch (e.g. origin/master).
+func branchHasCommitsAheadOf(dir, remoteName, trunkBranch string) bool {
+	baseRef := remoteName + "/" + trunkBranch
+	revListCtx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+	out, err := executeCommand(revListCtx, "git", []string{"rev-list", "--count", baseRef + "..HEAD"}, dir, false)
+	if err != nil {
+		return false
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil || count <= 0 {
+		return false
+	}
+	return true
+}
+
+// ensureBranchHasCommitForDraftPR ensures the branch in dir has at least one commit ahead of
+// remoteName/trunkBranch, so GitHub will accept a draft PR. If not, creates an empty commit
+// with message "<work-item-id>: open draft pr".
+func ensureBranchHasCommitForDraftPR(dir, remoteName, trunkBranch, workItemID string) error {
+	if branchHasCommitsAheadOf(dir, remoteName, trunkBranch) {
+		return nil
+	}
+	msg := workItemID + ": open draft pr"
+	commitCtx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+	_, err := executeCommand(commitCtx, "git", []string{"commit", "--allow-empty", "-m", msg}, dir, false)
+	if err != nil {
+		return fmt.Errorf("failed to create initial commit for draft PR: %w", err)
+	}
+	return nil
+}
+
 // createDraftPRAfterPush creates a draft PR for the pushed branch using KIRA_GITHUB_TOKEN.
 // On success prints the PR URL; on failure logs a warning and returns nil (does not fail start).
 // Returns an error only when token is unset (caller should suggest setting token or --no-draft-pr).
@@ -2317,6 +2352,9 @@ func pushBranchStandalone(ctx *StartContext, worktreePath, baseURL, trunkBranch 
 	if err != nil || !isGitHubRemote(remoteURL, baseURL) || !shouldCreateDraftPR(ctx, "", nil) {
 		return nil
 	}
+	if err := ensureBranchHasCommitForDraftPR(worktreePath, remoteName, trunkBranch, ctx.WorkItemID); err != nil {
+		return err
+	}
 	if err := pushBranch(remoteName, ctx.BranchName, worktreePath, false); err != nil {
 		return err
 	}
@@ -2343,6 +2381,9 @@ func pushBranchesPolyrepo(ctx *StartContext, baseURL, trunkBranch string) error 
 	remoteName := resolveRemoteName(ctx.Config, nil)
 	mainRemoteURL, err := getRemoteURL(remoteName, mainWorktreePath)
 	if err == nil && isGitHubRemote(mainRemoteURL, baseURL) && shouldCreateDraftPR(ctx, "", nil) {
+		if err := ensureBranchHasCommitForDraftPR(mainWorktreePath, remoteName, trunkBranch, ctx.WorkItemID); err != nil {
+			return err
+		}
 		if err := pushBranch(remoteName, ctx.BranchName, mainWorktreePath, false); err != nil {
 			return err
 		}
@@ -2381,6 +2422,9 @@ func pushProjectBranchIfNeeded(ctx *StartContext, p PolyrepoProject, worktreePat
 	}
 	if !shouldCreateDraftPR(ctx, p.Name, projConfig) {
 		return nil
+	}
+	if err := ensureBranchHasCommitForDraftPR(wp, p.Remote, trunkBranch, ctx.WorkItemID); err != nil {
+		return err
 	}
 	if err := pushBranch(p.Remote, ctx.BranchName, wp, false); err != nil {
 		return err

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -696,6 +697,118 @@ func TestGetRemoteURL(t *testing.T) {
 		_, err := getRemoteURL("nonexistent", tmpDir)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to get remote URL")
+	})
+}
+
+func TestBranchHasCommitsAheadOf(t *testing.T) {
+	t.Run("returns false when branch has no commits ahead of base", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		cmd = exec.Command("git", "add", "f")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		// Branch 025 same as master; origin/master = master (simulate)
+		cmd = exec.Command("git", "update-ref", "refs/remotes/origin/master", "HEAD")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		assert.False(t, branchHasCommitsAheadOf(tmpDir, "origin", "master"))
+	})
+	t.Run("returns true when branch has commits ahead of base", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		cmd = exec.Command("git", "add", "f")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "update-ref", "refs/remotes/origin/master", "HEAD")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "checkout", "-b", "feature")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "g"), []byte("y"), 0o600))
+		cmd = exec.Command("git", "add", "g")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "commit", "-m", "feature")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		assert.True(t, branchHasCommitsAheadOf(tmpDir, "origin", "master"))
+	})
+}
+
+func TestEnsureBranchHasCommitForDraftPR(t *testing.T) {
+	t.Run("creates empty commit when branch has no commits ahead", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		cmd = exec.Command("git", "add", "f")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "update-ref", "refs/remotes/origin/master", "HEAD")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, ensureBranchHasCommitForDraftPR(tmpDir, "origin", "master", "025"))
+		assert.True(t, branchHasCommitsAheadOf(tmpDir, "origin", "master"))
+		// Verify the empty commit message
+		cmd = exec.Command("git", "log", "-1", "--pretty=format:%s")
+		cmd.Dir = tmpDir
+		out, err := cmd.Output()
+		require.NoError(t, err)
+		assert.Equal(t, "025: open draft pr", string(out))
+	})
+	t.Run("no-op when branch already has commits ahead", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		cmd = exec.Command("git", "add", "f")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "update-ref", "refs/remotes/origin/master", "HEAD")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "checkout", "-b", "feature")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "g"), []byte("y"), 0o600))
+		cmd = exec.Command("git", "add", "g")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "commit", "-m", "feature")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, ensureBranchHasCommitForDraftPR(tmpDir, "origin", "master", "001"))
+		// Should still be one commit ahead (we didn't add another)
+		assert.True(t, branchHasCommitsAheadOf(tmpDir, "origin", "master"))
+		cmd = exec.Command("git", "log", "--oneline", "-2")
+		cmd.Dir = tmpDir
+		out, err := cmd.Output()
+		require.NoError(t, err)
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		require.Len(t, lines, 2)
+		assert.Contains(t, lines[0], "feature")
+		assert.Contains(t, lines[1], "init")
 	})
 }
 
