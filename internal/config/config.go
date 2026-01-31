@@ -58,7 +58,9 @@ type WorkspaceConfig struct {
 	WorkFolder      string          `yaml:"work_folder"`      // default: ".work"
 	ArchitectureDoc string          `yaml:"architecture_doc"` // optional path to architecture doc
 	Description     string          `yaml:"description"`      // optional workspace description
-	DraftPR         bool            `yaml:"draft_pr"`         // default: false
+	DraftPR         *bool           `yaml:"draft_pr"`         // default: true (nil = enabled)
+	GitPlatform     string          `yaml:"git_platform"`     // github, auto (default: auto)
+	GitBaseURL      string          `yaml:"git_base_url"`     // optional; for GHE
 	Setup           string          `yaml:"setup"`            // optional setup command/script
 	Projects        []ProjectConfig `yaml:"projects"`         // optional list of projects
 }
@@ -72,6 +74,8 @@ type ProjectConfig struct {
 	Kind        string `yaml:"kind"`         // app | service | library | infra
 	Description string `yaml:"description"`  // optional: for LLM context
 	DraftPR     *bool  `yaml:"draft_pr"`     // optional: override workspace default
+	GitPlatform string `yaml:"git_platform"` // optional: override workspace default
+	GitBaseURL  string `yaml:"git_base_url"` // optional: for GHE
 	Remote      string `yaml:"remote"`       // optional: override remote name
 	TrunkBranch string `yaml:"trunk_branch"` // optional: per-project trunk branch override
 	Setup       string `yaml:"setup"`        // optional: project-specific setup command
@@ -337,8 +341,25 @@ func validateConfig(config *Config) error {
 		}
 	}
 
-	// Validate workspace.work_folder if set
-	if config.Workspace != nil && config.Workspace.WorkFolder != "" {
+	// Validate workspace settings
+	if err := validateWorkspaceConfig(config); err != nil {
+		return err
+	}
+
+	// Validate field configuration
+	if err := validateFieldConfig(config); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateWorkspaceConfig validates workspace-level settings (work_folder, git_platform).
+func validateWorkspaceConfig(config *Config) error {
+	if config.Workspace == nil {
+		return nil
+	}
+	if config.Workspace.WorkFolder != "" {
 		wf := strings.TrimSpace(config.Workspace.WorkFolder)
 		if wf == "" {
 			return fmt.Errorf("workspace.work_folder cannot be empty or whitespace only")
@@ -347,12 +368,16 @@ func validateConfig(config *Config) error {
 			return fmt.Errorf("workspace.work_folder cannot contain null byte")
 		}
 	}
-
-	// Validate field configuration
-	if err := validateFieldConfig(config); err != nil {
-		return err
+	if config.Workspace.GitPlatform != "" {
+		validPlatforms := []string{"github", "auto"}
+		for _, p := range validPlatforms {
+			if config.Workspace.GitPlatform == p {
+				return nil
+			}
+		}
+		return fmt.Errorf("invalid workspace.git_platform value '%s': use one of: %s",
+			config.Workspace.GitPlatform, strings.Join(validPlatforms, ", "))
 	}
-
 	return nil
 }
 
@@ -628,7 +653,11 @@ func mergeWorkspaceDefaults(config *Config) {
 		config.Workspace.WorkFolder = ".work"
 	}
 	// WorktreeRoot is derived at runtime if not set
-	// DraftPR defaults to false (zero value)
+	// DraftPR defaults to true when nil (draft PR enabled by default)
+	if config.Workspace.DraftPR == nil {
+		enabled := true
+		config.Workspace.DraftPR = &enabled
+	}
 
 	// Apply project defaults
 	for i := range config.Workspace.Projects {
