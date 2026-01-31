@@ -331,7 +331,7 @@ func buildStartContext(cfg *config.Config, workItemID string, flags StartFlags) 
 	ctx.WorkItemPath = workItemPath
 
 	// Step 3: Extract work item metadata
-	workItemType, id, title, currentStatus, err := extractWorkItemMetadata(workItemPath, cfg)
+	workItemType, id, title, currentStatus, repos, err := extractWorkItemMetadata(workItemPath, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read work item '%s': could not extract metadata: %w", workItemID, err)
 	}
@@ -340,6 +340,7 @@ func buildStartContext(cfg *config.Config, workItemID string, flags StartFlags) 
 		id:            id,
 		title:         title,
 		currentStatus: currentStatus,
+		repos:         repos,
 	}
 
 	// Step 4: Sanitize title for branch/worktree name

@@ -51,10 +51,10 @@ func init() {
 const unknownValue = "unknown"
 
 // extractWorkItemMetadata extracts work item metadata from front matter
-func extractWorkItemMetadata(filePath string, cfg *config.Config) (workItemType, id, title, currentStatus string, err error) {
+func extractWorkItemMetadata(filePath string, cfg *config.Config) (workItemType, id, title, currentStatus string, repos []string, err error) {
 	content, err := safeReadFile(filePath, cfg)
 	if err != nil {
-		return unknownValue, "", "", unknownValue, fmt.Errorf("failed to read work item file: %w", err)
+		return unknownValue, "", "", unknownValue, nil, fmt.Errorf("failed to read work item file: %w", err)
 	}
 
 	// Extract YAML front matter between the first pair of --- lines
@@ -77,16 +77,17 @@ func extractWorkItemMetadata(filePath string, cfg *config.Config) (workItemType,
 
 	// Parse YAML to extract fields
 	type workItemFields struct {
-		Kind   string `yaml:"kind"`
-		ID     string `yaml:"id"`
-		Title  string `yaml:"title"`
-		Status string `yaml:"status"`
+		Kind   string   `yaml:"kind"`
+		ID     string   `yaml:"id"`
+		Title  string   `yaml:"title"`
+		Status string   `yaml:"status"`
+		Repos  []string `yaml:"repos"`
 	}
 
 	fields := &workItemFields{}
 	if len(yamlLines) > 0 {
 		if err := yaml.Unmarshal([]byte(strings.Join(yamlLines, "\n")), fields); err != nil {
-			return unknownValue, "", "", unknownValue, fmt.Errorf("failed to parse front matter: %w", err)
+			return unknownValue, "", "", unknownValue, nil, fmt.Errorf("failed to parse front matter: %w", err)
 		}
 	}
 
@@ -107,8 +108,9 @@ func extractWorkItemMetadata(filePath string, cfg *config.Config) (workItemType,
 	if currentStatus == "" {
 		currentStatus = unknownValue
 	}
+	repos = fields.Repos // nil if absent or empty
 
-	return workItemType, id, title, currentStatus, nil
+	return workItemType, id, title, currentStatus, repos, nil
 }
 
 // buildCommitMessage constructs commit message from templates with variable replacement
@@ -297,6 +299,7 @@ type workItemMetadata struct {
 	id            string
 	title         string
 	currentStatus string
+	repos         []string // optional: work item repos override for polyrepo
 }
 
 func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFlag, dryRun bool) error {
@@ -309,7 +312,7 @@ func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFla
 	// Extract metadata BEFORE moving (to get current status)
 	var metadata workItemMetadata
 	if commitFlag || dryRun {
-		metadata.workItemType, metadata.id, metadata.title, metadata.currentStatus, err = extractWorkItemMetadata(workItemPath, cfg)
+		metadata.workItemType, metadata.id, metadata.title, metadata.currentStatus, metadata.repos, err = extractWorkItemMetadata(workItemPath, cfg)
 		if err != nil {
 			return fmt.Errorf("failed to extract work item metadata: %w", err)
 		}

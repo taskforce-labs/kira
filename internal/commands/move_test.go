@@ -40,12 +40,13 @@ func TestExtractWorkItemMetadata(t *testing.T) {
 		cfg, err := config.LoadConfig()
 		require.NoError(t, err)
 
-		workItemType, id, title, currentStatus, err := extractWorkItemMetadata(testFilePath, cfg)
+		workItemType, id, title, currentStatus, repos, err := extractWorkItemMetadata(testFilePath, cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "prd", workItemType)
 		assert.Equal(t, "001", id)
 		assert.Equal(t, "Test Feature", title)
 		assert.Equal(t, "todo", currentStatus)
+		assert.Nil(t, repos)
 	})
 
 	t.Run("handles missing fields gracefully", func(t *testing.T) {
@@ -67,12 +68,13 @@ id: 001
 		cfg, err := config.LoadConfig()
 		require.NoError(t, err)
 
-		workItemType, id, title, currentStatus, err := extractWorkItemMetadata(testFilePath, cfg)
+		workItemType, id, title, currentStatus, repos, err := extractWorkItemMetadata(testFilePath, cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "unknown", workItemType)
 		assert.Equal(t, "001", id)
 		assert.Equal(t, "unknown", title)
 		assert.Equal(t, "unknown", currentStatus)
+		assert.Nil(t, repos)
 	})
 
 	t.Run("returns error for non-existent file", func(t *testing.T) {
@@ -83,9 +85,58 @@ id: 001
 		cfg, err := config.LoadConfig()
 		require.NoError(t, err)
 
-		_, _, _, _, err = extractWorkItemMetadata(".work/nonexistent.md", cfg)
+		_, _, _, _, _, err = extractWorkItemMetadata(".work/nonexistent.md", cfg)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read work item file")
+	})
+
+	t.Run("extracts repos from front matter when present", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+
+		workItemContent := `---
+id: 010
+title: Draft PR feature
+status: doing
+kind: prd
+repos:
+  - frontend
+  - backend
+---
+# Draft PR
+`
+		require.NoError(t, os.WriteFile(testFilePath, []byte(workItemContent), 0o600))
+
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		workItemType, id, title, currentStatus, repos, err := extractWorkItemMetadata(testFilePath, cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "prd", workItemType)
+		assert.Equal(t, "010", id)
+		assert.Equal(t, "Draft PR feature", title)
+		assert.Equal(t, "doing", currentStatus)
+		require.Len(t, repos, 2)
+		assert.Equal(t, []string{"frontend", "backend"}, repos)
+	})
+
+	t.Run("repos nil when absent from front matter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		_, _, _, _, repos, err := extractWorkItemMetadata(testFilePath, cfg)
+		require.NoError(t, err)
+		assert.Nil(t, repos)
 	})
 }
 
