@@ -894,3 +894,102 @@ workspace:
 			"expected error to mention null or control characters, got: %s", err.Error())
 	})
 }
+
+func TestGetDocsFolderPath(t *testing.T) {
+	t.Run("returns default when config is nil", func(t *testing.T) {
+		assert.Equal(t, ".docs", GetDocsFolderPath(nil))
+	})
+
+	t.Run("returns default when docs_folder is empty", func(t *testing.T) {
+		cfg := &Config{DocsFolder: ""}
+		assert.Equal(t, ".docs", GetDocsFolderPath(cfg))
+	})
+
+	t.Run("returns custom docs_folder", func(t *testing.T) {
+		cfg := &Config{DocsFolder: "docs"}
+		assert.Equal(t, "docs", GetDocsFolderPath(cfg))
+	})
+
+	t.Run("returns trimmed docs_folder", func(t *testing.T) {
+		cfg := &Config{DocsFolder: "  .docs  "}
+		assert.Equal(t, ".docs", GetDocsFolderPath(cfg))
+	})
+}
+
+func TestDocsRoot(t *testing.T) {
+	t.Run("resolves relative path against targetDir", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{DocsFolder: "docs"}
+		absPath, err := DocsRoot(cfg, tmpDir)
+		require.NoError(t, err)
+		expected := filepath.Join(tmpDir, "docs")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(absPath))
+	})
+
+	t.Run("resolves default .docs when ConfigDir set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{ConfigDir: tmpDir}
+		absPath, err := DocsRoot(cfg, tmpDir)
+		require.NoError(t, err)
+		expected := filepath.Join(tmpDir, ".docs")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(absPath))
+	})
+
+	t.Run("rejects docs_folder with path traversal", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{DocsFolder: "../other"}
+		_, err := DocsRoot(cfg, tmpDir)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must not escape")
+	})
+}
+
+func TestDocsFolderConfig(t *testing.T) {
+	t.Run("loads docs_folder from kira.yml", func(t *testing.T) {
+		testConfig := `version: "1.0"
+docs_folder: documentation
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		assert.Equal(t, "documentation", config.DocsFolder)
+		assert.Equal(t, "documentation", GetDocsFolderPath(config))
+	})
+
+	t.Run("defaults docs_folder to .docs when missing", func(t *testing.T) {
+		_ = os.Remove("kira.yml")
+		_ = os.Remove(".work/kira.yml")
+
+		config, err := LoadConfig()
+		require.NoError(t, err)
+		assert.Equal(t, ".docs", config.DocsFolder)
+		assert.Equal(t, ".docs", GetDocsFolderPath(config))
+	})
+
+	t.Run("rejects docs_folder with ..", func(t *testing.T) {
+		testConfig := `version: "1.0"
+docs_folder: "../elsewhere"
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "docs_folder")
+		assert.Contains(t, err.Error(), "..")
+	})
+
+	t.Run("rejects docs_folder that is only whitespace", func(t *testing.T) {
+		testConfig := `version: "1.0"
+docs_folder: "   "
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "docs_folder")
+	})
+}
