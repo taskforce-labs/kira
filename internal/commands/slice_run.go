@@ -771,7 +771,7 @@ func runSliceTaskCurrentToggle(cmd *cobra.Command, cfg *config.Config, workItemI
 }
 
 func workItemIDFromPath(path string, cfg *config.Config) string {
-	_, id, _, _, err := extractWorkItemMetadata(path, cfg)
+	_, id, _, _, _, err := extractWorkItemMetadata(path, cfg)
 	if err != nil || id == unknownValue {
 		return ""
 	}
@@ -919,7 +919,7 @@ func fallbackSliceCommitMessage(path string, cfg *config.Config, workItemID stri
 	if s := firstSliceWithOpenTasks(slices); s != nil {
 		return s.Name
 	}
-	_, _, title, _, err := extractWorkItemMetadata(path, cfg)
+	_, _, title, _, _, err := extractWorkItemMetadata(path, cfg)
 	if err == nil && title != "" && title != unknownValue {
 		return title
 	}
