@@ -111,8 +111,11 @@ func findWorkItemFile(workItemID string, cfg *config.Config) (string, error) {
 				return err
 			}
 
-			// Simple check for ID in front matter
-			if strings.Contains(string(content), fmt.Sprintf("id: %s", workItemID)) {
+			// Simple check for ID in front matter (unquoted, double-quoted, or single-quoted)
+			s := string(content)
+			if strings.Contains(s, fmt.Sprintf("id: %s", workItemID)) ||
+				strings.Contains(s, fmt.Sprintf("id: %q", workItemID)) ||
+				strings.Contains(s, fmt.Sprintf("id: '%s'", workItemID)) {
 				foundPath = path
 				return filepath.SkipDir
 			}

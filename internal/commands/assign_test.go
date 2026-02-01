@@ -443,7 +443,7 @@ func TestResolveWorkItems(t *testing.T) {
 
 		// Create multiple work item files
 		workItem1 := `---
-id: 001
+id: "001"
 title: Test Feature 1
 status: todo
 kind: prd
@@ -453,7 +453,7 @@ created: 2024-01-01
 # Test Feature 1
 `
 		workItem2 := `---
-id: 002
+id: "002"
 title: Test Feature 2
 status: doing
 kind: prd
@@ -864,7 +864,7 @@ func TestExtractIDFromYAMLLines(t *testing.T) {
 		assert.Equal(t, "017", extractIDFromYAMLLines(lines))
 	})
 	t.Run("preserves id 001 as written", func(t *testing.T) {
-		lines := []string{"id: 001", "title: Test"}
+		lines := []string{`id: "001"`, "title: Test"}
 		assert.Equal(t, "001", extractIDFromYAMLLines(lines))
 	})
 }
@@ -1066,7 +1066,7 @@ This is just markdown without front matter.
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 invalid: [unclosed bracket
 ---
@@ -1103,7 +1103,7 @@ invalid: [unclosed bracket
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 ---
 # Test Feature
@@ -1413,7 +1413,7 @@ Complex body content.
 
 const (
 	testWorkItemContentPhase5 = `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -1422,7 +1422,7 @@ created: 2024-01-01
 # Test Feature
 `
 	testWorkItemContentPhase5Feature1 = `---
-id: 001
+id: "001"
 title: Test Feature 1
 status: todo
 kind: prd
@@ -1431,7 +1431,7 @@ created: 2024-01-01
 # Test Feature 1
 `
 	testWorkItemContentWithAssigned = `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -1441,7 +1441,7 @@ assigned: user@example.com
 # Test Feature
 `
 	testWorkItemContentMalformedYAML = `---
-id: 001
+id: "001"
 title: Test Feature
 invalid: [unclosed bracket
 ---
@@ -1480,8 +1480,8 @@ func TestWriteWorkItemFrontMatter(t *testing.T) {
 		require.NoError(t, err)
 		contentStr := string(content)
 
-		// Check front matter
-		assert.Contains(t, contentStr, "id: 001")
+		// Check front matter (id may be written as "001" or 001 by YAML encoder)
+		assert.True(t, strings.Contains(contentStr, `id: "001"`) || strings.Contains(contentStr, "id: 001"), "should contain id field")
 		assert.Contains(t, contentStr, "title: Test Feature")
 		assert.Contains(t, contentStr, "assigned: user@example.com")
 		assert.Contains(t, contentStr, "tags: [frontend, backend]")
@@ -1765,7 +1765,7 @@ func TestUpdateWorkItemField(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -1822,7 +1822,7 @@ Body content.
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -1912,7 +1912,7 @@ updated: 2024-01-01T00:00:00Z
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -1947,7 +1947,7 @@ tags: [frontend, backend]
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2329,7 +2329,7 @@ func TestUpdateWorkItemFieldAppend(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2361,7 +2361,7 @@ assigned: ""
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2395,7 +2395,7 @@ assigned: alice@example.com
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2429,7 +2429,7 @@ assigned: [alice@example.com, bob@example.com]
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2463,7 +2463,7 @@ assigned: [alice@example.com, bob@example.com]
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2517,7 +2517,7 @@ updated: 2024-01-01T00:00:00Z
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2552,7 +2552,7 @@ tags: [frontend, backend]
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2591,7 +2591,7 @@ More content here.
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2624,7 +2624,7 @@ reviewer: alice@example.com
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2707,8 +2707,8 @@ func TestUpdateWorkItemFieldUnassign(t *testing.T) {
 		updatedStr := string(updatedContent)
 
 		assert.NotContains(t, updatedStr, "assigned:")
-		// YAML may parse "001" as integer 1, so check for either format
-		assert.True(t, strings.Contains(updatedStr, "id: 001") || strings.Contains(updatedStr, "id: 1"), "should contain id field")
+		// YAML may write id as "001", 001, or 1 depending on encoder/parser
+		assert.True(t, strings.Contains(updatedStr, `id: "001"`) || strings.Contains(updatedStr, "id: 001") || strings.Contains(updatedStr, "id: 1"), "should contain id field")
 		assert.Contains(t, updatedStr, "title: Test Feature")
 	})
 
@@ -2786,7 +2786,7 @@ func TestUpdateWorkItemFieldUnassign(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2838,7 +2838,7 @@ reviewer: reviewer@example.com
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2875,7 +2875,7 @@ tags: [frontend, backend]
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -2944,7 +2944,7 @@ More content here.
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -3030,7 +3030,7 @@ func TestProcessWorkItemUpdatesUnassign(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -3070,7 +3070,7 @@ reviewer: reviewer@example.com
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content1 := `---
-id: 001
+id: "001"
 title: Test Feature 1
 status: todo
 kind: prd
@@ -3080,7 +3080,7 @@ assigned: user1@example.com
 # Test Feature 1
 `
 		content2 := `---
-id: 002
+id: "002"
 title: Test Feature 2
 status: todo
 kind: prd
@@ -3204,7 +3204,7 @@ func TestProcessWorkItemUpdatesBatch(t *testing.T) {
 
 		content1 := testWorkItemContentPhase5Feature1
 		content2 := `---
-id: 002
+id: "002"
 title: Test Feature 2
 status: todo
 kind: prd
@@ -3213,7 +3213,7 @@ created: 2024-01-01
 # Test Feature 2
 `
 		content3 := `---
-id: 003
+id: "003"
 title: Test Feature 3
 status: doing
 kind: prd
@@ -3281,7 +3281,7 @@ created: 2024-01-01
 
 		// Create a file with malformed YAML
 		malformedContent := `---
-id: 002
+id: "002"
 title: Test Feature 2
 invalid: [unclosed bracket
 ---
@@ -3333,7 +3333,7 @@ invalid: [unclosed bracket
 
 		// Create a file with malformed YAML
 		malformedContent := `---
-id: 002
+id: "002"
 title: Test Feature 2
 invalid: [unclosed bracket
 ---
@@ -3375,7 +3375,7 @@ invalid: [unclosed bracket
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content1 := `---
-id: 001
+id: "001"
 title: Test Feature 1
 status: todo
 kind: prd
@@ -3385,7 +3385,7 @@ assigned: user1@example.com
 # Test Feature 1
 `
 		content2 := `---
-id: 002
+id: "002"
 title: Test Feature 2
 status: todo
 kind: prd
@@ -3435,7 +3435,7 @@ assigned: user2@example.com
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content1 := `---
-id: 001
+id: "001"
 title: Test Feature 1
 status: todo
 kind: prd
@@ -3445,7 +3445,7 @@ assigned: alice@example.com
 # Test Feature 1
 `
 		content2 := `---
-id: 002
+id: "002"
 title: Test Feature 2
 status: todo
 kind: prd
@@ -3505,7 +3505,7 @@ func TestGetWorkItemDisplayID(t *testing.T) {
 		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
 
 		content := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -3984,7 +3984,7 @@ func TestGetCurrentAssignment(t *testing.T) {
 
 	t.Run("returns current assignment when field exists", func(t *testing.T) {
 		workItemContent := `---
-id: 001
+id: "001"
 title: Test Feature
 status: todo
 kind: prd
@@ -4005,7 +4005,7 @@ created: 2024-01-01
 
 	t.Run("returns empty string when field does not exist", func(t *testing.T) {
 		workItemContent := `---
-id: 002
+id: "002"
 title: Test Feature
 status: todo
 kind: prd
@@ -4025,7 +4025,7 @@ created: 2024-01-01
 
 	t.Run("returns empty string when field is empty", func(t *testing.T) {
 		workItemContent := `---
-id: 003
+id: "003"
 title: Test Feature
 status: todo
 kind: prd
