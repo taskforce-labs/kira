@@ -467,7 +467,7 @@ func taskBox(done bool) string {
 
 func printAllSlices(slices []Slice) {
 	for _, s := range slices {
-		fmt.Printf("### %s\n", s.Name)
+		fmt.Printf("%s\n", s.Name)
 		for _, t := range s.Tasks {
 			fmt.Printf("  %s %s: %s\n", taskBox(t.Done), t.ID, t.Description)
 		}
@@ -476,7 +476,7 @@ func printAllSlices(slices []Slice) {
 }
 
 func printSliceDetail(s Slice) {
-	fmt.Printf("### %s\n", s.Name)
+	fmt.Printf("%s\n", s.Name)
 	for _, t := range s.Tasks {
 		fmt.Printf("  %s %s: %s\n", taskBox(t.Done), t.ID, t.Description)
 		if t.Notes != "" {
