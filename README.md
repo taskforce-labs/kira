@@ -7,6 +7,9 @@ Develop multiple features in parallel with kira workflows that create worktrees,
 
 
 ## Quick Start
+
+For detailed documentation see [.docs/README.md](.docs/README.md).
+
 0. Setup the project
 ```bash
 kira init

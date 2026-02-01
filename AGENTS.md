@@ -1,5 +1,7 @@
 # Agents
 
+See [.docs/agents/](.docs/agents/) for comprehensive agent documentation.
+
 ## Checking your work
 Check your work by running `make check` after making changes.
 This will run the following checks:
@@ -13,7 +15,7 @@ If make check passes, run the following to verify the e2e tests pass:
 
 ## Golang
 
-See [Go Secure Coding Practices](docs/security/golang-secure-coding.md) for comprehensive security guidelines covering:
+See [Go Secure Coding Practices](.docs/guides/security/golang-secure-coding.md) for comprehensive security guidelines covering:
 - File path validation patterns
 - File permissions
 - Command execution security

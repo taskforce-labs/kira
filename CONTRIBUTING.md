@@ -2,6 +2,8 @@
 
 Thanks for your interest in contributing! This guide covers local development, building, testing, formatting, and installation details for contributors.
 
+See [.docs/guides/](.docs/guides/) for development and usage guides.
+
 ## Development Setup
 
 ```bash
