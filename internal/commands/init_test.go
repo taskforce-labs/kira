@@ -76,6 +76,23 @@ func TestInitializeWorkspace(t *testing.T) {
 		// Check that kira.yml was created at root of targetDir
 		configPath := filepath.Join(tmpDir, "kira.yml")
 		assert.FileExists(t, configPath)
+
+		// Check that .docs directory and standard subdirs were created
+		docsDir := filepath.Join(tmpDir, ".docs")
+		assert.DirExists(t, docsDir)
+		for _, sub := range docsSubdirs {
+			assert.DirExists(t, filepath.Join(docsDir, sub))
+		}
+
+		// Check that kira.yml contains docs_folder (use Glob for gosec-safe read)
+		globPattern := filepath.Join(tmpDir, "kira.yml")
+		files, err := filepath.Glob(globPattern)
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+		configData, err := os.ReadFile(files[0])
+		require.NoError(t, err)
+		assert.Contains(t, string(configData), "docs_folder")
+		assert.Contains(t, string(configData), ".docs")
 	})
 
 	t.Run("preserves existing files", func(t *testing.T) {
@@ -156,5 +173,100 @@ func TestIdeasFileBehavior(t *testing.T) {
 			}
 		}
 		assert.Equal(t, 1, headerCount)
+	})
+}
+
+func TestInitializeDocsFolder(t *testing.T) {
+	t.Run("creates default .docs and subdirs", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg, err := config.LoadConfigFromDir(tmpDir)
+		require.NoError(t, err)
+
+		err = initializeDocsFolder(tmpDir, cfg)
+		require.NoError(t, err)
+
+		docsDir := filepath.Join(tmpDir, ".docs")
+		assert.DirExists(t, docsDir)
+		for _, sub := range docsSubdirs {
+			assert.DirExists(t, filepath.Join(docsDir, sub))
+		}
+	})
+
+	t.Run("creates custom docs_folder path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{DocsFolder: "docs"}
+
+		err := initializeDocsFolder(tmpDir, cfg)
+		require.NoError(t, err)
+
+		docsDir := filepath.Join(tmpDir, "docs")
+		assert.DirExists(t, docsDir)
+		assert.DirExists(t, filepath.Join(docsDir, "agents"))
+		assert.DirExists(t, filepath.Join(docsDir, "guides", "security"))
+	})
+
+	t.Run("fill-missing adds only missing subdirs", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg, err := config.LoadConfigFromDir(tmpDir)
+		require.NoError(t, err)
+
+		docsDir := filepath.Join(tmpDir, ".docs")
+		require.NoError(t, os.MkdirAll(filepath.Join(docsDir, "agents"), 0o700))
+		existingFile := filepath.Join(docsDir, "agents", "existing.md")
+		require.NoError(t, os.WriteFile(existingFile, []byte("keep"), 0o600))
+
+		err = initializeDocsFolder(tmpDir, cfg)
+		require.NoError(t, err)
+
+		for _, sub := range docsSubdirs {
+			assert.DirExists(t, filepath.Join(docsDir, sub))
+		}
+		files, err := filepath.Glob(existingFile)
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+		content, err := os.ReadFile(files[0])
+		require.NoError(t, err)
+		assert.Equal(t, "keep", string(content))
+	})
+}
+
+func TestEnsureWorkspaceDecision(t *testing.T) {
+	t.Run("force removes existing work and docs", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		workPath := filepath.Join(tmpDir, "work")
+		docsPath := filepath.Join(tmpDir, "docs")
+		require.NoError(t, os.MkdirAll(workPath, 0o700))
+		require.NoError(t, os.MkdirAll(docsPath, 0o700))
+
+		err := ensureWorkspaceDecision(workPath, docsPath, true, false)
+		require.NoError(t, err)
+
+		_, err = os.Stat(workPath)
+		assert.True(t, os.IsNotExist(err))
+		_, err = os.Stat(docsPath)
+		assert.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("fill-missing does not remove existing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		workPath := filepath.Join(tmpDir, "work")
+		docsPath := filepath.Join(tmpDir, "docs")
+		require.NoError(t, os.MkdirAll(workPath, 0o700))
+		require.NoError(t, os.MkdirAll(docsPath, 0o700))
+
+		err := ensureWorkspaceDecision(workPath, docsPath, false, true)
+		require.NoError(t, err)
+
+		assert.DirExists(t, workPath)
+		assert.DirExists(t, docsPath)
+	})
+
+	t.Run("no prompt when neither exists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		workPath := filepath.Join(tmpDir, "work")
+		docsPath := filepath.Join(tmpDir, "docs")
+
+		err := ensureWorkspaceDecision(workPath, docsPath, false, false)
+		require.NoError(t, err)
 	})
 }
