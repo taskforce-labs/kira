@@ -14,7 +14,10 @@ import (
 	"kira/internal/config"
 )
 
-const sliceLintOutputJSON = "json"
+const (
+	sliceLintOutputJSON = "json"
+	taskStateOpen       = "open"
+)
 
 // PrintSliceSummaryIfPresent prints a one-line slice/task summary if the work item has a Slices section.
 // Used by kira start when moving to doing.
@@ -32,7 +35,7 @@ func PrintSliceSummaryIfPresent(path string, cfg *config.Config) {
 			}
 		}
 	}
-	fmt.Printf("Slices: %d slices, %d tasks (%d open)\n", len(slices), total, open)
+	fmt.Printf("%s %d slices, %d tasks (%d open)\n", labelStyle("Slices:"), len(slices), total, open)
 }
 
 func getSlicesConfig(cfg *config.Config) *config.SlicesConfig {
@@ -319,7 +322,7 @@ func runSliceTaskEdit(cmd *cobra.Command, args []string) error {
 	if err := writeSlicesToFile(path, content, slices, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("Updated task %s in work item %s\n", taskID, workItemID)
+	fmt.Printf("Updated task %s in work item %s\n", taskIDStyle(taskID), taskIDStyle(workItemID))
 	noCommit, _ := cmd.Flags().GetBool("no-commit")
 	if !noCommit {
 		msg := fmt.Sprintf("Edit task %s in %s", taskID, workItemID)
@@ -357,11 +360,15 @@ func runSliceTaskToggle(cmd *cobra.Command, args []string) error {
 	if err := writeSlicesToFile(path, content, slices, cfg); err != nil {
 		return err
 	}
-	state := "open"
+	state := taskStateOpen
 	if slices[si].Tasks[ti].Done {
-		state = "done"
+		state = defaultReleaseStatus
 	}
-	fmt.Printf("Task %s set to %s in work item %s\n", taskID, state, workItemID)
+	stateOut := state
+	if state == defaultReleaseStatus {
+		stateOut = successStyle(state)
+	}
+	fmt.Printf("Task %s set to %s in work item %s\n", taskIDStyle(taskID), stateOut, taskIDStyle(workItemID))
 	noCommit, _ := cmd.Flags().GetBool("no-commit")
 	if !noCommit {
 		msg := fmt.Sprintf("Toggle task %s in %s", taskID, workItemID)
@@ -458,27 +465,20 @@ func findSliceByName(slices []Slice, name string) *Slice {
 	return nil
 }
 
-func taskBox(done bool) string {
-	if done {
-		return "[x]"
-	}
-	return "[ ]"
-}
-
 func printAllSlices(slices []Slice) {
 	for _, s := range slices {
-		fmt.Printf("%s\n", s.Name)
+		fmt.Println(sliceNameStyle(s.Name))
 		for _, t := range s.Tasks {
-			fmt.Printf("  %s %s: %s\n", taskBox(t.Done), t.ID, t.Description)
+			fmt.Printf("  %s %s: %s\n", taskBoxStyle(t.Done), taskIDStyle(t.ID), t.Description)
 		}
 		fmt.Println()
 	}
 }
 
 func printSliceDetail(s Slice) {
-	fmt.Printf("%s\n", s.Name)
+	fmt.Println(sliceNameStyle(s.Name))
 	for _, t := range s.Tasks {
-		fmt.Printf("  %s %s: %s\n", taskBox(t.Done), t.ID, t.Description)
+		fmt.Printf("  %s %s: %s\n", taskBoxStyle(t.Done), taskIDStyle(t.ID), t.Description)
 		if t.Notes != "" {
 			fmt.Printf("    Notes: %s\n", t.Notes)
 		}
@@ -486,12 +486,16 @@ func printSliceDetail(s Slice) {
 }
 
 func printTaskDetail(t Task, sliceName string) {
-	fmt.Printf("Task: %s\n", t.ID)
-	fmt.Printf("Slice: %s\n", sliceName)
-	fmt.Printf("Description: %s\n", t.Description)
-	fmt.Printf("State: %s\n", map[bool]string{false: "open", true: "done"}[t.Done])
+	stateStr := taskStateOpen
+	if t.Done {
+		stateStr = successStyle(defaultReleaseStatus)
+	}
+	fmt.Printf("%s %s\n", labelStyle("Task:"), taskIDStyle(t.ID))
+	fmt.Printf("%s %s\n", labelStyle("Slice:"), sliceNameStyle(sliceName))
+	fmt.Printf("%s %s\n", labelStyle("Description:"), t.Description)
+	fmt.Printf("%s %s\n", labelStyle("State:"), stateStr)
 	if t.Notes != "" {
-		fmt.Printf("Notes: %s\n", t.Notes)
+		fmt.Printf("%s %s\n", labelStyle("Notes:"), t.Notes)
 	}
 }
 
@@ -522,7 +526,7 @@ func runSliceProgress(_ *cobra.Command, args []string) error {
 		}
 	}
 	open := total - done
-	fmt.Printf("Work item %s: %d tasks (%d done, %d open)\n", workItemID, total, done, open)
+	fmt.Printf("Work item %s: %d tasks (%d done, %d open)\n", taskIDStyle(workItemID), total, done, open)
 	if total > 0 {
 		pct := 100 * done / total
 		fmt.Printf("Progress: %d%%\n", pct)
@@ -536,7 +540,7 @@ func runSliceProgress(_ *cobra.Command, args []string) error {
 				so++
 			}
 		}
-		fmt.Printf("  %s: %d done, %d open\n", s.Name, sd, so)
+		fmt.Printf("  %s: %d done, %d open\n", sliceNameStyle(s.Name), sd, so)
 	}
 	return nil
 }
@@ -637,7 +641,7 @@ func outputSliceCurrentJSON(workItemID string, cur *Slice) error {
 
 func printSliceCurrentHuman(cur *Slice) {
 	if cur == nil {
-		fmt.Println("Current slice: (none - all tasks done)")
+		fmt.Println(labelStyle("Current slice:") + " (none - all tasks done)")
 		return
 	}
 	openCount := 0
@@ -646,10 +650,10 @@ func printSliceCurrentHuman(cur *Slice) {
 			openCount++
 		}
 	}
-	fmt.Printf("Current slice: %s (%d open tasks)\n", cur.Name, openCount)
+	fmt.Printf("%s %s (%d open tasks)\n", labelStyle("Current slice:"), sliceNameStyle(cur.Name), openCount)
 	for _, t := range cur.Tasks {
 		if !t.Done {
-			fmt.Printf("  - %s: %s\n", t.ID, t.Description)
+			fmt.Printf("  - %s: %s\n", taskIDStyle(t.ID), t.Description)
 		}
 	}
 }
@@ -714,9 +718,9 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	}
-	fmt.Printf("Current task: %s - %s\n", t.ID, t.Description)
+	fmt.Printf("%s %s - %s\n", labelStyle("Current task:"), taskIDStyle(t.ID), t.Description)
 	if t.Notes != "" {
-		fmt.Printf("  Notes: %s\n", t.Notes)
+		fmt.Printf("  %s %s\n", labelStyle("Notes:"), t.Notes)
 	}
 	return nil
 }
@@ -746,11 +750,15 @@ func runSliceTaskCurrentToggle(cmd *cobra.Command, cfg *config.Config, workItemI
 	if err := writeSlicesToFile(path, content, slices, cfg); err != nil {
 		return err
 	}
-	state := "open"
+	state := taskStateOpen
 	if slices[si].Tasks[ti].Done {
-		state = "done"
+		state = defaultReleaseStatus
 	}
-	fmt.Printf("Task %s set to %s\n", t.ID, state)
+	stateOut := state
+	if state == defaultReleaseStatus {
+		stateOut = successStyle(state)
+	}
+	fmt.Printf("Task %s set to %s\n", taskIDStyle(t.ID), stateOut)
 	noCommit, _ := cmd.Flags().GetBool("no-commit")
 	if !noCommit {
 		msg := fmt.Sprintf("Toggle task %s to %s", t.ID, state)
@@ -800,7 +808,7 @@ func runSliceCommit(_ *cobra.Command, args []string) error {
 	if err := sliceCommitWorkItem(path, message, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("Committed: %s\n", message)
+	fmt.Printf("%s %s\n", successStyle("Committed:"), message)
 	return nil
 }
 
@@ -1003,7 +1011,7 @@ func outputSliceLintHuman(path string, errs []SliceLintError) error {
 		if e.Location != path {
 			line = e.Location
 		}
-		fmt.Printf("%s [%s] %s", line, e.Rule, e.Message)
+		fmt.Printf("%s [%s] %s", line, errorStyle(e.Rule), e.Message)
 		if e.Suggestion != "" {
 			fmt.Printf(" Suggestion: %s", e.Suggestion)
 		}
@@ -1012,7 +1020,7 @@ func outputSliceLintHuman(path string, errs []SliceLintError) error {
 	if len(errs) > 0 {
 		return fmt.Errorf("slice lint found %d error(s)", len(errs))
 	}
-	fmt.Println("Slices section is valid.")
+	fmt.Println(successStyle("Slices section is valid."))
 	return nil
 }
 
