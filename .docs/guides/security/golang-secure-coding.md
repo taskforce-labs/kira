@@ -240,5 +240,3 @@ Never use `#nosec` to bypass security checks without proper validation.
 - **Command sanitization**: See `internal/commands/save.go` - `sanitizeCommitMessage()`
 - **Test path validation**: See `internal/commands/integration_test.go` - `validateTestPath()`
 
-
-
