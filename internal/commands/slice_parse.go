@@ -96,25 +96,65 @@ func parseTaskLine(lines []string, i int, trimmed string) *Task {
 }
 
 // findSlicesSection returns start and end byte offsets of the ## Slices section (including heading and up to next ## or EOF).
+// It only matches a top-level "## Slices" heading at the start of a line, not inside fenced code blocks or inline code.
 func findSlicesSection(content []byte) (start, end int, found bool) {
-	idx := bytes.Index(content, []byte(slicesHeading))
-	if idx < 0 {
-		return 0, 0, false
-	}
-	start = idx
-	// Find end: next ## at start of line
-	rest := content[start+len(slicesHeading):]
-	nextH2 := bytes.Index(rest, []byte("\n## "))
-	if nextH2 >= 0 {
-		end = start + len(slicesHeading) + nextH2
-	} else {
-		end = len(content)
-		// Trim trailing newlines from section so we don't duplicate
-		for end > start && (content[end-1] == '\n' || content[end-1] == '\r') {
-			end--
+	sectionStart := -1
+	inCodeBlock := false
+	pos := 0
+	for pos < len(content) {
+		lineStart, trimmedStr, nextPos := nextLine(content, pos)
+		pos = nextPos
+
+		inCodeBlock = updateCodeBlockState(inCodeBlock, trimmedStr)
+		if inCodeBlock {
+			continue
+		}
+
+		if trimmedStr == slicesHeading {
+			if sectionStart < 0 {
+				sectionStart = lineStart
+			}
+			continue
+		}
+		if sectionStart >= 0 && strings.HasPrefix(trimmedStr, "## ") {
+			end = trimSectionEnd(content, sectionStart, lineStart)
+			return sectionStart, end, true
 		}
 	}
-	return start, end, true
+	if sectionStart >= 0 {
+		end = trimSectionEnd(content, sectionStart, len(content))
+		return sectionStart, end, true
+	}
+	return 0, 0, false
+}
+
+// nextLine returns line start offset, trimmed line string, and the next position after the line (including newline).
+func nextLine(content []byte, pos int) (lineStart int, trimmed string, nextPos int) {
+	lineStart = pos
+	lineEnd := bytes.IndexByte(content[pos:], '\n')
+	if lineEnd < 0 {
+		lineEnd = len(content) - pos
+	}
+	line := content[pos : pos+lineEnd]
+	nextPos = pos + lineEnd
+	if pos+lineEnd < len(content) {
+		nextPos++ // consume newline
+	}
+	return lineStart, string(bytes.TrimSpace(line)), nextPos
+}
+
+func updateCodeBlockState(inCodeBlock bool, trimmed string) bool {
+	if strings.HasPrefix(trimmed, "```") {
+		return !inCodeBlock
+	}
+	return inCodeBlock
+}
+
+func trimSectionEnd(content []byte, start, end int) int {
+	for end > start && (content[end-1] == '\n' || content[end-1] == '\r') {
+		end--
+	}
+	return end
 }
 
 // GenerateSlicesSection formats slices as markdown (## Slices, ### Name, optional Commit:, task list).
