@@ -13,6 +13,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// docsSubdirs are the standard subdirectories under the docs folder (relative paths).
+var docsSubdirs = []string{
+	"agents", "architecture", "product", "reports", "guides", "api",
+	"guides/security",
+}
+
 var initCmd = &cobra.Command{
 	Use:   "init [folder]",
 	Short: "Initialize a kira workspace",
@@ -32,7 +38,8 @@ var initCmd = &cobra.Command{
 		force, _ := cmd.Flags().GetBool("force")
 		fillMissing, _ := cmd.Flags().GetBool("fill-missing")
 		workPath := filepath.Join(targetDir, config.GetWorkFolderPath(cfg))
-		if err := ensureDirDecision(workPath, force, fillMissing); err != nil {
+		docsPath := filepath.Join(targetDir, config.GetDocsFolderPath(cfg))
+		if err := ensureWorkspaceDecision(workPath, docsPath, force, fillMissing); err != nil {
 			return err
 		}
 
@@ -101,6 +108,11 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 		}
 	}
 
+	// Create docs folder and standard subdirs
+	if err := initializeDocsFolder(targetDir, cfg); err != nil {
+		return err
+	}
+
 	// Create kira.yml config file under the target directory
 	if err := config.SaveConfigToDir(cfg, targetDir); err != nil {
 		return fmt.Errorf("failed to create kira.yml: %w", err)
@@ -110,21 +122,46 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 	return nil
 }
 
-func ensureDirDecision(workPath string, force, fillMissing bool) error {
-	if _, err := os.Stat(workPath); os.IsNotExist(err) {
+func initializeDocsFolder(targetDir string, cfg *config.Config) error {
+	docsRoot := filepath.Join(targetDir, config.GetDocsFolderPath(cfg))
+	if err := os.MkdirAll(docsRoot, 0o700); err != nil {
+		return fmt.Errorf("failed to create docs directory: %w", err)
+	}
+	for _, sub := range docsSubdirs {
+		subPath := filepath.Join(docsRoot, sub)
+		if err := os.MkdirAll(subPath, 0o700); err != nil {
+			return fmt.Errorf("failed to create docs subfolder %s: %w", sub, err)
+		}
+	}
+	return nil
+}
+
+func removePathIfExists(path, kind string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("failed to remove existing %s: %w", kind, err)
+	}
+	return nil
+}
+
+func ensureWorkspaceDecision(workPath, docsPath string, force, fillMissing bool) error {
+	workExists := pathExists(workPath)
+	docsExists := pathExists(docsPath)
+	if !workExists && !docsExists {
 		return nil
 	}
 	if force {
-		if err := os.RemoveAll(workPath); err != nil {
-			return fmt.Errorf("failed to remove existing work folder: %w", err)
-		}
+		_ = removePathIfExists(workPath, "work folder")
+		_ = removePathIfExists(docsPath, "docs folder")
 		return nil
 	}
 	if fillMissing {
 		return nil
 	}
 
-	fmt.Printf("Work folder (%s) already exists. Choose an option: [c]ancel, [o]verwrite, [f]ill-missing\n", workPath)
+	fmt.Printf("Workspace (.work and docs) already exists. Choose an option: [c]ancel, [o]verwrite, [f]ill-missing\n")
 	fmt.Print("Enter choice (c/o/f): ")
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
@@ -132,15 +169,18 @@ func ensureDirDecision(workPath string, force, fillMissing bool) error {
 		return err
 	}
 	choice := strings.ToLower(strings.TrimSpace(input))
-	switch choice {
-	case "o", "overwrite":
-		if err := os.RemoveAll(workPath); err != nil {
-			return fmt.Errorf("failed to remove existing work folder: %w", err)
-		}
+	if choice == "f" || choice == "fill-missing" {
 		return nil
-	case "f", "fill-missing":
-		return nil
-	default:
-		return fmt.Errorf("init cancelled")
 	}
+	if choice == "o" || choice == "overwrite" {
+		_ = removePathIfExists(workPath, "work folder")
+		_ = removePathIfExists(docsPath, "docs folder")
+		return nil
+	}
+	return fmt.Errorf("init cancelled")
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
