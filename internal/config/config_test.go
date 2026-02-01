@@ -942,6 +942,16 @@ func TestDocsRoot(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "must not escape")
 	})
+
+	t.Run("uses current dir when targetDir empty", func(t *testing.T) {
+		cfg := &Config{DocsFolder: ".docs"}
+		absPath, err := DocsRoot(cfg, "")
+		require.NoError(t, err)
+		cwd, err := filepath.Abs(".")
+		require.NoError(t, err)
+		expected := filepath.Join(cwd, ".docs")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(absPath))
+	})
 }
 
 func TestDocsFolderConfig(t *testing.T) {

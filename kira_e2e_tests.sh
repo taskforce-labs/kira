@@ -77,6 +77,37 @@ for dir in "${REQUIRED_DIRS[@]}"; do
     fi
 done
 
+# Test 2c: Check docs folder structure
+echo ""
+echo "📂 Test 2c: Check docs folder structure"
+if [ -d ".docs" ]; then
+    echo "✅ Docs folder .docs exists"
+else
+    echo "❌ Docs folder .docs missing"
+    exit 1
+fi
+DOCS_SUBDIRS=("agents" "architecture" "product" "reports" "guides" "api" "guides/security")
+for dir in "${DOCS_SUBDIRS[@]}"; do
+    if [ -d ".docs/$dir" ]; then
+        echo "✅ Directory .docs/$dir exists"
+    else
+        echo "❌ Directory .docs/$dir missing"
+        exit 1
+    fi
+done
+if [ -f ".docs/README.md" ]; then
+    echo "✅ File .docs/README.md exists"
+else
+    echo "❌ File .docs/README.md missing"
+    exit 1
+fi
+if grep -q "docs_folder" kira.yml; then
+    echo "✅ kira.yml contains docs_folder"
+else
+    echo "❌ kira.yml missing docs_folder"
+    exit 1
+fi
+
 # Test 3: Check required files
 echo ""
 echo "📄 Test 3: Check required files"
@@ -240,14 +271,21 @@ fi
 # Test 11: init flags: fill-missing and force
 echo ""
 echo "🧪 Test 11: init --fill-missing and --force"
-# Remove a folder and create sentinel
+# Remove a folder and create sentinel; also remove a docs subdir to test fill-missing for docs
 rm -rf .work/3_review
+rm -rf .docs/architecture
 touch .work/1_todo/sentinel.txt
 if "$KIRA_BIN" init --fill-missing; then
   if [ -d .work/3_review ] && [ -f .work/1_todo/sentinel.txt ]; then
     echo "✅ fill-missing restored folder without overwriting existing files"
   else
     echo "❌ fill-missing behavior incorrect"
+    exit 1
+  fi
+  if [ -d .docs/architecture ]; then
+    echo "✅ fill-missing restored docs subfolder .docs/architecture"
+  else
+    echo "❌ fill-missing did not restore .docs/architecture"
     exit 1
   fi
 else
