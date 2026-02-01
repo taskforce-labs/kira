@@ -15,6 +15,7 @@ var lintCmd = &cobra.Command{
 	Use:           "lint",
 	Short:         "Check for issues in work items",
 	Long:          `Scans folders and files to check for issues and reports any found.`,
+	Args:          cobra.ExactArgs(0),
 	SilenceUsage:  true, // Don't show usage on error
 	SilenceErrors: true, // Don't show error message (main.go handles it)
 	RunE: func(cmd *cobra.Command, _ []string) error {
