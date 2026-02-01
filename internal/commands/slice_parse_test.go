@@ -97,6 +97,20 @@ Commit: Complete Foundation
 		require.Len(t, slices[0].Tasks, 1)
 		assert.Equal(t, "Some note here", slices[0].Tasks[0].Notes)
 	})
+
+	t.Run("finds real Slices section when ## Slices appears in prose and code block first", func(t *testing.T) {
+		// Backtick in prose and ## Slices inside a fenced block must be skipped; only the real ## Slices is used.
+		content := []byte("# PRD\n\n- Edit the work item directly (e.g. add a full \x60## Slices\x60 section).\n- Example in code block:\n```markdown\n## Slices\n\n### Fake\n- [ ] T001: Not real\n```\n\n## Requirements\nSome text.\n\n## Slices\n\n### Foundation\n- [ ] T001: Real task one\n- [x] T002: Real task two\n")
+		slices, err := ParseSlicesSection(content)
+		require.NoError(t, err)
+		require.Len(t, slices, 1)
+		assert.Equal(t, "Foundation", slices[0].Name)
+		require.Len(t, slices[0].Tasks, 2)
+		assert.Equal(t, "T001", slices[0].Tasks[0].ID)
+		assert.Equal(t, "Real task one", slices[0].Tasks[0].Description)
+		assert.Equal(t, "T002", slices[0].Tasks[1].ID)
+		assert.True(t, slices[0].Tasks[1].Done)
+	})
 }
 
 func TestGenerateSlicesSection(t *testing.T) {
