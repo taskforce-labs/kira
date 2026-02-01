@@ -133,6 +133,71 @@ func initializeDocsFolder(targetDir string, cfg *config.Config) error {
 			return fmt.Errorf("failed to create docs subfolder %s: %w", sub, err)
 		}
 	}
+	return writeDocsIndexFiles(docsRoot)
+}
+
+// docsIndexEntries defines relative path (under docs root) and README content. Empty path = docs root.
+var docsIndexEntries = []struct {
+	path    string
+	content string
+}{
+	{"", `# Documentation
+
+Overview of project documentation. Use this folder for long-lived reference material (ADRs, guides, product docs, reports). Work items and specs live in .work instead.
+
+## Sections
+
+- [Agents](agents/) – Agent-specific documentation (e.g. using kira)
+- [Architecture](architecture/) – Architecture Decision Records and diagrams
+- [Product](product/) – Product vision, roadmap, personas, glossary, feature briefs
+- [Reports](reports/) – Release reports, metrics, audits, retrospectives
+- [API](api/) – API reference
+- [Guides](guides/) – Development and usage guides (including security)
+`},
+	{"agents", `# Agent documentation
+
+Documentation for agents and tooling (e.g. [using-kira](using-kira.md)).
+`},
+	{"architecture", `# Architecture
+
+Architecture Decision Records (ADRs) and system design documents.
+`},
+	{"product", `# Product
+
+Product vision, roadmap, personas, glossary, feature briefs, and commercials.
+`},
+	{"reports", `# Reports
+
+Release reports, metrics summaries, audits, and retrospectives.
+`},
+	{"api", `# API
+
+API reference documentation.
+`},
+	{"guides", `# Guides
+
+Development and usage guides. See [security/](security/) for security guidelines.
+`},
+	{"guides/security", `# Security
+
+Security guidelines (e.g. [golang-secure-coding](golang-secure-coding.md)).
+`},
+}
+
+func writeDocsIndexFiles(docsRoot string) error {
+	for _, e := range docsIndexEntries {
+		dir := docsRoot
+		if e.path != "" {
+			dir = filepath.Join(docsRoot, e.path)
+		}
+		readmePath := filepath.Join(dir, "README.md")
+		if _, err := os.Stat(readmePath); err == nil {
+			continue
+		}
+		if err := os.WriteFile(readmePath, []byte(e.content), 0o600); err != nil {
+			return fmt.Errorf("failed to write %s: %w", readmePath, err)
+		}
+	}
 	return nil
 }
 
