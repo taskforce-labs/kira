@@ -700,12 +700,23 @@ func TestGetRemoteURL(t *testing.T) {
 	})
 }
 
+func gitConfigUser(t *testing.T, dir string) {
+	t.Helper()
+	cmd := exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run())
+}
+
 func TestBranchHasCommitsAheadOf(t *testing.T) {
 	t.Run("returns false when branch has no commits ahead of base", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cmd := exec.Command("git", "init")
 		cmd.Dir = tmpDir
 		require.NoError(t, cmd.Run())
+		gitConfigUser(t, tmpDir)
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
 		cmd = exec.Command("git", "add", "f")
 		cmd.Dir = tmpDir
@@ -724,6 +735,7 @@ func TestBranchHasCommitsAheadOf(t *testing.T) {
 		cmd := exec.Command("git", "init")
 		cmd.Dir = tmpDir
 		require.NoError(t, cmd.Run())
+		gitConfigUser(t, tmpDir)
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
 		cmd = exec.Command("git", "add", "f")
 		cmd.Dir = tmpDir
@@ -754,6 +766,7 @@ func TestEnsureBranchHasCommitForDraftPR(t *testing.T) {
 		cmd := exec.Command("git", "init")
 		cmd.Dir = tmpDir
 		require.NoError(t, cmd.Run())
+		gitConfigUser(t, tmpDir)
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
 		cmd = exec.Command("git", "add", "f")
 		cmd.Dir = tmpDir
@@ -778,6 +791,7 @@ func TestEnsureBranchHasCommitForDraftPR(t *testing.T) {
 		cmd := exec.Command("git", "init")
 		cmd.Dir = tmpDir
 		require.NoError(t, cmd.Run())
+		gitConfigUser(t, tmpDir)
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
 		cmd = exec.Command("git", "add", "f")
 		cmd.Dir = tmpDir
@@ -828,6 +842,7 @@ func TestPushBranch(t *testing.T) {
 		cmd := exec.Command("git", "init")
 		cmd.Dir = tmpDir
 		require.NoError(t, cmd.Run())
+		gitConfigUser(t, tmpDir)
 		// Create a branch so we have something to push
 		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
 		cmd = exec.Command("git", "add", "f")
