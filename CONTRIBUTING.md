@@ -4,6 +4,8 @@ Thanks for your interest in contributing! This guide covers local development, b
 
 See [.docs/guides/](.docs/guides/) for development and usage guides.
 
+If you have an existing `docs/security/` directory, you can migrate it to the docs folder (e.g. `.docs/guides/security/`) and update references; init does not auto-migrate.
+
 ## Development Setup
 
 ```bash
