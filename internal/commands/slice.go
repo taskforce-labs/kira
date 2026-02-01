@@ -125,10 +125,11 @@ var sliceCurrentCmd = &cobra.Command{
 }
 
 var sliceLintCmd = &cobra.Command{
-	Use:          "lint [<work-item-id>]",
-	Short:        "Validate the Slices section",
-	RunE:         runSliceLint,
-	SilenceUsage: true,
+	Use:           "lint [<work-item-id>]",
+	Short:         "Validate the Slices section",
+	RunE:          runSliceLint,
+	SilenceUsage:  true,
+	SilenceErrors: true, // main prints error once
 }
 
 var sliceCommitCmd = &cobra.Command{

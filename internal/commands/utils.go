@@ -145,39 +145,113 @@ func findWorkItemFile(workItemID string, cfg *config.Config) (string, error) {
 
 // resolveSliceWorkItem resolves the work item path for slice commands.
 // When workItemID is non-empty, finds the work item by ID via findWorkItemFile.
-// When workItemID is empty, resolves from the doing folder with strict semantics:
-// zero work item files -> error "No work item in doing folder; specify work-item-id or start a work item";
-// more than one work item file -> error "Multiple work items in doing folder; specify work-item-id".
-func resolveSliceWorkItem(workItemID string, cfg *config.Config) (string, error) {
+// When workItemID is empty, resolves from the doing folder with strict semantics.
+// Optional commandName (e.g. "slice lint") is used in error messages so users see which command failed.
+func resolveSliceWorkItem(workItemID string, cfg *config.Config, commandName ...string) (string, error) {
+	cmdPrefix := sliceWorkItemCmdPrefix(commandName)
 	if workItemID != "" {
 		return findWorkItemFile(workItemID, cfg)
 	}
+	doingPath, err := resolveDoingPath(cfg)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("%sno work item in doing folder; specify work-item-id or start a work item", cmdPrefix)
+		}
+		return "", fmt.Errorf("failed to read doing folder: %w", err)
+	}
+	workItemFiles, err := listWorkItemFilesInDir(doingPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read doing folder: %w", err)
+	}
+	if len(workItemFiles) == 0 {
+		extra := sliceWorkItemExampleHint(commandName)
+		return "", fmt.Errorf("%sno work item in doing folder; specify work-item-id or start a work item%s", cmdPrefix, extra)
+	}
+	if len(workItemFiles) > 1 {
+		ids := workItemIDsFromFilenames(workItemFiles)
+		cmdHint := sliceWorkItemCmdHint(commandName)
+		return "", fmt.Errorf("%smultiple work items in doing folder; specify one: %s (e.g. %s)", cmdPrefix, cmdHint, strings.Join(ids, ", "))
+	}
+	return filepath.Join(doingPath, workItemFiles[0]), nil
+}
+
+func sliceWorkItemCmdPrefix(commandName []string) string {
+	if len(commandName) > 0 && commandName[0] != "" {
+		return commandName[0] + ": "
+	}
+	return ""
+}
+
+func sliceWorkItemExampleHint(commandName []string) string {
+	if len(commandName) > 0 && commandName[0] != "" {
+		return " (e.g. kira " + commandName[0] + " <work-item-id>)"
+	}
+	return ""
+}
+
+func sliceWorkItemCmdHint(commandName []string) string {
+	if len(commandName) > 0 && commandName[0] != "" {
+		return "kira " + commandName[0] + " <work-item-id>"
+	}
+	return "kira slice lint <work-item-id>"
+}
+
+func resolveDoingPath(cfg *config.Config) (string, error) {
 	doingFolder := cfg.StatusFolders["doing"]
 	if doingFolder == "" {
 		doingFolder = "2_doing"
 	}
 	workFolder := config.GetWorkFolderPath(cfg)
 	doingPath := filepath.Join(workFolder, doingFolder)
-	entries, err := os.ReadDir(doingPath)
+	_, err := os.Stat(doingPath)
+	return doingPath, err
+}
+
+func listWorkItemFilesInDir(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("no work item in doing folder; specify work-item-id or start a work item")
-		}
-		return "", fmt.Errorf("failed to read doing folder: %w", err)
+		return nil, err
 	}
-	var workItemFiles []string
+	var out []string
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
-			workItemFiles = append(workItemFiles, entry.Name())
+			out = append(out, entry.Name())
 		}
 	}
-	if len(workItemFiles) == 0 {
-		return "", fmt.Errorf("no work item in doing folder; specify work-item-id or start a work item")
+	return out, nil
+}
+
+// getDoingWorkItemPaths returns full paths of all work item files in the doing folder.
+// Returns (nil, err) if the doing folder is missing or unreadable; ([]string{}, nil) if empty.
+func getDoingWorkItemPaths(cfg *config.Config) ([]string, error) {
+	doingPath, err := resolveDoingPath(cfg)
+	if err != nil {
+		return nil, err
 	}
-	if len(workItemFiles) > 1 {
-		return "", fmt.Errorf("multiple work items in doing folder; specify work-item-id")
+	files, err := listWorkItemFilesInDir(doingPath)
+	if err != nil {
+		return nil, err
 	}
-	return filepath.Join(doingPath, workItemFiles[0]), nil
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, filepath.Join(doingPath, f))
+	}
+	return paths, nil
+}
+
+// workItemIDsFromFilenames extracts work item ID hints from filenames (e.g. 026-slices.prd.md -> 026).
+func workItemIDsFromFilenames(files []string) []string {
+	ids := make([]string, 0, len(files))
+	for _, f := range files {
+		base := strings.TrimSuffix(f, filepath.Ext(f))
+		base = strings.TrimSuffix(base, filepath.Ext(base))
+		if idx := strings.Index(base, "-"); idx > 0 {
+			ids = append(ids, base[:idx])
+		} else {
+			ids = append(ids, base)
+		}
+	}
+	return ids
 }
 
 // updateWorkItemStatus updates the status field in a work item file

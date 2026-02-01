@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -602,7 +603,7 @@ func runSliceCurrent(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		workItemID = args[0]
 	}
-	path, err := resolveSliceWorkItem(workItemID, cfg)
+	path, err := resolveSliceWorkItem(workItemID, cfg, "slice current")
 	if err != nil {
 		return err
 	}
@@ -677,7 +678,7 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 		}
 		sliceName = args[1]
 	}
-	path, err := resolveSliceWorkItem(workItemID, cfg)
+	path, err := resolveSliceWorkItem(workItemID, cfg, "slice task current")
 	if err != nil {
 		return err
 	}
@@ -726,7 +727,7 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 }
 
 func runSliceTaskCurrentToggle(cmd *cobra.Command, cfg *config.Config, workItemID string) error {
-	path, err := resolveSliceWorkItem(workItemID, cfg)
+	path, err := resolveSliceWorkItem(workItemID, cfg, "slice task current toggle")
 	if err != nil {
 		return err
 	}
@@ -794,7 +795,7 @@ func runSliceCommit(_ *cobra.Command, args []string) error {
 	if len(args) > 1 {
 		message = strings.Join(args[1:], " ")
 	}
-	path, err := resolveSliceWorkItem(workItemID, cfg)
+	path, err := resolveSliceWorkItem(workItemID, cfg, "slice commit")
 	if err != nil {
 		return err
 	}
@@ -942,20 +943,60 @@ func runSliceLint(cmd *cobra.Command, args []string) error {
 	if err := checkWorkDir(cfg); err != nil {
 		return err
 	}
-	workItemID := ""
+	outputFormat, _ := cmd.Flags().GetString("output")
 	if len(args) > 0 {
-		workItemID = args[0]
+		return runSliceLintOne(cfg, args[0], outputFormat)
 	}
-	path, err := resolveSliceWorkItem(workItemID, cfg)
+	return runSliceLintAll(cfg, outputFormat)
+}
+
+func runSliceLintOne(cfg *config.Config, workItemID, outputFormat string) error {
+	path, err := resolveSliceWorkItem(workItemID, cfg, "slice lint")
 	if err != nil {
 		return err
 	}
 	errors := lintSlicesSection(path, cfg)
-	outputFormat, _ := cmd.Flags().GetString("output")
 	if outputFormat == sliceLintOutputJSON {
 		return outputSliceLintJSON(errors)
 	}
 	return outputSliceLintHuman(path, errors)
+}
+
+func runSliceLintAll(cfg *config.Config, outputFormat string) error {
+	paths, err := getDoingWorkItemPaths(cfg)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("slice lint: no work item in doing folder; specify work-item-id or start a work item (e.g. kira slice lint <work-item-id>)")
+		}
+		return fmt.Errorf("failed to read doing folder: %w", err)
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("slice lint: no work item in doing folder; specify work-item-id or start a work item (e.g. kira slice lint <work-item-id>)")
+	}
+	var allErrs []SliceLintError
+	for _, path := range paths {
+		allErrs = append(allErrs, lintSlicesSection(path, cfg)...)
+	}
+	if outputFormat == sliceLintOutputJSON {
+		return outputSliceLintJSON(allErrs)
+	}
+	anyFailed := false
+	for i, path := range paths {
+		if len(paths) > 1 && i > 0 {
+			fmt.Println()
+		}
+		if len(paths) > 1 {
+			fmt.Println(filepath.Base(path))
+		}
+		errs := lintSlicesSection(path, cfg)
+		if err := outputSliceLintHuman(path, errs); err != nil {
+			anyFailed = true
+		}
+	}
+	if anyFailed {
+		return fmt.Errorf("slice lint found error(s)")
+	}
+	return nil
 }
 
 func lintSlicesSection(path string, cfg *config.Config) []SliceLintError {
