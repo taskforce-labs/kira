@@ -318,6 +318,46 @@ Resolve these before or during implementation so the PRD is unambiguous:
 
 5. **No current artifact writers.** There is no kira code today that writes to a docs path; the “use configured path” AC applies to future commands. Implementers should add a shared helper (e.g. `config.DocsRoot(targetDir string) (string, error)`) and use it in init and in any future feature that writes docs.
 
+## Slices
+
+Each slice is a separate commit. After each commit, run `make check` to ensure tests and lint pass.
+
+### 1-Config-and-DocsRoot
+
+- [ ] Add `DocsFolder` to config in `internal/config/config.go` (e.g. `yaml:"docs_folder"`).
+- [ ] Set default `.docs` in `DefaultConfig` and `mergeWithDefaults`.
+- [ ] Validate path (no `..`, reasonable length) when set.
+- [ ] Add `DocsRoot(targetDir string) (string, error)` (or equivalent) for docs path resolution.
+
+### 2-Init-docs-folder-structure
+
+- [ ] In `kira init`, ask user if they want to create docs folder and subfolders (`agents`, `architecture`, `product`, `reports`, `guides`, `guides/security`, `api`) using configured `docs_folder`.
+- [ ] Apply same decision flow as `.work` when docs folder exists (prompt or `--force` / `--fill-missing`).
+- [ ] Ensure `kira.yml` written by init includes `docs_folder: .docs`.
+
+### 3-Init-index-files
+
+- [ ] Create `README.md` in docs root with overview and navigation.
+- [ ] Create `README.md` in each subfolder with purpose, list of docs, and brief descriptions per PRD.
+
+### 4-Integration
+
+- [ ] Root `README.md` links to docs folder README (e.g. `.docs/README.md`).
+- [ ] `AGENTS.md` references docs folder `agents/` (e.g. `.docs/agents/`).
+- [ ] `CONTRIBUTING.md` references docs folder `guides/` (e.g. `.docs/guides/`) if present.
+
+### 5-Migration
+
+- [ ] Document migration of existing `docs/security/` to `guides/security/` as manual step (in docs or CONTRIBUTING).
+- [ ] Optionally migrate this repo: move `docs/security/` into configured docs folder `guides/security/` and update references.
+
+### 6-Tests-and-e2e
+
+- [ ] Unit tests for config and `DocsRoot`.
+- [ ] Init tests for docs folder creation and `--force` / `--fill-missing` behavior.
+- [ ] E2e coverage for docs in init.
+- [ ] Run `make check` and `make e2e`.
+
 ## Release Notes
 
 - **Configurable docs folder**: `kira.yml` supports `docs_folder` (default `.docs`) so the docs path appears at the top of the file tree like `.work` and can be set to `docs` or a custom path
