@@ -29,6 +29,7 @@ type Config struct {
 	Users         UsersConfig            `yaml:"users"`
 	Fields        map[string]FieldConfig `yaml:"fields"`
 	Slices        *SlicesConfig          `yaml:"slices"`
+	DocsFolder    string                 `yaml:"docs_folder"` // default: ".docs"
 	// ConfigDir is the absolute path to the directory containing kira.yml (set at load time; not persisted).
 	ConfigDir string `yaml:"-"`
 }
@@ -186,6 +187,7 @@ var DefaultConfig = Config{
 		ReleasesFile:      "RELEASES.md",
 		ArchiveDateFormat: "2006-01-02",
 	},
+	DocsFolder: ".docs",
 }
 
 // LoadConfig loads the configuration from kira.yml file or returns defaults.
@@ -317,6 +319,40 @@ func GetWorkFolderAbsPath(cfg *Config) (string, error) {
 	return absPath, nil
 }
 
+// GetDocsFolderPath returns the configured docs folder path, defaulting to ".docs".
+func GetDocsFolderPath(cfg *Config) string {
+	if cfg != nil && strings.TrimSpace(cfg.DocsFolder) != "" {
+		return strings.TrimSpace(cfg.DocsFolder)
+	}
+	return ".docs"
+}
+
+// DocsRoot returns the absolute path to the docs folder resolved relative to targetDir.
+// It validates that the result does not escape targetDir (e.g. no .. in path).
+func DocsRoot(cfg *Config, targetDir string) (string, error) {
+	baseDir := targetDir
+	if baseDir == "" {
+		baseDir = "."
+	}
+	docsPath := filepath.Join(baseDir, GetDocsFolderPath(cfg))
+	absDocs, err := filepath.Abs(docsPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve docs folder path: %w", err)
+	}
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve target directory: %w", err)
+	}
+	rel, err := filepath.Rel(absBase, absDocs)
+	if err != nil {
+		return "", fmt.Errorf("docs_folder path invalid: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("docs_folder path must not escape target directory")
+	}
+	return absDocs, nil
+}
+
 // ValidStatusActions defines the valid values for start.status_action
 var ValidStatusActions = []string{"none", "commit_only", "commit_and_push", "commit_only_branch"}
 
@@ -359,6 +395,31 @@ func validateConfig(config *Config) error {
 		return err
 	}
 
+	// Validate docs_folder
+	if err := validateDocsFolder(config); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+const maxDocsFolderPathLen = 256
+
+// validateDocsFolder validates docs_folder: no .., no null byte, reasonable length, non-empty after trim.
+func validateDocsFolder(config *Config) error {
+	df := strings.TrimSpace(config.DocsFolder)
+	if df == "" {
+		return fmt.Errorf("docs_folder cannot be empty or whitespace only")
+	}
+	if strings.Contains(config.DocsFolder, "..") {
+		return fmt.Errorf("docs_folder cannot contain '..'")
+	}
+	if strings.Contains(config.DocsFolder, "\x00") {
+		return fmt.Errorf("docs_folder cannot contain null byte")
+	}
+	if len(config.DocsFolder) > maxDocsFolderPathLen {
+		return fmt.Errorf("docs_folder path too long (max %d)", maxDocsFolderPathLen)
+	}
 	return nil
 }
 
@@ -599,6 +660,10 @@ func mergeWithDefaults(config *Config) {
 
 	if config.DefaultStatus == "" {
 		config.DefaultStatus = DefaultConfig.DefaultStatus
+	}
+
+	if config.DocsFolder == "" {
+		config.DocsFolder = ".docs"
 	}
 
 	mergeGitDefaults(config)
