@@ -93,6 +93,24 @@ func TestInitializeWorkspace(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, string(configData), "docs_folder")
 		assert.Contains(t, string(configData), ".docs")
+
+		// Check docs root README and subfolder READMEs exist with expected content
+		docsRoot := filepath.Join(tmpDir, ".docs")
+		rootReadme := filepath.Join(docsRoot, "README.md")
+		files, err = filepath.Glob(rootReadme)
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+		rootContent, err := os.ReadFile(files[0])
+		require.NoError(t, err)
+		assert.Contains(t, string(rootContent), "# Documentation")
+		assert.Contains(t, string(rootContent), "agents")
+		assert.Contains(t, string(rootContent), "architecture")
+		for _, sub := range []string{"agents", "architecture", "product", "reports", "api", "guides"} {
+			subReadme := filepath.Join(docsRoot, sub, "README.md")
+			assert.FileExists(t, subReadme)
+		}
+		securityReadme := filepath.Join(docsRoot, "guides", "security", "README.md")
+		assert.FileExists(t, securityReadme)
 	})
 
 	t.Run("preserves existing files", func(t *testing.T) {
@@ -227,6 +245,26 @@ func TestInitializeDocsFolder(t *testing.T) {
 		content, err := os.ReadFile(files[0])
 		require.NoError(t, err)
 		assert.Equal(t, "keep", string(content))
+	})
+
+	t.Run("does not overwrite existing README on second init", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg, err := config.LoadConfigFromDir(tmpDir)
+		require.NoError(t, err)
+
+		require.NoError(t, initializeDocsFolder(tmpDir, cfg))
+		customContent := "# Custom\nCustom content."
+		agentsReadme := filepath.Join(tmpDir, ".docs", "agents", "README.md")
+		require.NoError(t, os.WriteFile(agentsReadme, []byte(customContent), 0o600))
+
+		require.NoError(t, initializeDocsFolder(tmpDir, cfg))
+
+		files, err := filepath.Glob(agentsReadme)
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+		content, err := os.ReadFile(files[0])
+		require.NoError(t, err)
+		assert.Equal(t, customContent, string(content))
 	})
 }
 
