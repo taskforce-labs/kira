@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"kira/internal/config"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -183,5 +185,60 @@ cursor_install:
 		data, err := os.ReadFile(cmdPath)
 		require.NoError(t, err)
 		assert.Contains(t, string(data), "# Product Discovery")
+	})
+}
+
+func TestEnsureCursorSkillsInstalled(t *testing.T) {
+	t.Run("installs when skills path is empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		err := EnsureCursorSkillsInstalled(cfg)
+		require.NoError(t, err)
+		skillsPath := filepath.Join(tmpDir, ".cursor", "skills")
+		entries, err := os.ReadDir(skillsPath)
+		require.NoError(t, err)
+		var dirs []string
+		for _, e := range entries {
+			if e.IsDir() {
+				dirs = append(dirs, e.Name())
+			}
+		}
+		require.Contains(t, dirs, "kira-product-discovery")
+	})
+	t.Run("no-op when all skills already present", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		err := EnsureCursorSkillsInstalled(cfg)
+		require.NoError(t, err)
+		// run again; should be no-op (skills already there)
+		err = EnsureCursorSkillsInstalled(cfg)
+		require.NoError(t, err)
+	})
+}
+
+func TestEnsureCursorCommandsInstalled(t *testing.T) {
+	t.Run("installs when commands path is empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		err := EnsureCursorCommandsInstalled(cfg)
+		require.NoError(t, err)
+		commandsPath := filepath.Join(tmpDir, ".cursor", "commands")
+		entries, err := os.ReadDir(commandsPath)
+		require.NoError(t, err)
+		var files []string
+		for _, e := range entries {
+			if !e.IsDir() {
+				files = append(files, e.Name())
+			}
+		}
+		require.Contains(t, files, "kira-product-discovery.md")
+	})
+	t.Run("no-op when all commands already present", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		err := EnsureCursorCommandsInstalled(cfg)
+		require.NoError(t, err)
+		err = EnsureCursorCommandsInstalled(cfg)
+		require.NoError(t, err)
 	})
 }
