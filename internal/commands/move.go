@@ -63,12 +63,12 @@ func extractWorkItemMetadata(filePath string, cfg *config.Config) (workItemType,
 	inYAML := false
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if i == 0 && trimmed == "---" {
+		if i == 0 && trimmed == yamlSeparator {
 			inYAML = true
 			continue
 		}
 		if inYAML {
-			if trimmed == "---" {
+			if trimmed == yamlSeparator {
 				break
 			}
 			yamlLines = append(yamlLines, line)
