@@ -41,6 +41,7 @@ func init() {
 	rootCmd.AddCommand(sliceCmd)
 	rootCmd.AddCommand(reviewCmd)
 	rootCmd.AddCommand(checkCmd)
+	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(doneCmd)
 	rootCmd.AddCommand(configCmd)
 }

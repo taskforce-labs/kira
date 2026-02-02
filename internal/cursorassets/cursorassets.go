@@ -106,3 +106,37 @@ func SkillEntries(name string) ([]fs.DirEntry, error) {
 	}
 	return entries, nil
 }
+
+// ListSkillFilePaths returns relative paths of all files under a skill directory (e.g. SKILL.md, scripts/foo.sh).
+func ListSkillFilePaths(name string) ([]string, error) {
+	if name == "" || strings.Contains(name, "..") || strings.Contains(name, "\x00") {
+		return nil, fmt.Errorf("invalid skill name: %q", name)
+	}
+	dir := path.Join(skillsDir, name)
+	if !strings.HasPrefix(dir, skillsDir+"/") {
+		return nil, fmt.Errorf("invalid skill path: %s", name)
+	}
+	var paths []string
+	dirWithSep := dir + "/"
+	err := fs.WalkDir(assetsFS, dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasPrefix(p, dirWithSep) && p != dir {
+			return nil
+		}
+		rel := p
+		if strings.HasPrefix(p, dirWithSep) {
+			rel = p[len(dirWithSep):]
+		}
+		paths = append(paths, rel)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk skill %s: %w", name, err)
+	}
+	return paths, nil
+}
