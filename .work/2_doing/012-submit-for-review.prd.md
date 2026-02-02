@@ -1,7 +1,7 @@
 ---
 id: 012
 title: submit for review
-status: backlog
+status: doing
 kind: prd
 assigned:
 created: 2026-01-19
