@@ -392,8 +392,8 @@ The only config for this command is to override where skills and commands get in
 - [x] T012: Validate command markdown and report errors; provide install feedback
 
 ### Auto-install missing
-- [ ] T013: Add check for required skills/commands at configured path where Kira workflows depend on them
-- [ ] T014: When required skill or command is missing, run kira install cursor-skills and/or cursor-commands automatically (no user confirmation)
+- [x] T013: Add check for required skills/commands at configured path where Kira workflows depend on them
+- [x] T014: When required skill or command is missing, run kira install cursor-skills and/or cursor-commands automatically (no user confirmation)
 
 ### Bundled skills and commands content
 - [ ] T015: Add bundled skill folders and SKILL.md for Product Discovery, Domain Discovery, Technical Discovery, Roadmap Planning, Work Item Elaboration, RALF on Work Items

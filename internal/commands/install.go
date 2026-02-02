@@ -47,30 +47,29 @@ func runInstallCursorSkills(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+	force, _ := cmd.Flags().GetBool("force")
+	return runInstallCursorSkillsWithOptions(cfg, force)
+}
+
+func runInstallCursorSkillsWithOptions(cfg *config.Config, force bool) error {
 	skillsPath, err := config.GetCursorSkillsPath(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to resolve skills path: %w", err)
 	}
-	force, _ := cmd.Flags().GetBool("force")
-
 	if err := ensureSkillsOverwriteDecision(skillsPath, force); err != nil {
 		return err
 	}
-
 	if err := os.MkdirAll(skillsPath, 0o700); err != nil {
 		return fmt.Errorf("failed to create skills directory: %w", err)
 	}
-
 	names, err := cursorassets.ListSkills()
 	if err != nil {
 		return fmt.Errorf("failed to list bundled skills: %w", err)
 	}
-
 	skillsPathAbs, err := filepath.Abs(skillsPath)
 	if err != nil {
 		return fmt.Errorf("failed to resolve skills path: %w", err)
 	}
-
 	for _, name := range names {
 		skillContent, err := cursorassets.ReadSkillSKILL(name)
 		if err != nil {
@@ -87,7 +86,6 @@ func runInstallCursorSkills(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("skill %s: %w", name, err)
 		}
 	}
-
 	fmt.Printf("Installed %d skill(s) to %s\n", len(names), skillsPath)
 	return nil
 }
@@ -97,30 +95,29 @@ func runInstallCursorCommands(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+	force, _ := cmd.Flags().GetBool("force")
+	return runInstallCursorCommandsWithOptions(cfg, force)
+}
+
+func runInstallCursorCommandsWithOptions(cfg *config.Config, force bool) error {
 	commandsPath, err := config.GetCursorCommandsPath(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to resolve commands path: %w", err)
 	}
-	force, _ := cmd.Flags().GetBool("force")
-
 	if err := ensureCommandsOverwriteDecision(commandsPath, force); err != nil {
 		return err
 	}
-
 	if err := os.MkdirAll(commandsPath, 0o700); err != nil {
 		return fmt.Errorf("failed to create commands directory: %w", err)
 	}
-
 	names, err := cursorassets.ListCommands()
 	if err != nil {
 		return fmt.Errorf("failed to list bundled commands: %w", err)
 	}
-
 	commandsPathAbs, err := filepath.Abs(commandsPath)
 	if err != nil {
 		return fmt.Errorf("failed to resolve commands path: %w", err)
 	}
-
 	for _, name := range names {
 		content, err := cursorassets.ReadCommand(name)
 		if err != nil {
@@ -137,8 +134,49 @@ func runInstallCursorCommands(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("command %s: %w", name, err)
 		}
 	}
-
 	fmt.Printf("Installed %d command(s) to %s\n", len(names), commandsPath)
+	return nil
+}
+
+// EnsureCursorSkillsInstalled checks that all bundled skills exist at the configured path;
+// if any are missing, installs them automatically (no user confirmation).
+func EnsureCursorSkillsInstalled(cfg *config.Config) error {
+	skillsPath, err := config.GetCursorSkillsPath(cfg)
+	if err != nil {
+		return err
+	}
+	names, err := cursorassets.ListSkills()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		dirPath := filepath.Join(skillsPath, name)
+		info, err := os.Stat(dirPath)
+		if err != nil || !info.IsDir() {
+			return runInstallCursorSkillsWithOptions(cfg, true)
+		}
+	}
+	return nil
+}
+
+// EnsureCursorCommandsInstalled checks that all bundled commands exist at the configured path;
+// if any are missing, installs them automatically (no user confirmation).
+func EnsureCursorCommandsInstalled(cfg *config.Config) error {
+	commandsPath, err := config.GetCursorCommandsPath(cfg)
+	if err != nil {
+		return err
+	}
+	names, err := cursorassets.ListCommands()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		filePath := filepath.Join(commandsPath, name+".md")
+		info, err := os.Stat(filePath)
+		if err != nil || info.IsDir() {
+			return runInstallCursorCommandsWithOptions(cfg, true)
+		}
+	}
 	return nil
 }
 
