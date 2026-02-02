@@ -376,8 +376,8 @@ The only config for this command is to override where skills and commands get in
 - [x] T002: Implement path resolver: read config, default to ~/.cursor/skills/ and ~/.cursor/commands/ when absent
 
 ### Bundled assets layout
-- [ ] T003: Define bundled source layout under kira assets (e.g. kira/assets/cursor-skills/skills/ and commands/)
-- [ ] T004: Implement listing/loading of bundled skills and commands from the bundle
+- [x] T003: Define bundled source layout under kira assets (e.g. kira/assets/cursor-skills/skills/ and commands/)
+- [x] T004: Implement listing/loading of bundled skills and commands from the bundle
 
 ### Install cursor-skills
 - [ ] T005: Register `kira install cursor-skills` subcommand and wire to installer
