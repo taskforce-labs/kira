@@ -108,6 +108,17 @@ workspace:
   # projects[].draft_pr   # optional override per project (polyrepo)
 ```
 
+### Cursor skills and commands install path
+
+`kira install cursor-skills` and `kira install cursor-commands` copy bundled skills and commands to `~/.cursor/skills/` and `~/.cursor/commands/` by default. To override the base directory (e.g. use a custom home or test directory), set `cursor_install.base_path` in `kira.yml`:
+
+```yaml
+cursor_install:
+  base_path: /path/to/base   # optional; omit or leave empty to use $HOME
+```
+
+Skills are installed to `<base_path>/.cursor/skills/`, commands to `<base_path>/.cursor/commands/`.
+
 ## Overview
 
 Kira uses a combination of plaintext markdown files, git, and a lightweight CLI to manage and coordinate work. This approach means clankers can directly read, write, and commit changes without complex APIs, while meatbags get full transparency into what the clankers are doing through git history.
