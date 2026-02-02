@@ -16,6 +16,24 @@ var rootCmd = &cobra.Command{
 	Long: `Kira is a git-based, plaintext productivity tool designed with both
 clankers (LLMs) and meatbags (people) in mind. It uses markdown files, git,
 and a lightweight CLI to manage and coordinate work.`,
+	PersistentPreRunE: ensureCursorInstall,
+}
+
+func ensureCursorInstall(_ *cobra.Command, args []string) error {
+	if len(args) > 0 && args[0] == "install" {
+		return nil // skip auto-install when user is explicitly running install
+	}
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return nil // let commands that need config load it and fail
+	}
+	if err := EnsureCursorSkillsInstalled(cfg); err != nil {
+		return err
+	}
+	if err := EnsureCursorCommandsInstalled(cfg); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Execute runs the root command and returns any error encountered.
