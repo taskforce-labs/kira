@@ -372,8 +372,8 @@ The only config for this command is to override where skills and commands get in
 ## Slices
 
 ### Install path config
-- [ ] T001: Add install path config keys in kira.yaml (e.g. cursor-skills-path, cursor-commands-path or base path) and document in schema/docs
-- [ ] T002: Implement path resolver: read config, default to ~/.cursor/skills/ and ~/.cursor/commands/ when absent
+- [x] T001: Add install path config keys in kira.yaml (e.g. cursor-skills-path, cursor-commands-path or base path) and document in schema/docs
+- [x] T002: Implement path resolver: read config, default to ~/.cursor/skills/ and ~/.cursor/commands/ when absent
 
 ### Bundled assets layout
 - [ ] T003: Define bundled source layout under kira assets (e.g. kira/assets/cursor-skills/skills/ and commands/)
