@@ -4,10 +4,8 @@ title: submit for review
 status: backlog
 kind: prd
 assigned:
-estimate: 3 days
 created: 2026-01-19
-due: 2026-01-19
-tags: [github, notifications, review, cli]
+tags: [github, review, cli]
 ---
 
 # submit for review
@@ -16,20 +14,17 @@ A command that moves work items to review status on the current branch, optional
 
 ## Context
 
-In the Kira workflow, work items progress through different statuses: backlog → todo → doing → review → done. Currently, moving to review status requires manual `kira move` commands and separate GitHub PR creation. This creates friction in the development workflow, especially when working with teams or when agents need to coordinate code reviews.
+In the Kira workflow, developers finish work on a feature branch and need to submit for review: move the work item to review status, ensure the branch is up to date with trunk, push the branch, and create or update a pull request on GitHub. Today this requires multiple manual steps: run `kira latest` to rebase, run `kira move <id> review` to move the work item, push the branch, then create or update the PR in the GitHub UI.
 
-The `kira review` command (note: renamed from "submit for review" to avoid confusion with existing "review" status) will streamline this process by:
+The `kira review` command today only checks slice/task readiness (warns if tasks are open). This PRD extends it into a **submit for review** flow that:
 
-1. Moving the work item to review status on the current feature branch
-2. Optionally updating the work item status on the main trunk branch to maintain it as the source of truth
-3. Rebasing the current branch onto the updated trunk branch
-4. Automatically creating a draft PR on GitHub with proper branch naming and descriptions
-5. Optionally notifying reviewers through configurable channels
-6. Supporting only individual work items
+1. Optionally runs the same trunk-update and rebase logic as `kira latest` (update trunk from remote, then rebase current branch onto trunk), unless `--no-trunk-update` or `--no-rebase` is set
+2. Moves the work item to review status (from doing to review folder) like `kira move` does
+3. Pushes the current branch to the configured remote (e.g. `git push <remote> <current-branch> --force-with-lease`, where `<remote>` is from `git.remote` in kira.yml, default `origin`)
+4. If a draft PR exists for the branch, updates it to ready for review using the GitHub API and KIRA_GITHUB_TOKEN (same library as `kira start` uses for draft PRs)
+5. If no draft PR exists, creates a new PR (ready for review or draft per `--draft`) using the GitHub API and KIRA_GITHUB_TOKEN
 
-This approach treats the trunk branch as the authoritative source of truth for work item status, ensuring that the project's current state is always reflected in the main branch, while avoiding merge conflicts through strategic rebasing.
-
-**Dependencies**: Full reviewer number resolution requires the `kira user` command for managing user mappings. Without it, only email addresses and direct GitHub usernames will work.
+Work item ID is derived from the current branch name (e.g. `012-submit-for-review` → `012`). The command cannot be run on the trunk branch or on non-kira branches.
 
 ## Requirements
 
@@ -37,381 +32,139 @@ This approach treats the trunk branch as the authoritative source of truth for w
 
 #### Command Interface
 - **Command**: `kira review [--reviewer <user>...]`
-- **Behavior**: Automatically derives work item ID from current branch name (must be on a kira-created branch)
+- **Behavior**: Derives work item ID from current branch name (must be on a kira-created branch; format `{id}-{kebab-title}`). Performs trunk update + rebase (unless skipped), move to review, push, then create/update PR on GitHub.
 - **Restrictions**: Cannot be run on trunk branch or non-kira branches
 - **Flags**:
-  - `--reviewer <user>` - Specify reviewer (can be user number from `kira user` command or email address). Can be used multiple times
-  - `--draft` (default: true) - Create as draft PR
-  - `--no-trunk-update` - Skip updating trunk branch status (overrides config)
+  - `--reviewer <user>` - Specify reviewer (can be user number from `kira user` command or email address). Can be used multiple times. Passed to GitHub when creating/updating PR.
+  - `--draft` (default: true) - Create or leave PR as draft when creating new PR; when updating an existing draft PR, `--no-draft` means update to ready for review
+  - `--no-trunk-update` - Skip updating trunk branch from remote before rebasing (overrides config)
   - `--no-rebase` - Skip rebasing current branch after trunk update (overrides config)
-  - `--title <title>` - Custom PR title (derived from work item if not provided)
-  - `--description <description>` - Custom PR description (uses work item content if not provided)
+  - `--dry-run` - Show what would be done without executing (validation, planned steps, no git/GitHub changes)
 
-#### Work Item Management
+#### Validation and Branch Rules
+- Resolve current branch; if it equals configured trunk branch, error with clear message (e.g. "cannot run review on trunk branch; checkout a feature branch first")
+- Parse branch name to derive work item ID (e.g. first segment before `-`); validate against config ID format; if branch does not match kira naming or ID invalid, error with clear message
+- Resolve work item file by ID (e.g. `findWorkItemFile`); if not found or work item not in doing status, error
+- When slice/task checking is configured (e.g. from slices-and-tasks feature), run existing readiness check: warn or error if tasks are open (same behavior as current `kira review` slice check)
 
-- Derive work item ID from current branch name (format: `{id}-{title}`)
-- Validate current branch was created by `kira start` (not trunk branch)
-- Move derived work item from current status to "review" on the current branch
-- Optionally update the work item status to "review" on the trunk branch (when enabled)
-- Rebase the current branch onto the updated trunk branch (when trunk updates are enabled)
-- Update work item front matter with review metadata (reviewers, PR URL, etc.)
-- Validate that work item has required fields before submission
-- Support work items in "doing" or "todo" status (error for other statuses)
-- Handle merge conflicts during rebase with user guidance
+#### Trunk Update and Rebase
+- When not `--no-trunk-update` and not `--no-rebase`: run same flow as `kira latest` for the current repo(s)—discover repos from work item and config, fetch, update trunk from remote when on trunk, rebase current branch onto trunk when on feature branch; respect stash/pop and conflict handling
+- When `--no-trunk-update`: skip updating trunk; if not `--no-rebase`, rebase current branch onto current local trunk only
+- When `--no-rebase`: skip rebase entirely
+- Support polyrepo: apply trunk update and rebase per repository where the work item applies
 
-#### GitHub Integration
-- Create draft pull request on git.remote (from existing kira.yml git configuration)
-- Use git.trunk_branch as the base branch (from existing kira.yml git configuration)
-- Extract PR title from work item title (branch name already follows `{id}-{title}` pattern)
-- Generate concise PR description with link to full work item details
-- Assign reviewers specified via `--reviewer` flag (supports user numbers from `kira user` command or email addresses)
-- Push current branch if not already pushed to remote
+#### Move to Review
+- Move work item file from doing folder to review folder (same logic as `kira move <id> review`): rename/move file, update status in front matter
+- Optionally commit the move when config or flag requests it (reuse move commit templates)
 
+#### Push
+- Push current branch to configured remote with `--force-with-lease` (e.g. `git push <remote> <current-branch> --force-with-lease`)
+- For polyrepo, push the branch in each repo that has the work item branch
+
+#### GitHub PR Create or Update
+- Use KIRA_GITHUB_TOKEN; same client and base URL resolution as `kira start` (internal/git package, ParseGitHubOwnerRepo, NewClient)
+- List open PRs for the repository with head = current branch (owner:branch)
+- If an open draft PR exists for that head: update it to ready for review when `--no-draft` (or config); optionally set reviewers from `--reviewer`
+- If no open PR exists: create a new PR (draft or ready per `--draft`), base = trunk branch, head = current branch, title/body from work item; optionally set reviewers
+- On token unset when PR step would run: clear error suggesting KIRA_GITHUB_TOKEN or skip option; do not fail earlier steps (move, push) if only PR step needs token
 
 ### Configuration
 
-#### kira.yml Extensions
-```yaml
-review:
-  update_trunk_status: true   # Update work item status on trunk branch as source of truth
-  rebase_after_trunk_update: true # Rebase current branch after trunk status update
-  draft_by_default: true    # Create draft PRs by default
-  auto_request_reviews: true # Auto-request reviews from assigned reviewers
-  github_token: "${GITHUB_TOKEN}"  # Environment variable or direct value
-  pr_title: "[{id}] {title}"
-  pr_description: "View detailed work item: [{id}-{title}]({work_item_url})"
-```
-
-### Branch and PR Management
-
-#### Branch Requirements
-- Branch must already exist (created by `kira start`)
-- Branch must follow naming convention: `{id}-{kebab-case-title}`
-- Branch should be pushed to remote before creating PR
-- Command will push branch if not already on remote
-
-#### PR Creation Logic
-1. Verify branch exists on remote (push if needed)
-2. Create draft PR with generated content
-3. Add labels based on work item tags
-4. Request reviews from specified reviewers
+#### kira.yml Integration
+- Use `git.trunk_branch`, `git.remote` (default `origin`), `work` folder, `status_folders` (doing, review) from config
+- Optional: `review.trunk_update` / `review.rebase` booleans to default running trunk update and rebase (flags override)
+- Optional: `review.commit_move` to commit the move to review (align with move command)
+- Workspace/base URL for GitHub from existing workspace config when present
 
 ### Error Handling
 
 #### Validation Errors
-- Work item not found: "Work item {id} not found"
-- Invalid status: "Cannot submit for review: work item is in {current_status} status"
-- Missing required fields: "Work item missing required field: {field}"
-- GitHub token missing: "GitHub token required for PR creation"
+- On trunk branch: "Cannot run review on trunk branch {name}. Checkout a feature branch first."
+- Non-kira branch: "Branch '{name}' does not match kira branch format (expected {id}-{kebab-title}). Checkout a kira feature branch or use kira move for status changes."
+- Work item not found: "Work item {id} not found."
+- Work item not in doing: "Work item {id} is not in doing status (current: {status}). Only work items in doing can be submitted for review."
 
-#### Git Operations
-- Branch not on remote: Push branch to remote before creating PR
-- Push conflicts: Guide user to resolve conflicts
-- Remote not found: "GitHub remote '{remote}' not configured"
+#### Git / GitHub Errors
+- Push failure: clear message with remote and branch; do not roll back move
+- GitHub token missing when required: "KIRA_GITHUB_TOKEN is not set. Set it to create or update PRs, or use --dry-run to skip."
+- PR create/update failure: log or print warning; do not fail the command if move and push succeeded (degraded success)
 
-#### Notification Failures
-- Log notification errors but don't fail the command
-- Retry logic for transient failures (network issues)
-- Graceful degradation when notification services are unavailable
+### User Experience
+- Clear progress or step messages (validating, rebasing, moving, pushing, creating/updating PR)
+- Success message with PR URL when PR was created or updated
+- Support for `--dry-run` to show planned steps without executing
 
 ## Acceptance Criteria
 
-### Core Command Functionality
-- [ ] `kira review` automatically derives work item ID from current branch name
-- [ ] Command fails if run on trunk branch
-- [ ] Command fails if current branch doesn't follow kira naming convention
-- [ ] Command fails if current branch doesn't exist on remote
-- [ ] `kira review` moves derived work item to review status on current branch
-- [ ] `kira review` updates derived work item to review status on trunk branch when enabled
-- [ ] `kira review` rebases current branch onto trunk after trunk update when enabled
-- [ ] `kira review --no-trunk-update` skips trunk status updates
-- [ ] `kira review --no-rebase` skips rebase after trunk update
-- [ ] `kira review --reviewer user1 --reviewer user2` specifies reviewers
-- [ ] `kira review --reviewer 1 --reviewer 2` uses user numbers from kira user command
-- [ ] `kira review --reviewer user@example.com` uses email addresses for reviewers
-- [ ] `kira review --draft=false` creates ready-for-review PR
-- [ ] Command fails gracefully when GitHub token is missing
-- [ ] Command shows helpful error messages for invalid work items
+### Command and Validation
+- [ ] `kira review` without args derives work item ID from current branch and fails with clear error when on trunk or non-kira branch
+- [ ] When on a kira branch (e.g. `012-submit-for-review`), work item is resolved by ID; command fails if work item not found or not in doing
+- [ ] `kira review --dry-run` runs validation and prints planned steps; no file move, no push, no GitHub calls
 
-### GitHub Integration
-- [ ] Creates draft PR with proper title and description
-- [ ] Auto-generates branch name following convention
-- [ ] PR description includes work item details and requirements
-- [ ] PR links back to work item file
-- [ ] Handles existing branches appropriately
-- [ ] Adds appropriate labels based on work item tags
+### Trunk Update and Rebase
+- [ ] When neither `--no-trunk-update` nor `--no-rebase`: behavior matches `kira latest` (fetch, update trunk, rebase onto trunk) for the current repo(s)
+- [ ] With `--no-rebase`, rebase is skipped; with `--no-trunk-update`, trunk is not updated from remote before rebase
+- [ ] Polyrepo: trunk update and rebase run only in repos associated with the work item
 
-### Work Item Updates
-- [ ] Work item status changes to "review"
-- [ ] Front matter includes PR URL and reviewer information
-- [ ] Updated timestamp reflects review submission time
-- [ ] Work item remains in git history with full traceability
+### Move and Push
+- [ ] Work item file is moved from doing folder to review folder and status field updated to review
+- [ ] Current branch is pushed to configured remote with `--force-with-lease`
+- [ ] Optional commit of the move when configured; same commit message behavior as `kira move`
 
+### GitHub PR
+- [ ] If an open draft PR exists for the current branch, it can be updated to ready for review (e.g. when `--no-draft`); reviewers can be set from `--reviewer`
+- [ ] If no open PR exists, a new PR is created (draft or ready per `--draft`), with title/body from work item and optional reviewers
+- [ ] KIRA_GITHUB_TOKEN required for PR create/update; clear error when unset and PR step would run
+- [ ] PR create/update uses same GitHub client and base URL logic as `kira start` draft PR flow
 
-### Trunk Update and Rebase Functionality
-- [ ] Trunk branch status updates work correctly when enabled
-- [ ] Rebase operations complete successfully after trunk updates
-- [ ] Command handles rebase conflicts with clear user guidance
-- [ ] Trunk branch configuration respects custom branch names
-- [ ] Disabling trunk updates via config works correctly
-- [ ] Override flags (--no-trunk-update, --no-rebase) work correctly
+### Slice Readiness (existing behavior)
+- [ ] When slice/task checking is enabled, open tasks cause warning or error before proceeding (existing `kira review` slice check preserved or integrated)
 
-### Error Scenarios
-- [ ] Invalid work item ID shows clear error message
-- [ ] Work item already in review shows appropriate message
-- [ ] Trunk branch not found shows appropriate error
-- [ ] Rebase conflicts provide clear resolution instructions
-- [ ] GitHub API errors are handled gracefully
-- [ ] Network failures retry with exponential backoff
+## Slices
 
+Slices are ordered; each slice is a committable unit of work. Tasks within a slice are implemented in order.
+
+### Slice 1: Command, validation, and branch derivation
+
+- [ ] T001: Add `kira review` Cobra command (or repurpose existing) with flags: `--reviewer`, `--draft`, `--no-trunk-update`, `--no-rebase`, `--dry-run`; long description updated for submit-for-review flow.
+- [ ] T002: Implement branch derivation: get current branch, compare to trunk (error if on trunk); parse branch name to work item ID (e.g. `{id}-{kebab}`), validate ID format via config; error if not kira branch.
+- [ ] T003: Resolve work item by ID (`findWorkItemFile`); validate work item is in doing status (derive current status from file location or front matter); error if not found or not in doing.
+- [ ] T004: Integrate existing slice/task readiness check when configured (warn or error if tasks open); keep behavior consistent with current `kira review` slice check.
+- [ ] T005: Implement `--dry-run`: run validation and print planned steps (trunk update, rebase, move, push, PR create/update); no side effects.
+
+### Slice 2: Trunk update and rebase
+
+- [ ] T006: Reuse or call `kira latest` discovery and repo resolution for the work item (repos from config/workspace and work item metadata); run in context of current branch and work item.
+- [ ] T007: When not `--no-trunk-update` and not `--no-rebase`: execute fetch, trunk update (when on trunk), rebase onto trunk (when on feature branch); reuse stash/pop and conflict handling from latest.
+- [ ] T008: When `--no-trunk-update`: skip trunk update; when `--no-rebase`: skip rebase; apply per-repo for polyrepo.
+- [ ] T009: Add optional config for default trunk_update/rebase (e.g. `review.trunk_update`, `review.rebase`); flags override config.
+
+### Slice 3: Move to review and push
+
+- [ ] T010: Move work item file from doing folder to review folder (reuse move logic: rename, update status in front matter); optional commit of move when config/flag set.
+- [ ] T011: Push current branch to configured remote with `--force-with-lease`; support polyrepo (push in each repo for the work item).
+- [ ] T012: Progress/success messages for move and push; error handling without rolling back move on push failure.
+
+### Slice 4: GitHub PR create or update
+
+- [ ] T013: In internal/git: add ListPullRequestsByHead(ctx, client, owner, repo, head string) (or use existing List with Head filter); add UpdateDraftToReady(ctx, client, owner, repo, prNumber) and optionally SetReviewers; add CreatePR(ctx, client, owner, repo, base, head, title, body, draft bool) for non-draft or draft PR.
+- [ ] T014: After push: get remote URL and base URL; parse owner/repo; create GitHub client from KIRA_GITHUB_TOKEN; list open PRs for head = current branch; if draft PR found and `--no-draft`, update to ready and optionally set reviewers; if no PR, create PR (draft or ready per `--draft`) with title/body from work item and optional reviewers.
+- [ ] T015: When KIRA_GITHUB_TOKEN is unset and PR step would run: return clear error; do not fail move/push if they already succeeded (degraded success or fail before push—decide and document). Prefer failing before push with clear message when token required.
+- [ ] T016: Use same base URL and client construction as start (workspace GitBaseURL when polyrepo); handle GitHub Enterprise.
+
+### Slice 5: Tests and docs
+
+- [ ] T017: Unit tests for branch derivation, validation (trunk, non-kira, work item not found, not in doing), and dry-run output.
+- [ ] T018: Integration or e2e tests: run review on a kira branch (with/without --no-rebase, --no-trunk-update), verify move and push; mock or real GitHub for PR create/update where applicable.
+- [ ] T019: Update README or user docs for `kira review` submit-for-review flow; document flags and config.
 
 ## Implementation Notes
 
-### Architecture
-
-#### Command Structure
-```
-internal/commands/review.go
-├── reviewCmd - Main cobra command
-├── deriveWorkItemFromBranch() - Extract work item ID from current branch name
-├── validateBranchContext() - Ensure command is run on valid kira branch
-├── reviewWorkItem() - Core review logic
-├── updateTrunkStatus() - Update work item status on trunk branch
-├── performRebase() - Rebase current branch onto trunk
-├── createGitHubPR() - GitHub API integration
-└── updateWorkItem() - Work item metadata updates
-```
-
-#### Dependencies
-- **GitHub**: `github.com/google/go-github/v58/github` for API client
-- **HTTP**: Standard library for webhook notifications
-- **SMTP**: `net/smtp` for email notifications
-- **YAML**: Extended config parsing for notification settings
-
-### GitHub API Integration
-
-#### Authentication
-```go
-ctx := context.Background()
-ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-tc := oauth2.NewClient(ctx, ts)
-client := github.NewClient(tc)
-```
-
-#### PR Creation
-```go
-pr := &github.NewPullRequest{
-    Title: &title,
-    Head: &branchName,
-    Base: &baseBranch,
-    Body: &description,
-    Draft: &isDraft,
-}
-```
-
-#### Error Handling
-- Rate limiting: Implement backoff and retry logic
-- API errors: Parse and provide user-friendly messages
-- Token issues: Clear guidance on token setup
-
-
-### Work Item Processing
-
-#### Status Validation
-```go
-validStatuses := []string{"todo", "doing"}
-if !contains(validStatuses, currentStatus) {
-    return fmt.Errorf("work item must be in todo or doing status")
-}
-```
-
-#### Work Item Derivation
-```go
-func deriveWorkItemFromBranch(currentBranch string) (string, error) {
-    // Branch format: {id}-{title} (e.g., "001-user-authentication")
-    // Extract ID from beginning of branch name
-    dashIndex := strings.Index(currentBranch, "-")
-    if dashIndex == -1 {
-        return "", fmt.Errorf("branch name '%s' does not follow kira naming convention", currentBranch)
-    }
-
-    workItemID := currentBranch[:dashIndex]
-    if !regexp.MustCompile(`^\d{3}$`).MatchString(workItemID) {
-        return "", fmt.Errorf("invalid work item ID '%s' in branch name", workItemID)
-    }
-
-    return workItemID, nil
-}
-
-func validateBranchContext(currentBranch string, cfg *config.Config) error {
-    trunkBranch := cfg.Git.TrunkBranch
-    if currentBranch == trunkBranch {
-        return fmt.Errorf("cannot run 'kira review' on trunk branch '%s'", trunkBranch)
-    }
-
-    // Additional validation could check if branch was created by kira start
-    // by verifying work item exists and branch name matches expected pattern
-
-    return nil
-}
-```
-
-#### Reviewer Resolution
-```go
-func resolveReviewers(reviewerSpecs []string) ([]string, error) {
-    var reviewers []string
-
-    for _, spec := range reviewerSpecs {
-        // Check if it's a user number (digits only)
-        if regexp.MustCompile(`^\d+$`).MatchString(spec) {
-            // Resolve user number to GitHub username/email via kira user config
-            user, err := resolveUserByNumber(spec)
-            if err != nil {
-                return nil, fmt.Errorf("failed to resolve user number '%s': %w", spec, err)
-            }
-            reviewers = append(reviewers, user)
-        } else if strings.Contains(spec, "@") {
-            // Email address - use as-is
-            reviewers = append(reviewers, spec)
-        } else {
-            // Assume GitHub username
-            reviewers = append(reviewers, spec)
-        }
-    }
-
-    return reviewers, nil
-}
-
-func resolveUserByNumber(userNumber string) (string, error) {
-    // Load user mappings from kira user configuration
-    // This would integrate with the future kira user command
-    // For now, return placeholder error
-    return "", fmt.Errorf("user management not yet implemented")
-}
-```
-
-#### Trunk Status Update Process
-```go
-func updateTrunkStatus(workItemID string, cfg *config.Config) error {
-    // Get trunk branch from existing git configuration
-    trunkBranch := cfg.Git.TrunkBranch
-
-    // Stash any uncommitted changes
-    stashOutput, _ := exec.Command("git", "stash").Output()
-
-    // Switch to trunk branch
-    if err := exec.Command("git", "checkout", trunkBranch).Run(); err != nil {
-        return fmt.Errorf("failed to checkout trunk branch '%s': %w", trunkBranch, err)
-    }
-
-    // Update work item status
-    if err := moveWorkItem(workItemID, "review", true); err != nil {
-        return fmt.Errorf("failed to update trunk status: %w", err)
-    }
-
-    // Switch back to original branch
-    if err := exec.Command("git", "checkout", "-").Run(); err != nil {
-        return fmt.Errorf("failed to switch back to original branch: %w", err)
-    }
-
-    // Restore stashed changes if any
-    if stashOutput != nil {
-        exec.Command("git", "stash", "pop")
-    }
-
-    return nil
-}
-```
-
-#### Rebase Process
-```go
-func performRebase(cfg *config.Config) error {
-    // Get trunk branch from existing git configuration
-    trunkBranch := cfg.Git.TrunkBranch
-
-    // Perform rebase
-    cmd := exec.Command("git", "rebase", trunkBranch)
-    if err := cmd.Run(); err != nil {
-        // Check if rebase failed due to conflicts
-        if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-            return fmt.Errorf("rebase failed due to conflicts. Please resolve conflicts and run 'git rebase --continue'")
-        }
-        return fmt.Errorf("rebase failed: %w", err)
-    }
-    return nil
-}
-```
-
-#### Metadata Updates
-```go
-frontMatter := map[string]interface{}{
-    "status": "review",
-    "updated": time.Now().Format(time.RFC3339),
-    "review_pr_url": prURL,
-    "reviewers": reviewers,
-}
-```
-
-### Testing Strategy
-
-#### Unit Tests
-- Test work item ID derivation from branch names
-- Test branch validation (trunk branch rejection, invalid formats)
-- Test reviewer resolution (user numbers, emails, usernames)
-- Mock GitHub API responses
-- Test trunk status update functionality
-- Test rebase operations and conflict handling
-- Validate work item updates
-- Error scenario coverage
-
-#### Integration Tests
-- Full workflow testing with test GitHub repo
-- Notification webhook testing
-- Email delivery verification
-
-#### E2E Tests
-- `kira review` command in test environment
-- Verify PR creation and work item updates
-- Test notification delivery
-
-### Security Considerations
-
-#### Token Management
-- Never log or expose GitHub tokens
-- Use environment variables for sensitive config
-- Validate token permissions before operations
-
-#### Input Validation
-- Sanitize work item content for PR descriptions
-- Validate email addresses and webhook URLs
-- Escape special characters in branch names
-
-#### API Rate Limiting
-- Implement intelligent backoff for GitHub API calls
-- Cache repository information where possible
-- Provide clear error messages for rate limit issues
+- **Branch ID derivation**: Same convention as start (branch name `{id}-{kebab-title}`); extract ID as segment before first `-`; validate with `cfg.Validation.IDFormat`.
+- **Reuse**: Prefer calling existing `latest` flow (discoverRepositories, performFetchAndRebase) parameterized by work item and current branch; reuse moveWorkItem for move to review; reuse git.ParseGitHubOwnerRepo, NewClient, and extend internal/git with List PRs by head, Update draft to ready, Create PR with draft flag and reviewers.
+- **GitHub**: List open PRs with `Head: owner:branch`; update draft via PullRequests.Edit with `Draft: false`; create with Draft: true/false and RequestedReviewers if supported.
 
 ## Release Notes
 
-### New Features
-- **Review Command**: New `kira review` command that automatically derives work item from current branch for streamlined PR creation
-- **Smart Context Detection**: Automatically identifies work items from kira-created branch names
-- **Branch Validation**: Prevents accidental execution on trunk branches or invalid branches
-- **Trunk Status Updates**: Optional updates to trunk branch status for maintaining source of truth (configurable)
-- **Automatic Rebasing**: Seamless rebase of feature branch after trunk status updates
-- **GitHub Integration**: Seamless integration with GitHub for draft PR creation and review management
-
-### Improvements
-- Streamlined command interface - no need to specify work item IDs manually
-- Smart context awareness - automatically detects work items from branch names
-- Enhanced safety - prevents execution on trunk branches
-- Enhanced work item metadata tracking for review processes
-- Configurable trunk branch status updates (can be disabled if not desired)
-- Improved error messages and user guidance for review workflows and rebasing
-- Clean PR descriptions with links to detailed work items (no duplication)
-
-### Technical Changes
-- Added GitHub API client dependency for PR management
-- Extended configuration schema for review and notification settings
-- New command structure following established Kira patterns
+- **`kira review` submit for review**: From a kira feature branch, `kira review` now performs trunk update and rebase (optional), moves the work item to review status, pushes the branch, and creates or updates a GitHub PR. Use `--no-trunk-update` or `--no-rebase` to skip update/rebase, and `--dry-run` to preview steps.
 
