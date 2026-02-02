@@ -125,6 +125,49 @@ start:
 	})
 }
 
+func TestReviewConfigDefaults(t *testing.T) {
+	t.Run("review commit_move defaults to true when not specified", func(t *testing.T) {
+		_ = os.Remove("kira.yml")
+		_ = os.Remove(".work/kira.yml")
+
+		cfg, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Review)
+		require.NotNil(t, cfg.Review.CommitMove)
+		assert.True(t, *cfg.Review.CommitMove, "commit_move should default to true so move is committed before push")
+	})
+
+	t.Run("preserves review.commit_move false when set", func(t *testing.T) {
+		testConfig := `version: "1.0"
+review:
+  commit_move: false
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		cfg, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Review)
+		require.NotNil(t, cfg.Review.CommitMove)
+		assert.False(t, *cfg.Review.CommitMove)
+	})
+
+	t.Run("preserves review.commit_move true when set", func(t *testing.T) {
+		testConfig := `version: "1.0"
+review:
+  commit_move: true
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		cfg, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Review)
+		require.NotNil(t, cfg.Review.CommitMove)
+		assert.True(t, *cfg.Review.CommitMove)
+	})
+}
+
 func TestSlicesConfigDefaults(t *testing.T) {
 	t.Run("applies default slices config when not specified", func(t *testing.T) {
 		_ = os.Remove("kira.yml")

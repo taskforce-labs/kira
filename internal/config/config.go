@@ -742,7 +742,11 @@ func mergeReviewDefaults(config *Config) {
 		config.Review = &ReviewConfig{}
 	}
 	// TrunkUpdate and Rebase default to true when nil (run update/rebase by default)
-	// CommitMove defaults to false when nil (no commit of move by default)
+	// CommitMove defaults to true when nil so the move is committed before push
+	if config.Review.CommitMove == nil {
+		commitMove := true
+		config.Review.CommitMove = &commitMove
+	}
 }
 
 func mergeWorkspaceDefaults(config *Config) {
