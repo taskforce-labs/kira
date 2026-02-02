@@ -33,8 +33,8 @@ the branch name. Use --no-trunk-update or --no-rebase to skip update/rebase, and
 func init() {
 	reviewCmd.SilenceUsage = true
 	reviewCmd.Flags().StringSlice("reviewer", nil, "Reviewer (user number from kira user or email); can be repeated")
-	reviewCmd.Flags().Bool("draft", true, "Create or leave PR as draft (default true)")
-	reviewCmd.Flags().Bool("no-draft", false, "Create or update PR as ready for review (overrides --draft)")
+	reviewCmd.Flags().Bool("draft", false, "Create or leave PR as draft (default: create/update as ready for review)")
+	reviewCmd.Flags().Bool("no-draft", false, "Create or update PR as ready for review (default; overrides --draft)")
 	reviewCmd.Flags().Bool("no-trunk-update", false, "Skip updating trunk branch from remote before rebase")
 	reviewCmd.Flags().Bool("no-rebase", false, "Skip rebasing current branch onto trunk")
 	reviewCmd.Flags().Bool("dry-run", false, "Show what would be done without executing")
