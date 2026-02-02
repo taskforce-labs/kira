@@ -70,19 +70,63 @@ func NewClient(ctx context.Context, token, baseURL string) (*github.Client, erro
 // CreateDraftPR creates a draft pull request and returns its HTML URL.
 // base is the target branch (e.g. main), head is the source branch.
 func CreateDraftPR(ctx context.Context, client *github.Client, owner, repo, base, head, title, body string) (prURL string, err error) {
+	return CreatePR(ctx, client, owner, repo, base, head, title, body, true, nil)
+}
+
+// ListPullRequestsByHead lists open pull requests with head = owner:headBranch.
+// headBranch is the branch name (e.g. 012-submit-for-review); head filter is owner:headBranch.
+func ListPullRequestsByHead(ctx context.Context, client *github.Client, owner, repo, headBranch string) ([]*github.PullRequest, error) {
+	headFilter := owner + ":" + headBranch
+	opts := &github.PullRequestListOptions{State: "open", Head: headFilter, ListOptions: github.ListOptions{PerPage: 10}}
+	prs, _, err := client.PullRequests.List(ctx, owner, repo, opts)
+	if err != nil {
+		return nil, err
+	}
+	return prs, nil
+}
+
+// UpdateDraftToReady updates a pull request from draft to ready for review.
+func UpdateDraftToReady(ctx context.Context, client *github.Client, owner, repo string, prNumber int) error {
+	draft := false
+	_, _, err := client.PullRequests.Edit(ctx, owner, repo, prNumber, &github.PullRequest{Draft: &draft})
+	return err
+}
+
+// SetReviewers requests reviewers on a pull request (user logins).
+func SetReviewers(ctx context.Context, client *github.Client, owner, repo string, prNumber int, reviewers []string) error {
+	if len(reviewers) == 0 {
+		return nil
+	}
+	_, _, err := client.PullRequests.RequestReviewers(ctx, owner, repo, prNumber, github.ReviewersRequest{Reviewers: reviewers})
+	return err
+}
+
+// CreatePR creates a pull request (draft or ready) and optionally sets reviewers.
+// Returns the PR HTML URL.
+func CreatePR(ctx context.Context, client *github.Client, owner, repo, base, head, title, body string, draft bool, reviewers []string) (prURL string, err error) {
 	req := &github.NewPullRequest{
 		Title: github.String(title),
 		Head:  github.String(head),
 		Base:  github.String(base),
 		Body:  github.String(body),
-		Draft: github.Bool(true),
+		Draft: github.Bool(draft),
 	}
 	pr, _, err := client.PullRequests.Create(ctx, owner, repo, req)
 	if err != nil {
 		return "", err
 	}
 	if pr.HTMLURL != nil {
-		return *pr.HTMLURL, nil
+		prURL = *pr.HTMLURL
+	} else {
+		prURL = ""
 	}
-	return "", fmt.Errorf("PR created but no HTML URL returned")
+	if pr.Number != nil && len(reviewers) > 0 {
+		if err := SetReviewers(ctx, client, owner, repo, *pr.Number, reviewers); err != nil {
+			return prURL, fmt.Errorf("PR created but failed to set reviewers: %w", err)
+		}
+	}
+	if prURL == "" {
+		return "", fmt.Errorf("PR created but no HTML URL returned")
+	}
+	return prURL, nil
 }
