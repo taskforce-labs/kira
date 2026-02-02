@@ -380,10 +380,10 @@ The only config for this command is to override where skills and commands get in
 - [x] T004: Implement listing/loading of bundled skills and commands from the bundle
 
 ### Install cursor-skills
-- [ ] T005: Register `kira install cursor-skills` subcommand and wire to installer
-- [ ] T006: Create target skills directory at configured path if it does not exist
-- [ ] T007: Copy bundled skills to configured path; detect existing and offer overwrite or cancel
-- [ ] T008: Validate skill structure (SKILL.md with required frontmatter) and report errors; provide install feedback
+- [x] T005: Register `kira install cursor-skills` subcommand and wire to installer
+- [x] T006: Create target skills directory at configured path if it does not exist
+- [x] T007: Copy bundled skills to configured path; detect existing and offer overwrite or cancel
+- [x] T008: Validate skill structure (SKILL.md with required frontmatter) and report errors; provide install feedback
 
 ### Install cursor-commands
 - [ ] T009: Register `kira install cursor-commands` subcommand and wire to installer
