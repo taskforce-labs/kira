@@ -89,9 +89,23 @@ func runReview(cmd *cobra.Command, _ []string) error {
 		return printReviewDryRun(ctx)
 	}
 
-	// Full submit-for-review flow (trunk update, rebase, move, push, PR) is implemented in later slices.
-	// For slice 1 we only run validation and dry-run; actual steps come in slices 2–4.
+	// Trunk update and rebase (flags override config)
+	effectiveNoTrunkUpdate := ctx.NoTrunkUpdate || reviewConfigTrunkUpdateDisabled(cfg)
+	effectiveNoRebase := ctx.NoRebase || reviewConfigRebaseDisabled(cfg)
+	if err := runReviewTrunkUpdateAndRebase(cfg, ctx.WorkItemPath, effectiveNoTrunkUpdate, effectiveNoRebase); err != nil {
+		return err
+	}
+
+	// Move, push, and PR are implemented in slices 3–4.
 	return nil
+}
+
+func reviewConfigTrunkUpdateDisabled(cfg *config.Config) bool {
+	return cfg.Review != nil && cfg.Review.TrunkUpdate != nil && !*cfg.Review.TrunkUpdate
+}
+
+func reviewConfigRebaseDisabled(cfg *config.Config) bool {
+	return cfg.Review != nil && cfg.Review.Rebase != nil && !*cfg.Review.Rebase
 }
 
 // validateBranchAndWorkItem sets ctx.CurrentBranch, TrunkBranch, WorkItemID, WorkItemPath and validates.
