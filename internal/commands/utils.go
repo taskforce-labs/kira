@@ -239,6 +239,33 @@ func getDoingWorkItemPaths(cfg *config.Config) ([]string, error) {
 	return paths, nil
 }
 
+// statusFromWorkItemPath returns the status key (e.g. "doing") if path is under a configured status folder; otherwise "".
+func statusFromWorkItemPath(path string, cfg *config.Config) (string, error) {
+	workDir, err := config.GetWorkFolderAbsPath(cfg)
+	if err != nil {
+		return "", err
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	workDirWithSep := workDir + string(filepath.Separator)
+	if !strings.HasPrefix(absPath, workDirWithSep) && absPath != workDir {
+		return "", nil
+	}
+	for status, folder := range cfg.StatusFolders {
+		if folder == "" {
+			continue
+		}
+		statusDir := filepath.Join(workDir, folder)
+		statusDirWithSep := statusDir + string(filepath.Separator)
+		if strings.HasPrefix(absPath, statusDirWithSep) || absPath == statusDir {
+			return status, nil
+		}
+	}
+	return "", nil
+}
+
 // workItemIDsFromFilenames extracts work item ID hints from filenames (e.g. 026-slices.prd.md -> 026).
 func workItemIDsFromFilenames(files []string) []string {
 	ids := make([]string, 0, len(files))
