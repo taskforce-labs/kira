@@ -2243,6 +2243,19 @@ func pushBranch(remoteName, branchName, dir string, dryRun bool) error {
 	return nil
 }
 
+// pushBranchForceWithLease pushes the branch to the remote with --force-with-lease from the given directory.
+func pushBranchForceWithLease(remoteName, branchName, dir string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+
+	_, err := executeCommand(ctx, "git", []string{"push", remoteName, branchName, "--force-with-lease"}, dir, false)
+	if err != nil {
+		return fmt.Errorf("failed to push branch %s to %s: %w", branchName, remoteName, err)
+	}
+
+	return nil
+}
+
 // extractWorkItemBody returns the work item file content after the YAML front matter (body only).
 func extractWorkItemBody(filePath string, cfg *config.Config) (string, error) {
 	content, err := safeReadFile(filePath, cfg)
