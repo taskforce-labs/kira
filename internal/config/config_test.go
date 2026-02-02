@@ -1046,3 +1046,87 @@ docs_folder: "   "
 		assert.Contains(t, err.Error(), "docs_folder")
 	})
 }
+
+func TestChecksConfig(t *testing.T) {
+	t.Run("defaults to empty checks when no checks key", func(t *testing.T) {
+		_ = os.Remove("kira.yml")
+		_ = os.Remove(".work/kira.yml")
+
+		cfg, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Checks)
+		assert.Len(t, cfg.Checks, 0)
+	})
+
+	t.Run("defaults to empty checks when checks is empty list", func(t *testing.T) {
+		testConfig := `version: "1.0"
+checks: []
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		cfg, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Checks)
+		assert.Len(t, cfg.Checks, 0)
+	})
+
+	t.Run("loads valid checks with name command and optional description", func(t *testing.T) {
+		testConfig := `version: "1.0"
+checks:
+  - name: lint
+    command: make lint
+    description: Run linter
+  - name: test
+    command: go test ./...
+    description: Run unit tests
+  - name: security
+    command: make security
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		cfg, err := LoadConfig()
+		require.NoError(t, err)
+		require.Len(t, cfg.Checks, 3)
+		assert.Equal(t, "lint", cfg.Checks[0].Name)
+		assert.Equal(t, "make lint", cfg.Checks[0].Command)
+		assert.Equal(t, "Run linter", cfg.Checks[0].Description)
+		assert.Equal(t, "test", cfg.Checks[1].Name)
+		assert.Equal(t, "go test ./...", cfg.Checks[1].Command)
+		assert.Equal(t, "Run unit tests", cfg.Checks[1].Description)
+		assert.Equal(t, "security", cfg.Checks[2].Name)
+		assert.Equal(t, "make security", cfg.Checks[2].Command)
+		assert.Equal(t, "", cfg.Checks[2].Description)
+	})
+
+	t.Run("rejects check entry missing name", func(t *testing.T) {
+		testConfig := `version: "1.0"
+checks:
+  - command: make lint
+    description: Run linter
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "checks:")
+		assert.Contains(t, err.Error(), "missing required 'name' or 'command'")
+	})
+
+	t.Run("rejects check entry missing command", func(t *testing.T) {
+		testConfig := `version: "1.0"
+checks:
+  - name: lint
+    description: Run linter
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		_, err := LoadConfig()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "checks:")
+		assert.Contains(t, err.Error(), "missing required 'name' or 'command'")
+	})
+}

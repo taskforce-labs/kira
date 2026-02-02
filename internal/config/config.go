@@ -30,6 +30,7 @@ type Config struct {
 	Fields        map[string]FieldConfig `yaml:"fields"`
 	Slices        *SlicesConfig          `yaml:"slices"`
 	Review        *ReviewConfig          `yaml:"review"`
+	Checks        []CheckEntry           `yaml:"checks"`      // optional: list of check commands to run
 	DocsFolder    string                 `yaml:"docs_folder"` // default: ".docs"
 	// ConfigDir is the absolute path to the directory containing kira.yml (set at load time; not persisted).
 	ConfigDir string `yaml:"-"`
@@ -47,6 +48,13 @@ type SlicesConfig struct {
 	AutoUpdateStatus bool   `yaml:"auto_update_status"` // default: false
 	TaskIDFormat     string `yaml:"task_id_format"`     // default: "T%03d"
 	DefaultState     string `yaml:"default_state"`      // default: "open" (only open or done)
+}
+
+// CheckEntry represents a single check command in the checks list.
+type CheckEntry struct {
+	Name        string `yaml:"name"`        // required: short identifier (e.g. lint, test)
+	Command     string `yaml:"command"`     // required: shell command to run
+	Description string `yaml:"description"` // optional: human-readable description
 }
 
 // GitConfig contains git-related settings.
@@ -408,6 +416,11 @@ func validateConfig(config *Config) error {
 		return err
 	}
 
+	// Validate checks structure
+	if err := validateChecks(config); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -680,6 +693,7 @@ func mergeWithDefaults(config *Config) {
 	mergeWorkspaceDefaults(config)
 	mergeUsersDefaults(config)
 	mergeSlicesDefaults(config)
+	mergeChecksDefaults(config)
 	mergeFieldDefaults(config)
 }
 
@@ -694,6 +708,22 @@ func mergeSlicesDefaults(config *Config) {
 		config.Slices.DefaultState = "open"
 	}
 	// AutoUpdateStatus defaults to false (zero value)
+}
+
+func mergeChecksDefaults(config *Config) {
+	if config.Checks == nil {
+		config.Checks = []CheckEntry{}
+	}
+}
+
+// validateChecks ensures each check entry has required name and command.
+func validateChecks(config *Config) error {
+	for i, entry := range config.Checks {
+		if strings.TrimSpace(entry.Name) == "" || strings.TrimSpace(entry.Command) == "" {
+			return fmt.Errorf("checks: entry at index %d missing required 'name' or 'command'", i)
+		}
+	}
+	return nil
 }
 
 func mergeFieldDefaults(config *Config) {
