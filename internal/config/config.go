@@ -29,9 +29,17 @@ type Config struct {
 	Users         UsersConfig            `yaml:"users"`
 	Fields        map[string]FieldConfig `yaml:"fields"`
 	Slices        *SlicesConfig          `yaml:"slices"`
+	Review        *ReviewConfig          `yaml:"review"`
 	DocsFolder    string                 `yaml:"docs_folder"` // default: ".docs"
 	// ConfigDir is the absolute path to the directory containing kira.yml (set at load time; not persisted).
 	ConfigDir string `yaml:"-"`
+}
+
+// ReviewConfig contains settings for the review (submit-for-review) command.
+type ReviewConfig struct {
+	TrunkUpdate *bool `yaml:"trunk_update"` // default: true (nil = run trunk update)
+	Rebase      *bool `yaml:"rebase"`       // default: true (nil = run rebase)
+	CommitMove  *bool `yaml:"commit_move"`  // optional: commit the move to review (align with move command)
 }
 
 // SlicesConfig contains settings for slices and tasks in work items.
@@ -668,6 +676,7 @@ func mergeWithDefaults(config *Config) {
 
 	mergeGitDefaults(config)
 	mergeStartDefaults(config)
+	mergeReviewDefaults(config)
 	mergeWorkspaceDefaults(config)
 	mergeUsersDefaults(config)
 	mergeSlicesDefaults(config)
@@ -726,6 +735,14 @@ func mergeStartDefaults(config *Config) {
 		config.Start.StatusAction = "commit_and_push"
 	}
 	// StatusCommitMessage defaults to empty, which will use default template at runtime
+}
+
+func mergeReviewDefaults(config *Config) {
+	if config.Review == nil {
+		config.Review = &ReviewConfig{}
+	}
+	// TrunkUpdate and Rebase default to true when nil (run update/rebase by default)
+	// CommitMove defaults to false when nil (no commit of move by default)
 }
 
 func mergeWorkspaceDefaults(config *Config) {

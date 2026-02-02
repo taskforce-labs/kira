@@ -369,6 +369,24 @@ func discoverRepositories(cfg *config.Config) ([]RepositoryInfo, error) {
 	return repos, nil
 }
 
+// discoverRepositoriesFromPath discovers repositories for the work item at workItemPath.
+// Used by review when work item ID is derived from branch (caller already has path).
+func discoverRepositoriesFromPath(cfg *config.Config, workItemPath string) ([]RepositoryInfo, error) {
+	metadata, err := extractWorkItemMetadataForLatest(workItemPath, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract work item metadata: %w", err)
+	}
+	behavior := detectWorkspaceBehavior(cfg)
+	repos, err := resolveRepositoriesForLatest(cfg, behavior, metadata.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateRepositories(repos); err != nil {
+		return nil, err
+	}
+	return repos, nil
+}
+
 // findCurrentWorkItem locates the work item file in the doing folder
 func findCurrentWorkItem(cfg *config.Config) (string, error) {
 	doingFolder := cfg.StatusFolders["doing"]
@@ -1638,6 +1656,28 @@ func rebaseOntoTrunk(repo RepositoryInfo) error {
 	return nil
 }
 
+// rebaseOntoLocalTrunk rebases the current branch onto the local trunk branch (no fetch).
+func rebaseOntoLocalTrunk(repo RepositoryInfo) error {
+	currentBranch, err := getCurrentBranch(repo.Path)
+	if err != nil {
+		return fmt.Errorf("failed to determine current branch: %w", err)
+	}
+	if currentBranch == repo.TrunkBranch {
+		return fmt.Errorf("already on trunk branch %s", repo.TrunkBranch)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+	_, err = executeCommandCombinedOutputWithEnv(ctx, "git", []string{"rebase", repo.TrunkBranch}, repo.Path, gitNonInteractiveEnv, false)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "CONFLICT") || strings.Contains(errStr, "conflict") {
+			return fmt.Errorf("rebase failed due to conflicts. Resolve conflicts and run 'kira review' again: %w", err)
+		}
+		return fmt.Errorf("rebase onto local %s failed: %w", repo.TrunkBranch, err)
+	}
+	return nil
+}
+
 // performFetchAndRebase performs both fetch and rebase operations for a repository
 // It handles stashing uncommitted changes if present
 func performFetchAndRebase(repo RepositoryInfo, noPopStash bool) (bool, error) {
@@ -2021,4 +2061,136 @@ func displayOperationResults(results []RepositoryOperationResult) {
 	fmt.Printf("Summary: %d succeeded, %d failed\n", successCount, failureCount)
 
 	displayFailedReposGuidance(failedRepos)
+}
+
+// runReviewTrunkUpdateAndRebase runs trunk update and/or rebase for the review command.
+// noTrunkUpdate: skip fetch and trunk update; when false and noRebase, still do rebase onto local trunk only.
+// noRebase: skip rebase for feature branches; when false and noTrunkUpdate, do rebase onto local trunk only.
+func runReviewTrunkUpdateAndRebase(cfg *config.Config, workItemPath string, noTrunkUpdate, noRebase bool) error {
+	if noTrunkUpdate && noRebase {
+		return nil
+	}
+	repos, err := discoverRepositoriesFromPath(cfg, workItemPath)
+	if err != nil {
+		return err
+	}
+	if len(repos) == 0 {
+		return fmt.Errorf("no repositories found for work item")
+	}
+	displayDiscoveredRepositories(repos)
+	stateInfos := checkAllRepositoryStates(repos)
+	aggregated := aggregateRepositoryStates(stateInfos)
+	displayStateSummary(stateInfos, aggregated)
+	skip, err := runReviewValidateState(aggregated, stateInfos)
+	if err != nil {
+		return err
+	}
+	if skip {
+		return nil
+	}
+	if err := validateAllReposCleanOrDirtyForUpdate(aggregated); err != nil {
+		return err
+	}
+	reposToProcess := getReposToProcess(stateInfos)
+	if len(reposToProcess) == 0 {
+		return nil
+	}
+	displayUpdateMessage(aggregated.DirtyRepos, false)
+	orderedRepos := orderRepositoriesByDependencies(reposToProcess)
+	if !noTrunkUpdate && !noRebase {
+		results := performFetchAndRebaseForAllRepos(orderedRepos, false, false)
+		return handleUpdateResults(results)
+	}
+	if noTrunkUpdate && !noRebase {
+		return runReviewRebaseOntoLocalOnly(orderedRepos)
+	}
+	return runReviewFetchAndTrunkUpdateOnly(orderedRepos)
+}
+
+func runReviewValidateState(aggregated AggregatedState, stateInfos []RepositoryStateInfo) (skip bool, err error) {
+	if aggregated.OverallState == StateConflictsExist {
+		displayAllConflicts(stateInfos)
+		return false, fmt.Errorf("resolve conflicts before submitting for review")
+	}
+	if aggregated.OverallState == StateInRebase {
+		return false, fmt.Errorf("rebase in progress; complete or abort rebase before submitting for review")
+	}
+	if aggregated.OverallState != StateReadyForUpdate && len(aggregated.DirtyRepos) == 0 {
+		return true, nil
+	}
+	return false, nil
+}
+
+func runReviewRebaseOntoLocalOnly(repos []RepositoryInfo) error {
+	for _, repo := range repos {
+		hadStash, err := runReviewStashIfNeeded(repo)
+		if err != nil {
+			return err
+		}
+		if err := rebaseOntoLocalTrunk(repo); err != nil {
+			if hadStash {
+				_ = popStash(repo)
+			}
+			return fmt.Errorf("%s: %w", repo.Name, err)
+		}
+		if hadStash {
+			if err := popStash(repo); err != nil {
+				return fmt.Errorf("rebase succeeded but failed to pop stash in %s: %w", repo.Name, err)
+			}
+		}
+		fmt.Printf("  ✓ %s: rebased onto local %s\n", repo.Name, repo.TrunkBranch)
+	}
+	fmt.Println("\n✓ All repositories rebased onto local trunk.")
+	return nil
+}
+
+func runReviewFetchAndTrunkUpdateOnly(repos []RepositoryInfo) error {
+	for _, repo := range repos {
+		hadStash, err := runReviewStashIfNeeded(repo)
+		if err != nil {
+			return err
+		}
+		if err := fetchFromRemote(repo); err != nil {
+			if hadStash {
+				_ = popStash(repo)
+			}
+			return fmt.Errorf("%s: fetch failed: %w", repo.Name, err)
+		}
+		onTrunk, err := isOnTrunkBranch(repo)
+		if err != nil {
+			if hadStash {
+				_ = popStash(repo)
+			}
+			return err
+		}
+		if onTrunk {
+			if err := updateTrunkFromRemote(repo); err != nil {
+				if hadStash {
+					_ = popStash(repo)
+				}
+				return fmt.Errorf("%s: trunk update failed: %w", repo.Name, err)
+			}
+			fmt.Printf("  ✓ %s: trunk updated\n", repo.Name)
+		} else {
+			fmt.Printf("  ✓ %s: fetched (rebase skipped by --no-rebase)\n", repo.Name)
+		}
+		if hadStash {
+			if err := popStash(repo); err != nil {
+				return fmt.Errorf("update succeeded but failed to pop stash in %s: %w", repo.Name, err)
+			}
+		}
+	}
+	fmt.Println("\n✓ Fetch and trunk update complete.")
+	return nil
+}
+
+func runReviewStashIfNeeded(repo RepositoryInfo) (bool, error) {
+	hasUncommitted, err := checkUncommittedChangesForLatest(repo.Path)
+	if err != nil || !hasUncommitted {
+		return false, nil
+	}
+	if err := stashChanges(repo); err != nil {
+		return false, fmt.Errorf("failed to stash in %s: %w", repo.Name, err)
+	}
+	return true, nil
 }

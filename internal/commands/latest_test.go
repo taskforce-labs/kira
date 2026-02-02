@@ -841,6 +841,35 @@ func TestDiscoverRepositories(t *testing.T) {
 		assert.Equal(t, expectedPath, actualPath)
 	})
 
+	t.Run("discoverRepositoriesFromPath returns same repos as discoverRepositories for work item path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".git", 0o700))
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(testWorkItemContentDoing), 0o600))
+
+		cfg := &config.Config{
+			StatusFolders: map[string]string{
+				"doing": "2_doing",
+			},
+			Git: &config.GitConfig{
+				TrunkBranch: "main",
+				Remote:      "origin",
+			},
+		}
+
+		repos, err := discoverRepositoriesFromPath(cfg, testWorkItemPathDoing)
+		require.NoError(t, err)
+		require.Len(t, repos, 1)
+		expectedName := filepath.Base(tmpDir)
+		assert.Equal(t, expectedName, repos[0].Name)
+		expectedPath, _ := filepath.EvalSymlinks(tmpDir)
+		actualPath, _ := filepath.EvalSymlinks(repos[0].Path)
+		assert.Equal(t, expectedPath, actualPath)
+	})
+
 	t.Run("returns error when no work item in doing folder", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
