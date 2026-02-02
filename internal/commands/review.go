@@ -3,6 +3,7 @@ package commands
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -96,7 +97,66 @@ func runReview(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Move, push, and PR are implemented in slices 3–4.
+	repos, err := discoverRepositoriesFromPath(cfg, ctx.WorkItemPath)
+	if err != nil {
+		return fmt.Errorf("failed to discover repositories for push: %w", err)
+	}
+
+	if err := runReviewMoveToReview(ctx, cfg); err != nil {
+		return err
+	}
+	if err := runReviewPush(ctx, repos); err != nil {
+		return err
+	}
+	fmt.Println("Moved to review and pushed.")
+	return nil
+}
+
+func reviewCommitMove(cfg *config.Config) bool {
+	return cfg.Review != nil && cfg.Review.CommitMove != nil && *cfg.Review.CommitMove
+}
+
+func runReviewMoveToReview(ctx *reviewContext, cfg *config.Config) error {
+	var moveMetadata workItemMetadata
+	if reviewCommitMove(cfg) {
+		var err error
+		moveMetadata.workItemType, moveMetadata.id, moveMetadata.title, moveMetadata.currentStatus, moveMetadata.repos, err = extractWorkItemMetadata(ctx.WorkItemPath, cfg)
+		if err != nil {
+			return fmt.Errorf("failed to extract work item metadata for commit: %w", err)
+		}
+	}
+	fmt.Println("Moving work item to review...")
+	if err := moveWorkItemWithoutCommit(cfg, ctx.WorkItemID, "review"); err != nil {
+		return fmt.Errorf("failed to move work item to review: %w", err)
+	}
+	reviewFolder := cfg.StatusFolders["review"]
+	if reviewFolder == "" {
+		reviewFolder = "3_review"
+	}
+	newPath := filepath.Join(config.GetWorkFolderPath(cfg), reviewFolder, filepath.Base(ctx.WorkItemPath))
+	if reviewCommitMove(cfg) {
+		subject, body, err := buildCommitMessage(cfg, moveMetadata.workItemType, moveMetadata.id, moveMetadata.title, moveMetadata.currentStatus, "review")
+		if err != nil {
+			return fmt.Errorf("failed to build commit message: %w", err)
+		}
+		if err := commitMove(ctx.WorkItemPath, newPath, subject, body, false); err != nil {
+			return fmt.Errorf("failed to commit move: %w", err)
+		}
+		fmt.Println("Moved work item to review and committed.")
+	} else {
+		fmt.Println("Moved work item to review.")
+	}
+	return nil
+}
+
+func runReviewPush(ctx *reviewContext, repos []RepositoryInfo) error {
+	fmt.Println("Pushing branch...")
+	for _, repo := range repos {
+		if err := pushBranchForceWithLease(repo.Remote, ctx.CurrentBranch, repo.Path); err != nil {
+			return fmt.Errorf("push failed for %s: %w (work item was moved to review; fix push then re-run if needed)", repo.Name, err)
+		}
+		fmt.Printf("Pushed %s to %s\n", ctx.CurrentBranch, repo.Remote)
+	}
 	return nil
 }
 

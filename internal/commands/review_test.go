@@ -196,6 +196,14 @@ kind: prd
 	})
 }
 
+func TestRunReviewPushEmptyRepos(t *testing.T) {
+	ctx := &reviewContext{CurrentBranch: "012-foo"}
+	err := runReviewPush(ctx, nil)
+	require.NoError(t, err)
+	err = runReviewPush(ctx, []RepositoryInfo{})
+	require.NoError(t, err)
+}
+
 func TestRunReviewDryRun(t *testing.T) {
 	t.Run("dry-run runs validation and prints planned steps", func(t *testing.T) {
 		tmpDir := t.TempDir()
