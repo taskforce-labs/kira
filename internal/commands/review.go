@@ -2,13 +2,19 @@
 package commands
 
 import (
+	"context"
 	"fmt"
+	"log"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/google/go-github/v61/github"
 	"github.com/spf13/cobra"
 
 	"kira/internal/config"
+	"kira/internal/git"
 )
 
 var reviewCmd = &cobra.Command{
@@ -89,19 +95,22 @@ func runReview(cmd *cobra.Command, _ []string) error {
 	if ctx.DryRun {
 		return printReviewDryRun(ctx)
 	}
+	return runReviewExecute(ctx, cfg)
+}
 
-	// Trunk update and rebase (flags override config)
+func runReviewExecute(ctx *reviewContext, cfg *config.Config) error {
 	effectiveNoTrunkUpdate := ctx.NoTrunkUpdate || reviewConfigTrunkUpdateDisabled(cfg)
 	effectiveNoRebase := ctx.NoRebase || reviewConfigRebaseDisabled(cfg)
 	if err := runReviewTrunkUpdateAndRebase(cfg, ctx.WorkItemPath, effectiveNoTrunkUpdate, effectiveNoRebase); err != nil {
 		return err
 	}
-
 	repos, err := discoverRepositoriesFromPath(cfg, ctx.WorkItemPath)
 	if err != nil {
 		return fmt.Errorf("failed to discover repositories for push: %w", err)
 	}
-
+	if runReviewWouldCreateOrUpdatePR(cfg, repos) && os.Getenv("KIRA_GITHUB_TOKEN") == "" {
+		return fmt.Errorf("KIRA_GITHUB_TOKEN is not set. Set it to create or update PRs, or use --dry-run to skip")
+	}
 	if err := runReviewMoveToReview(ctx, cfg); err != nil {
 		return err
 	}
@@ -109,6 +118,9 @@ func runReview(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	fmt.Println("Moved to review and pushed.")
+	if err := runReviewCreateOrUpdatePR(ctx, cfg, repos); err != nil {
+		log.Printf("Warning: PR create/update failed: %v", err)
+	}
 	return nil
 }
 
@@ -158,6 +170,107 @@ func runReviewPush(ctx *reviewContext, repos []RepositoryInfo) error {
 		fmt.Printf("Pushed %s to %s\n", ctx.CurrentBranch, repo.Remote)
 	}
 	return nil
+}
+
+func runReviewWouldCreateOrUpdatePR(cfg *config.Config, repos []RepositoryInfo) bool {
+	baseURL := ""
+	if cfg.Workspace != nil {
+		baseURL = cfg.Workspace.GitBaseURL
+	}
+	for _, repo := range repos {
+		remoteURL, err := getRemoteURL(repo.Remote, repo.Path)
+		if err != nil {
+			continue
+		}
+		if isGitHubRemote(remoteURL, baseURL) {
+			return true
+		}
+	}
+	return false
+}
+
+func runReviewCreateOrUpdatePR(ctx *reviewContext, cfg *config.Config, repos []RepositoryInfo) error {
+	token := os.Getenv("KIRA_GITHUB_TOKEN")
+	if token == "" {
+		return nil
+	}
+	baseURL := ""
+	if cfg.Workspace != nil {
+		baseURL = cfg.Workspace.GitBaseURL
+	}
+	workItemPath, err := findWorkItemFile(ctx.WorkItemID, cfg)
+	if err != nil {
+		return err
+	}
+	_, id, title, _, _, err := extractWorkItemMetadata(workItemPath, cfg)
+	if err != nil {
+		return err
+	}
+	prTitle := id + ": " + title
+	prBody, _ := extractWorkItemBody(workItemPath, cfg)
+	prCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := git.NewClient(prCtx, token, baseURL)
+	if err != nil {
+		return err
+	}
+	for _, repo := range repos {
+		runReviewCreateOrUpdatePRForRepo(prCtx, ctx, repo, prTitle, prBody, client, baseURL)
+	}
+	return nil
+}
+
+func runReviewCreateOrUpdatePRForRepo(prCtx context.Context, ctx *reviewContext, repo RepositoryInfo, prTitle, prBody string, client *github.Client, baseURL string) {
+	remoteURL, err := getRemoteURL(repo.Remote, repo.Path)
+	if err != nil || !isGitHubRemote(remoteURL, baseURL) {
+		return
+	}
+	owner, repoName, err := git.ParseGitHubOwnerRepo(remoteURL)
+	if err != nil {
+		log.Printf("Warning: could not parse GitHub remote %s: %v", remoteURL, err)
+		return
+	}
+	prs, err := git.ListPullRequestsByHead(prCtx, client, owner, repoName, ctx.CurrentBranch)
+	if err != nil {
+		log.Printf("Warning: failed to list PRs for %s: %v", repo.Name, err)
+		return
+	}
+	if len(prs) > 0 {
+		runReviewUpdateExistingPR(prCtx, client, owner, repoName, ctx, prs[0])
+		return
+	}
+	prURL, err := git.CreatePR(prCtx, client, owner, repoName, ctx.TrunkBranch, ctx.CurrentBranch, prTitle, prBody, ctx.Draft, ctx.Reviewers)
+	if err != nil {
+		log.Printf("Warning: failed to create PR for %s: %v", repo.Name, err)
+		return
+	}
+	fmt.Printf("PR: %s\n", prURL)
+}
+
+func runReviewUpdateExistingPR(prCtx context.Context, client *github.Client, owner, repoName string, ctx *reviewContext, pr *github.PullRequest) {
+	if pr.HTMLURL != nil && (pr.Draft == nil || !*pr.Draft) {
+		fmt.Printf("PR: %s\n", *pr.HTMLURL)
+		return
+	}
+	if pr.Number == nil {
+		return
+	}
+	if pr.Draft == nil || !*pr.Draft || ctx.Draft {
+		if pr.HTMLURL != nil {
+			fmt.Printf("PR: %s\n", *pr.HTMLURL)
+		}
+		return
+	}
+	if err := git.UpdateDraftToReady(prCtx, client, owner, repoName, *pr.Number); err != nil {
+		log.Printf("Warning: failed to update draft to ready: %v", err)
+		return
+	}
+	if len(ctx.Reviewers) > 0 {
+		_ = git.SetReviewers(prCtx, client, owner, repoName, *pr.Number, ctx.Reviewers)
+	}
+	if pr.HTMLURL != nil {
+		fmt.Printf("PR ready for review: %s\n", *pr.HTMLURL)
+	}
 }
 
 func reviewConfigTrunkUpdateDisabled(cfg *config.Config) bool {
