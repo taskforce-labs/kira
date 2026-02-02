@@ -396,6 +396,6 @@ The only config for this command is to override where skills and commands get in
 - [x] T014: When required skill or command is missing, run kira install cursor-skills and/or cursor-commands automatically (no user confirmation)
 
 ### Bundled skills and commands content
-- [ ] T015: Add bundled skill folders and SKILL.md for Product Discovery, Domain Discovery, Technical Discovery, Roadmap Planning, Work Item Elaboration, RALF on Work Items
-- [ ] T016: Add bundled command .md files for product-discovery, domain-modelling, create-adr, target-architecture, elaborate-work-item, break-into-slices, ralf-work-item, test-and-verify
+- [x] T015: Add bundled skill folders and SKILL.md for Product Discovery, Domain Discovery, Technical Discovery, Roadmap Planning, Work Item Elaboration, RALF on Work Items
+- [x] T016: Add bundled command .md files for product-discovery, domain-modelling, create-adr, target-architecture, elaborate-work-item, break-into-slices, ralf-work-item, test-and-verify
 
