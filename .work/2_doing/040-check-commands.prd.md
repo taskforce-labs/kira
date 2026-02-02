@@ -1,7 +1,7 @@
 ---
 id: 040
 title: check commands
-status: backlog
+status: doing
 kind: prd
 assigned:
 created: 2026-02-02
