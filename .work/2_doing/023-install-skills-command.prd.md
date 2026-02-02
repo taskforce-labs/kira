@@ -386,10 +386,10 @@ The only config for this command is to override where skills and commands get in
 - [x] T008: Validate skill structure (SKILL.md with required frontmatter) and report errors; provide install feedback
 
 ### Install cursor-commands
-- [ ] T009: Register `kira install cursor-commands` subcommand and wire to installer
-- [ ] T010: Create target commands directory at configured path if it does not exist
-- [ ] T011: Copy bundled commands to configured path; detect existing and offer overwrite or cancel
-- [ ] T012: Validate command markdown and report errors; provide install feedback
+- [x] T009: Register `kira install cursor-commands` subcommand and wire to installer
+- [x] T010: Create target commands directory at configured path if it does not exist
+- [x] T011: Copy bundled commands to configured path; detect existing and offer overwrite or cancel
+- [x] T012: Validate command markdown and report errors; provide install feedback
 
 ### Auto-install missing
 - [ ] T013: Add check for required skills/commands at configured path where Kira workflows depend on them

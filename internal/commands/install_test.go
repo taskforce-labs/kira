@@ -97,6 +97,23 @@ func TestValidatePathUnder(t *testing.T) {
 	})
 }
 
+func TestValidateCommandMarkdown(t *testing.T) {
+	t.Run("valid content", func(t *testing.T) {
+		err := validateCommandMarkdown([]byte("# Command\n\nContent here."))
+		require.NoError(t, err)
+	})
+	t.Run("empty file", func(t *testing.T) {
+		err := validateCommandMarkdown([]byte{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty")
+	})
+	t.Run("whitespace only", func(t *testing.T) {
+		err := validateCommandMarkdown([]byte("   \n\t  "))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no content")
+	})
+}
+
 func TestRunInstallCursorSkills(t *testing.T) {
 	t.Run("installs to configured path and creates skills", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -130,5 +147,41 @@ cursor_install:
 		data, err := os.ReadFile(skillPath)
 		require.NoError(t, err)
 		assert.Contains(t, string(data), "name: product-discovery")
+	})
+}
+
+func TestRunInstallCursorCommands(t *testing.T) {
+	t.Run("installs to configured path and creates commands", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgDir := t.TempDir()
+		kiraYml := `version: "1.0"
+cursor_install:
+  base_path: ` + "\"" + tmpDir + "\"" + "\n"
+		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "kira.yml"), []byte(kiraYml), 0o600))
+		origWd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(origWd) }()
+		require.NoError(t, os.Chdir(cfgDir))
+
+		cmd := installCursorCommandsCmd
+		require.NoError(t, cmd.Flags().Set("force", "true"))
+		err = runInstallCursorCommands(cmd, nil)
+		require.NoError(t, err)
+
+		commandsPath := filepath.Join(tmpDir, ".cursor", "commands")
+		entries, err := os.ReadDir(commandsPath)
+		require.NoError(t, err)
+		var files []string
+		for _, e := range entries {
+			if !e.IsDir() {
+				files = append(files, e.Name())
+			}
+		}
+		require.Contains(t, files, "kira-product-discovery.md")
+		cmdPath := filepath.Join(commandsPath, "kira-product-discovery.md")
+		// #nosec G304 - path is from test temp dir and fixed segment
+		data, err := os.ReadFile(cmdPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "# Product Discovery")
 	})
 }

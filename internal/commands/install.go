@@ -28,9 +28,18 @@ var installCursorSkillsCmd = &cobra.Command{
 	RunE:  runInstallCursorSkills,
 }
 
+var installCursorCommandsCmd = &cobra.Command{
+	Use:   "cursor-commands",
+	Short: "Install Cursor Commands",
+	Long:  `Copy bundled Cursor commands to the configured path. Commands are installed as kira-<name>.md.`,
+	RunE:  runInstallCursorCommands,
+}
+
 func init() {
 	installCmd.AddCommand(installCursorSkillsCmd)
+	installCmd.AddCommand(installCursorCommandsCmd)
 	installCursorSkillsCmd.Flags().Bool("force", false, "Overwrite existing skills at the target path without prompting")
+	installCursorCommandsCmd.Flags().Bool("force", false, "Overwrite existing commands at the target path without prompting")
 }
 
 func runInstallCursorSkills(cmd *cobra.Command, _ []string) error {
@@ -83,6 +92,118 @@ func runInstallCursorSkills(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+func runInstallCursorCommands(cmd *cobra.Command, _ []string) error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	commandsPath, err := config.GetCursorCommandsPath(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to resolve commands path: %w", err)
+	}
+	force, _ := cmd.Flags().GetBool("force")
+
+	if err := ensureCommandsOverwriteDecision(commandsPath, force); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(commandsPath, 0o700); err != nil {
+		return fmt.Errorf("failed to create commands directory: %w", err)
+	}
+
+	names, err := cursorassets.ListCommands()
+	if err != nil {
+		return fmt.Errorf("failed to list bundled commands: %w", err)
+	}
+
+	commandsPathAbs, err := filepath.Abs(commandsPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve commands path: %w", err)
+	}
+
+	for _, name := range names {
+		content, err := cursorassets.ReadCommand(name)
+		if err != nil {
+			return fmt.Errorf("command %s: %w", name, err)
+		}
+		if err := validateCommandMarkdown(content); err != nil {
+			return fmt.Errorf("command %s: %w", name, err)
+		}
+		destPath := filepath.Join(commandsPath, name+".md")
+		if err := validatePathUnder(commandsPathAbs, destPath); err != nil {
+			return fmt.Errorf("command %s: %w", name, err)
+		}
+		if err := os.WriteFile(destPath, content, 0o600); err != nil {
+			return fmt.Errorf("command %s: %w", name, err)
+		}
+	}
+
+	fmt.Printf("Installed %d command(s) to %s\n", len(names), commandsPath)
+	return nil
+}
+
+func ensureCommandsOverwriteDecision(commandsPath string, force bool) error {
+	kiraFiles, err := listExistingKiraCommands(commandsPath)
+	if err != nil {
+		return err
+	}
+	if len(kiraFiles) == 0 {
+		return nil
+	}
+	if force {
+		return removeKiraCommandFiles(commandsPath, kiraFiles)
+	}
+	fmt.Printf("Commands already exist at %s (%s). Choose: [o]verwrite, [c]ancel\n", commandsPath, strings.Join(kiraFiles, ", "))
+	fmt.Print("Enter choice (o/c): ")
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return err
+	}
+	choice := strings.ToLower(strings.TrimSpace(input))
+	if choice == "o" || choice == choiceOverwrite {
+		return removeKiraCommandFiles(commandsPath, kiraFiles)
+	}
+	return fmt.Errorf("install cancelled")
+}
+
+func listExistingKiraCommands(commandsPath string) ([]string, error) {
+	entries, err := os.ReadDir(commandsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read commands path: %w", err)
+	}
+	var kiraFiles []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "kira-") && strings.HasSuffix(e.Name(), ".md") {
+			kiraFiles = append(kiraFiles, e.Name())
+		}
+	}
+	return kiraFiles, nil
+}
+
+func removeKiraCommandFiles(commandsPath string, files []string) error {
+	for _, f := range files {
+		filePath := filepath.Join(commandsPath, f)
+		if err := os.Remove(filePath); err != nil {
+			return fmt.Errorf("failed to remove existing command %s: %w", f, err)
+		}
+	}
+	return nil
+}
+
+func validateCommandMarkdown(content []byte) error {
+	if len(content) == 0 {
+		return fmt.Errorf("command file is empty")
+	}
+	if strings.TrimSpace(string(content)) == "" {
+		return fmt.Errorf("command file has no content")
+	}
+	return nil
+}
+
 func ensureSkillsOverwriteDecision(skillsPath string, force bool) error {
 	entries, err := os.ReadDir(skillsPath)
 	if err != nil {
@@ -118,7 +239,7 @@ func ensureSkillsOverwriteDecision(skillsPath string, force bool) error {
 	}
 	choice := strings.ToLower(strings.TrimSpace(input))
 	switch choice {
-	case "o", "overwrite":
+	case "o", choiceOverwrite:
 		for _, d := range kiraDirs {
 			dirPath := filepath.Join(skillsPath, d)
 			if err := os.RemoveAll(dirPath); err != nil {
