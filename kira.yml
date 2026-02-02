@@ -28,8 +28,11 @@ validation:
         - released
         - abandoned
         - archived
+    strict: false
 commit:
     default_message: Update work items
+    move_subject_template: '{id} move: to {target_status} - {type} {title} '
+    move_body_template: '{title} ({current_status} -> {target_status})'
 release:
     releases_file: RELEASES.md
     archive_date_format: "2006-01-02"
@@ -42,7 +45,7 @@ git:
 start:
     move_to: doing
     status_action: commit_and_push
-    status_commit_message: "Start {type} {id}: {title}"
+    status_commit_message: '{id }start: {type} {title}'
 
 ide:
     command: "cursor"
@@ -53,3 +56,7 @@ users:
     commit_limit: 1000
     ignored_emails:
         - wayne@jellybeanjar.io
+    ignored_patterns: []
+    saved_users: []
+fields: {}
+docs_folder: .docs
