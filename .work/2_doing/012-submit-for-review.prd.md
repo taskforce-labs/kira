@@ -126,37 +126,37 @@ Slices are ordered; each slice is a committable unit of work. Tasks within a sli
 
 ### Slice 1: Command, validation, and branch derivation
 
-- [ ] T001: Add `kira review` Cobra command (or repurpose existing) with flags: `--reviewer`, `--draft`, `--no-trunk-update`, `--no-rebase`, `--dry-run`; long description updated for submit-for-review flow.
-- [ ] T002: Implement branch derivation: get current branch, compare to trunk (error if on trunk); parse branch name to work item ID (e.g. `{id}-{kebab}`), validate ID format via config; error if not kira branch.
-- [ ] T003: Resolve work item by ID (`findWorkItemFile`); validate work item is in doing status (derive current status from file location or front matter); error if not found or not in doing.
-- [ ] T004: Integrate existing slice/task readiness check when configured (warn or error if tasks open); keep behavior consistent with current `kira review` slice check.
-- [ ] T005: Implement `--dry-run`: run validation and print planned steps (trunk update, rebase, move, push, PR create/update); no side effects.
+- [x] T001: Add `kira review` Cobra command (or repurpose existing) with flags: `--reviewer`, `--draft`, `--no-trunk-update`, `--no-rebase`, `--dry-run`; long description updated for submit-for-review flow.
+- [x] T002: Implement branch derivation: get current branch, compare to trunk (error if on trunk); parse branch name to work item ID (e.g. `{id}-{kebab}`), validate ID format via config; error if not kira branch.
+- [x] T003: Resolve work item by ID (`findWorkItemFile`); validate work item is in doing status (derive current status from file location or front matter); error if not found or not in doing.
+- [x] T004: Integrate existing slice/task readiness check when configured (warn or error if tasks open); keep behavior consistent with current `kira review` slice check.
+- [x] T005: Implement `--dry-run`: run validation and print planned steps (trunk update, rebase, move, push, PR create/update); no side effects.
 
 ### Slice 2: Trunk update and rebase
 
-- [ ] T006: Reuse or call `kira latest` discovery and repo resolution for the work item (repos from config/workspace and work item metadata); run in context of current branch and work item.
-- [ ] T007: When not `--no-trunk-update` and not `--no-rebase`: execute fetch, trunk update (when on trunk), rebase onto trunk (when on feature branch); reuse stash/pop and conflict handling from latest.
-- [ ] T008: When `--no-trunk-update`: skip trunk update; when `--no-rebase`: skip rebase; apply per-repo for polyrepo.
-- [ ] T009: Add optional config for default trunk_update/rebase (e.g. `review.trunk_update`, `review.rebase`); flags override config.
+- [x] T006: Reuse or call `kira latest` discovery and repo resolution for the work item (repos from config/workspace and work item metadata); run in context of current branch and work item.
+- [x] T007: When not `--no-trunk-update` and not `--no-rebase`: execute fetch, trunk update (when on trunk), rebase onto trunk (when on feature branch); reuse stash/pop and conflict handling from latest.
+- [x] T008: When `--no-trunk-update`: skip trunk update; when `--no-rebase`: skip rebase; apply per-repo for polyrepo.
+- [x] T009: Add optional config for default trunk_update/rebase (e.g. `review.trunk_update`, `review.rebase`); flags override config.
 
 ### Slice 3: Move to review and push
 
-- [ ] T010: Move work item file from doing folder to review folder (reuse move logic: rename, update status in front matter); optional commit of move when config/flag set.
-- [ ] T011: Push current branch to configured remote with `--force-with-lease`; support polyrepo (push in each repo for the work item).
-- [ ] T012: Progress/success messages for move and push; error handling without rolling back move on push failure.
+- [x] T010: Move work item file from doing folder to review folder (reuse move logic: rename, update status in front matter); optional commit of move when config/flag set.
+- [x] T011: Push current branch to configured remote with `--force-with-lease`; support polyrepo (push in each repo for the work item).
+- [x] T012: Progress/success messages for move and push; error handling without rolling back move on push failure.
 
 ### Slice 4: GitHub PR create or update
 
-- [ ] T013: In internal/git: add ListPullRequestsByHead(ctx, client, owner, repo, head string) (or use existing List with Head filter); add UpdateDraftToReady(ctx, client, owner, repo, prNumber) and optionally SetReviewers; add CreatePR(ctx, client, owner, repo, base, head, title, body, draft bool) for non-draft or draft PR.
-- [ ] T014: After push: get remote URL and base URL; parse owner/repo; create GitHub client from KIRA_GITHUB_TOKEN; list open PRs for head = current branch; if draft PR found and `--no-draft`, update to ready and optionally set reviewers; if no PR, create PR (draft or ready per `--draft`) with title/body from work item and optional reviewers.
-- [ ] T015: When KIRA_GITHUB_TOKEN is unset and PR step would run: return clear error; do not fail move/push if they already succeeded (degraded success or fail before push—decide and document). Prefer failing before push with clear message when token required.
-- [ ] T016: Use same base URL and client construction as start (workspace GitBaseURL when polyrepo); handle GitHub Enterprise.
+- [x] T013: In internal/git: add ListPullRequestsByHead(ctx, client, owner, repo, head string) (or use existing List with Head filter); add UpdateDraftToReady(ctx, client, owner, repo, prNumber) and optionally SetReviewers; add CreatePR(ctx, client, owner, repo, base, head, title, body, draft bool) for non-draft or draft PR.
+- [x] T014: After push: get remote URL and base URL; parse owner/repo; create GitHub client from KIRA_GITHUB_TOKEN; list open PRs for head = current branch; if draft PR found and `--no-draft`, update to ready and optionally set reviewers; if no PR, create PR (draft or ready per `--draft`) with title/body from work item and optional reviewers.
+- [x] T015: When KIRA_GITHUB_TOKEN is unset and PR step would run: return clear error; do not fail move/push if they already succeeded (degraded success or fail before push—decide and document). Prefer failing before push with clear message when token required.
+- [x] T016: Use same base URL and client construction as start (workspace GitBaseURL when polyrepo); handle GitHub Enterprise.
 
 ### Slice 5: Tests and docs
 
-- [ ] T017: Unit tests for branch derivation, validation (trunk, non-kira, work item not found, not in doing), and dry-run output.
-- [ ] T018: Integration or e2e tests: run review on a kira branch (with/without --no-rebase, --no-trunk-update), verify move and push; mock or real GitHub for PR create/update where applicable.
-- [ ] T019: Update README or user docs for `kira review` submit-for-review flow; document flags and config.
+- [x] T017: Unit tests for branch derivation, validation (trunk, non-kira, work item not found, not in doing), and dry-run output.
+- [x] T018: Integration or e2e tests: run review on a kira branch (with/without --no-rebase, --no-trunk-update), verify move and push; mock or real GitHub for PR create/update where applicable.
+- [x] T019: Update README or user docs for `kira review` submit-for-review flow; document flags and config.
 
 ## Implementation Notes
 
