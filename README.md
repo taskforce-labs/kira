@@ -53,10 +53,16 @@ kira start 001
 3. Submits the work-item for review and creates a pull request
 ```bash
 kira review
-# 1. Rebases the branch onto the trunk branch
-# 2. Changes the work-item to review status
-# 3. Changes the status of the pull request to ready for review
+# 1. Validates current branch (kira format: id-title) and work item in doing
+# 2. Optionally updates trunk and rebases the branch (see --no-trunk-update, --no-rebase)
+# 3. Moves the work item to review status (optionally commits the move)
+# 4. Pushes the branch with --force-with-lease
+# 5. Creates a new PR (draft or ready) or updates an existing draft PR to ready for review
 ```
+
+**Flags:** `--reviewer` (repeatable), `--draft` (default) / `--no-draft`, `--no-trunk-update`, `--no-rebase`, `--dry-run`.
+
+**Config:** In `kira.yml`, optional `review` section: `trunk_update`, `rebase` (default true), `commit_move` (commit the move to review). Use `KIRA_GITHUB_TOKEN` for PR create/update (same as `kira start`).
 
 4. Merges the pull request and marks the work-item as done
 ```bash
@@ -74,6 +80,15 @@ kira release
 # 3. Archives the work items in the done folder
 # 4. Tags and pushes the release to trigger release workflow
 ```
+
+### Submit for review (`kira review`)
+
+`kira review` submits the current work item for review: it validates the branch and work item (in doing), optionally runs trunk update and rebase (same as `kira latest`), moves the work item to the review folder, pushes the branch with `--force-with-lease`, and creates or updates a GitHub PR.
+
+- **Branch:** Must be a kira feature branch (e.g. `012-submit-for-review`). Run from the branch that matches the work item ID.
+- **Flags:** `--reviewer <user>` (repeatable, GitHub login), `--draft` (default) / `--no-draft` (create or update PR as ready for review), `--no-trunk-update`, `--no-rebase`, `--dry-run` (print planned steps only).
+- **Config:** Optional in `kira.yml`: `review.trunk_update`, `review.rebase` (default true), `review.commit_move` (commit the move to review).
+- **Token:** Set `KIRA_GITHUB_TOKEN` to create or update PRs (same as `kira start`). If unset and remote is GitHub, `kira review` fails before push with a clear message; use `--dry-run` to skip.
 
 ### Draft pull requests
 

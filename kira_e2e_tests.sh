@@ -2727,6 +2727,81 @@ if [ $? -ne 0 ]; then
 fi
 echo "  ✅ slice progress shows summary"
 
+# Test 35: kira review - submit for review flow
+echo ""
+echo "📋 Test 35: kira review - submit for review"
+
+# Reset to clean state: git repo, work item in doing, kira-named branch
+rm -rf .git > /dev/null 2>&1
+"$KIRA_BIN" init --force > /dev/null 2>&1
+git init > /dev/null 2>&1
+git config user.email test@example.com
+git config user.name "Test User"
+git checkout -b main > /dev/null 2>&1
+git add .
+git commit -m "init" > /dev/null 2>&1
+
+# Work item in doing and branch matching id-title
+cat > .work/2_doing/018-review-e2e.prd.md << 'EOF'
+---
+id: 018
+title: Review E2E Test
+status: doing
+kind: prd
+created: 2024-01-01
+---
+
+# Review E2E Test
+EOF
+git add .work/2_doing/018-review-e2e.prd.md
+git commit -m "Add work item 018" > /dev/null 2>&1
+git checkout -b 018-review-e2e > /dev/null 2>&1
+
+# Dry-run: should print planned steps and not move file
+REVIEW_DRY_OUTPUT=$("$KIRA_BIN" review --dry-run --no-trunk-update --no-rebase 2>&1)
+if echo "$REVIEW_DRY_OUTPUT" | grep -q "trunk update\|rebase\|move to review\|push\|PR"; then
+  echo "  ✅ kira review --dry-run shows planned steps"
+else
+  echo "  ❌ kira review --dry-run should show planned steps"
+  echo "Output: $REVIEW_DRY_OUTPUT"
+  exit 1
+fi
+if [ -f ".work/2_doing/018-review-e2e.prd.md" ] && [ ! -f ".work/3_review/018-review-e2e.prd.md" ]; then
+  echo "  ✅ Dry-run did not move work item"
+else
+  echo "  ❌ Dry-run should not move work item"
+  exit 1
+fi
+
+# Run review without dry-run (no remote: move succeeds, push fails with clear message)
+REVIEW_OUTPUT=$("$KIRA_BIN" review --no-trunk-update --no-rebase 2>&1) || REVIEW_EXIT=$?
+if [ -f ".work/3_review/018-review-e2e.prd.md" ] && [ ! -f ".work/2_doing/018-review-e2e.prd.md" ]; then
+  echo "  ✅ kira review moved work item to review folder"
+else
+  echo "  ❌ kira review should move work item to review"
+  echo "Output: $REVIEW_OUTPUT"
+  exit 1
+fi
+if echo "$REVIEW_OUTPUT" | grep -q "Moving work item to review" && echo "$REVIEW_OUTPUT" | grep -q "Moved to review"; then
+  echo "  ✅ kira review shows progress messages"
+else
+  echo "  ⚠️  Progress messages may vary"
+fi
+# Push expected to fail (no remote); we do not roll back the move
+if echo "$REVIEW_OUTPUT" | grep -qi "push\|remote"; then
+  echo "  ✅ Push step attempted (failure expected without remote)"
+else
+  echo "  ⚠️  Push step output may vary"
+fi
+
+# kira review --help
+if "$KIRA_BIN" review --help 2>&1 | grep -q "submit for review\|--dry-run\|--no-rebase"; then
+  echo "  ✅ kira review --help documents flags"
+else
+  echo "  ❌ kira review --help should document flags"
+  exit 1
+fi
+
 # Cleanup
 echo ""
 if [ "$KEEP" -eq 1 ] || [ "${KEEP_TEST_DIR:-0}" -ne 0 ]; then
@@ -2776,6 +2851,7 @@ echo "  ✅ Field error detection"
 echo "  ✅ Doctor field fixes"
 echo "  ✅ Backward compatibility"
 echo "  ✅ Slice command (add, task add, show)"
+echo "  ✅ kira review (submit for review, dry-run, move)"
 echo ""
 echo "🚀 Kira is ready for use!"
 
