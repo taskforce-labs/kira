@@ -1,7 +1,7 @@
 ---
 id: 012
 title: submit for review
-status: doing
+status: todo
 kind: prd
 assigned:
 created: 2026-01-19
