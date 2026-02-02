@@ -1,7 +1,7 @@
 ---
 id: 023
 title: install skills command
-status: backlog
+status: doing
 kind: prd
 assigned:
 estimate: 0
