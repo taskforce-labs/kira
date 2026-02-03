@@ -111,13 +111,18 @@ func runReviewExecute(ctx *reviewContext, cfg *config.Config) error {
 	if runReviewWouldCreateOrUpdatePR(cfg, repos) && os.Getenv("KIRA_GITHUB_TOKEN") == "" {
 		return fmt.Errorf("KIRA_GITHUB_TOKEN is not set. Set it to create or update PRs, or use --dry-run to skip")
 	}
-	if err := runReviewMoveToReview(ctx, cfg); err != nil {
+	moved, err := runReviewMoveToReview(ctx, cfg)
+	if err != nil {
 		return err
 	}
 	if err := runReviewPush(ctx, repos); err != nil {
 		return err
 	}
-	fmt.Println("Moved to review and pushed.")
+	if moved {
+		fmt.Println("Moved to review and pushed.")
+	} else {
+		fmt.Println("Pushed.")
+	}
 	if err := runReviewCreateOrUpdatePR(ctx, cfg, repos); err != nil {
 		log.Printf("Warning: PR create/update failed: %v", err)
 	}
@@ -128,18 +133,27 @@ func reviewCommitMove(cfg *config.Config) bool {
 	return cfg.Review != nil && cfg.Review.CommitMove != nil && *cfg.Review.CommitMove
 }
 
-func runReviewMoveToReview(ctx *reviewContext, cfg *config.Config) error {
+// runReviewMoveToReview moves the work item to review if not already there. Returns (moved, error).
+func runReviewMoveToReview(ctx *reviewContext, cfg *config.Config) (bool, error) {
+	status, err := statusFromWorkItemPath(ctx.WorkItemPath, cfg)
+	if err != nil {
+		return false, fmt.Errorf("failed to derive work item status: %w", err)
+	}
+	if status == "review" {
+		fmt.Println("Work item already in review.")
+		return false, nil
+	}
 	var moveMetadata workItemMetadata
 	if reviewCommitMove(cfg) {
 		var err error
 		moveMetadata.workItemType, moveMetadata.id, moveMetadata.title, moveMetadata.currentStatus, moveMetadata.repos, err = extractWorkItemMetadata(ctx.WorkItemPath, cfg)
 		if err != nil {
-			return fmt.Errorf("failed to extract work item metadata for commit: %w", err)
+			return false, fmt.Errorf("failed to extract work item metadata for commit: %w", err)
 		}
 	}
 	fmt.Println("Moving work item to review...")
 	if err := moveWorkItemWithoutCommit(cfg, ctx.WorkItemID, "review"); err != nil {
-		return fmt.Errorf("failed to move work item to review: %w", err)
+		return false, fmt.Errorf("failed to move work item to review: %w", err)
 	}
 	reviewFolder := cfg.StatusFolders["review"]
 	if reviewFolder == "" {
@@ -149,16 +163,16 @@ func runReviewMoveToReview(ctx *reviewContext, cfg *config.Config) error {
 	if reviewCommitMove(cfg) {
 		subject, body, err := buildCommitMessage(cfg, moveMetadata.workItemType, moveMetadata.id, moveMetadata.title, moveMetadata.currentStatus, "review")
 		if err != nil {
-			return fmt.Errorf("failed to build commit message: %w", err)
+			return false, fmt.Errorf("failed to build commit message: %w", err)
 		}
 		if err := commitMove(ctx.WorkItemPath, newPath, subject, body, false); err != nil {
-			return fmt.Errorf("failed to commit move: %w", err)
+			return false, fmt.Errorf("failed to commit move: %w", err)
 		}
 		fmt.Println("Moved work item to review and committed.")
 	} else {
 		fmt.Println("Moved work item to review.")
 	}
-	return nil
+	return true, nil
 }
 
 func runReviewPush(ctx *reviewContext, repos []RepositoryInfo) error {
@@ -324,8 +338,9 @@ func validateBranchAndWorkItem(ctx *reviewContext) error {
 		return fmt.Errorf("failed to derive work item status: %w", err)
 	}
 	const statusDoing = "doing"
-	if status != statusDoing {
-		return fmt.Errorf("work item %s is not in %s status (current: %s); only work items in %s can be submitted for review", workItemID, statusDoing, status, statusDoing)
+	const statusReview = "review"
+	if status != statusDoing && status != statusReview {
+		return fmt.Errorf("work item %s is not in %s or %s status (current: %s); only work items in %s or %s can be submitted for review", workItemID, statusDoing, statusReview, status, statusDoing, statusReview)
 	}
 
 	return nil
