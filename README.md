@@ -5,6 +5,10 @@ A cli to manage your work-items and specs in git as markdown files so you can us
 
 Develop multiple features in parallel with kira workflows that create worktrees, branches and pull requests based on the specs and work-items you create.
 
+> 🧪 **Experimental** 👨‍🔬
+>
+> This is still a very experimental project and open to feedback and collaboration.
+
 
 ## Quick Start
 
