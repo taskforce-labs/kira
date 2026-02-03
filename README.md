@@ -53,7 +53,7 @@ kira start 001
 3. Submits the work-item for review and creates a pull request
 ```bash
 kira review
-# 1. Validates current branch (kira format: id-title) and work item in doing
+# 1. Validates current branch (kira format: id-title) and work item in doing or review
 # 2. Optionally updates trunk and rebases the branch (see --no-trunk-update, --no-rebase)
 # 3. Moves the work item to review status (optionally commits the move)
 # 4. Pushes the branch with --force-with-lease
@@ -83,7 +83,7 @@ kira release
 
 ### Submit for review (`kira review`)
 
-`kira review` submits the current work item for review: it validates the branch and work item (in doing), optionally runs trunk update and rebase (same as `kira latest`), moves the work item to the review folder, pushes the branch with `--force-with-lease`, and creates or updates a GitHub PR.
+`kira review` submits the current work item for review: it validates the branch and work item (in doing or review), optionally runs trunk update and rebase (same as `kira latest`), moves the work item to the review folder if not already there, pushes the branch with `--force-with-lease`, and creates or updates a GitHub PR. You can run it again when the work item is already in review (e.g. after feedback) to push updates and refresh the PR.
 
 - **Branch:** Must be a kira feature branch (e.g. `012-submit-for-review`). Run from the branch that matches the work item ID.
 - **Flags:** `--reviewer <user>` (repeatable, GitHub login), `--draft` (create or leave PR as draft; default is ready for review), `--no-trunk-update`, `--no-rebase`, `--dry-run` (print planned steps only).

@@ -196,6 +196,28 @@ kind: prd
 	})
 }
 
+func TestRunReviewMoveToReviewAlreadyInReview(t *testing.T) {
+	t.Run("work item already in review skips move and returns false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/3_review", 0o700))
+		path := filepath.Join(".work", "3_review", "012-foo.prd.md")
+		require.NoError(t, os.WriteFile(path, []byte("---\nid: 012\nstatus: review\n---\n"), 0o600))
+
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+		ctx := &reviewContext{Cfg: cfg, WorkItemID: "012", WorkItemPath: path}
+
+		moved, err := runReviewMoveToReview(ctx, cfg)
+		require.NoError(t, err)
+		assert.False(t, moved)
+		// File should still be in review folder
+		require.FileExists(t, path)
+	})
+}
+
 func TestRunReviewPushEmptyRepos(t *testing.T) {
 	ctx := &reviewContext{CurrentBranch: "012-foo"}
 	err := runReviewPush(ctx, nil)
