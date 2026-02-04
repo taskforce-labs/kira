@@ -275,7 +275,7 @@ func runReviewUpdateExistingPR(prCtx context.Context, client *github.Client, own
 		}
 		return
 	}
-	if err := git.UpdateDraftToReady(prCtx, client, owner, repoName, *pr.Number); err != nil {
+	if err := git.UpdateDraftToReady(prCtx, client, pr); err != nil {
 		log.Printf("Warning: failed to update draft to ready: %v", err)
 		return
 	}
