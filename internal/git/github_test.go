@@ -125,3 +125,25 @@ func TestUpdateDraftToReady_success(t *testing.T) {
 	query, _ := receivedBody["query"].(string)
 	assert.Contains(t, query, "markPullRequestReadyForReview")
 }
+
+func TestUpdateDraftToReady_resourceNotAccessibleError(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"errors":[{"message":"Resource not accessible by personal access token"}]}`))
+	}))
+	defer server.Close()
+
+	baseURL, err := url.Parse(server.URL + "/")
+	require.NoError(t, err)
+	client := github.NewClient(server.Client())
+	client.BaseURL = baseURL
+	pr := &github.PullRequest{NodeID: github.String("PR_node1")}
+
+	err = UpdateDraftToReady(ctx, client, pr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Resource not accessible")
+	assert.Contains(t, err.Error(), "KIRA_GITHUB_TOKEN")
+	assert.Contains(t, err.Error(), "repo scope")
+	assert.Contains(t, err.Error(), "Pull requests")
+}
