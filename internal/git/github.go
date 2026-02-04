@@ -157,7 +157,14 @@ func graphQLMarkPullRequestReadyForReview(ctx context.Context, client *github.Cl
 		return fmt.Errorf("graphql decode: %w", err)
 	}
 	if len(result.Errors) > 0 {
-		return fmt.Errorf("graphql: %s", result.Errors[0].Message)
+		msg := result.Errors[0].Message
+		if strings.Contains(msg, "Resource not accessible") {
+			return fmt.Errorf("%s — KIRA_GITHUB_TOKEN needs permission to mark a draft PR as ready. "+
+				"Classic tokens: use the repo scope. Fine-grained tokens: grant Repository permissions \"Pull requests\" (Read and Write) and \"Contents\" (Write), "+
+				"include this repo in Repository access, and set the token's resource owner to the repo owner. If it still fails, use a classic token. "+
+				"See https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens", msg)
+		}
+		return fmt.Errorf("graphql: %s", msg)
 	}
 	if result.Data == nil || result.Data.MarkPullRequestReadyForReview == nil {
 		return fmt.Errorf("graphql: no pull request in response")
