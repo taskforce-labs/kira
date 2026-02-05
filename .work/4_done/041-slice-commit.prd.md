@@ -1,10 +1,14 @@
 ---
 id: 041
 title: slice commit
-status: review
+status: done
 kind: prd
-assigned:
-created: 2026-02-05
+created: 2026-02-05T00:00:00Z
+assigned: null
+merge_commit_sha: b6cc9fa0c02e0b98ae13f9795c35f246393aea1b
+merge_strategy: rebase
+merged_at: "2026-02-05T04:46:42Z"
+pr_number: 18
 tags: []
 ---
 
