@@ -308,6 +308,19 @@ func TestPrintSliceSummaryIfPresent(t *testing.T) {
 	})
 }
 
+func TestSliceCommitRequiresSubcommand(t *testing.T) {
+	t.Run("slice commit with no subcommand prints usage and exits non-zero", func(t *testing.T) {
+		rootCmd.SetArgs([]string{"slice", "commit"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+	})
+	t.Run("slice commit with unknown subcommand prints usage and exits non-zero", func(t *testing.T) {
+		rootCmd.SetArgs([]string{"slice", "commit", "unknownsub"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+	})
+}
+
 func TestSliceAddAndShow(t *testing.T) {
 	t.Run("slice add then show", func(t *testing.T) {
 		tmpDir := t.TempDir()

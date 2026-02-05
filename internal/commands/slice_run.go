@@ -779,7 +779,69 @@ func workItemIDFromPath(path string, cfg *config.Config) string {
 	return id
 }
 
-func runSliceCommit(_ *cobra.Command, args []string) error {
+// runSliceCommitNoSubcommand is run when "slice commit" is invoked without a valid subcommand (add, remove, generate). Returns error so exit code is non-zero.
+func runSliceCommitNoSubcommand(_ *cobra.Command, _ []string) error {
+	return fmt.Errorf("subcommand required: use 'add', 'remove', or 'generate'")
+}
+
+// runSliceCommitAdd adds a task to a slice. Args: 2 = slice-name + task-desc (doing folder); 3+ = work-item-id, slice-name, task-desc.
+func runSliceCommitAdd(cmd *cobra.Command, args []string) error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if err := checkWorkDir(cfg); err != nil {
+		return err
+	}
+	var workItemID, sliceName, description string
+	if len(args) >= 3 {
+		workItemID = args[0]
+		sliceName = args[1]
+		description = strings.Join(args[2:], " ")
+	} else {
+		sliceName = args[0]
+		description = strings.Join(args[1:], " ")
+	}
+	path, err := resolveSliceWorkItem(workItemID, cfg, "slice commit add")
+	if err != nil {
+		return err
+	}
+	id := workItemIDFromPath(path, cfg)
+	if id == "" {
+		id = workItemID
+	}
+	return runSliceTaskAdd(cmd, []string{id, sliceName, description})
+}
+
+// runSliceCommitRemove removes a slice. Args: 1 = slice-name (doing folder); 2 = work-item-id, slice-name.
+func runSliceCommitRemove(cmd *cobra.Command, args []string) error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if err := checkWorkDir(cfg); err != nil {
+		return err
+	}
+	var workItemID, sliceName string
+	if len(args) >= 2 {
+		workItemID = args[0]
+		sliceName = args[1]
+	} else {
+		sliceName = args[0]
+	}
+	path, err := resolveSliceWorkItem(workItemID, cfg, "slice commit remove")
+	if err != nil {
+		return err
+	}
+	id := workItemIDFromPath(path, cfg)
+	if id == "" {
+		id = workItemID
+	}
+	return runSliceRemove(cmd, []string{id, sliceName})
+}
+
+// runSliceCommitGenerate prints a structured commit message to stdout. Stub: one-line message; full format in slice 3.
+func runSliceCommitGenerate(_ *cobra.Command, args []string) error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -788,14 +850,10 @@ func runSliceCommit(_ *cobra.Command, args []string) error {
 		return err
 	}
 	workItemID := ""
-	message := ""
 	if len(args) > 0 {
 		workItemID = args[0]
 	}
-	if len(args) > 1 {
-		message = strings.Join(args[1:], " ")
-	}
-	path, err := resolveSliceWorkItem(workItemID, cfg, "slice commit")
+	path, err := resolveSliceWorkItem(workItemID, cfg, "slice commit generate")
 	if err != nil {
 		return err
 	}
@@ -803,13 +861,8 @@ func runSliceCommit(_ *cobra.Command, args []string) error {
 	if id == "" {
 		id = workItemID
 	}
-	if message == "" {
-		message = generateSliceCommitMessage(path, cfg, id)
-	}
-	if err := sliceCommitWorkItem(path, message, cfg); err != nil {
-		return err
-	}
-	fmt.Printf("%s %s\n", successStyle("Committed:"), message)
+	msg := generateSliceCommitMessage(path, cfg, id)
+	fmt.Println(msg)
 	return nil
 }
 

@@ -133,9 +133,36 @@ var sliceLintCmd = &cobra.Command{
 }
 
 var sliceCommitCmd = &cobra.Command{
-	Use:          "commit [<work-item-id>] [commit-message]",
-	Short:        "Commit slice/task changes",
-	RunE:         runSliceCommit,
+	Use:   "commit",
+	Short: "Slice commit: add task, remove slice, or generate commit message",
+	Long: `Generate a structured commit message, or add a task to a slice, or remove a slice.
+Use: slice commit add, slice commit remove, slice commit generate.
+Generate prints to stdout only; use 'git commit -F -' to commit with the message.`,
+	Args:         cobra.ArbitraryArgs,
+	RunE:         runSliceCommitNoSubcommand,
+	SilenceUsage: true,
+}
+
+var sliceCommitAddCmd = &cobra.Command{
+	Use:          "add [<work-item-id>] <slice-name> <task-description>",
+	Short:        "Add a task to a slice",
+	Args:         cobra.MinimumNArgs(2),
+	RunE:         runSliceCommitAdd,
+	SilenceUsage: true,
+}
+
+var sliceCommitRemoveCmd = &cobra.Command{
+	Use:          "remove [<work-item-id>] <slice-name>",
+	Args:         cobra.MinimumNArgs(1),
+	Short:        "Remove a slice and all its tasks",
+	RunE:         runSliceCommitRemove,
+	SilenceUsage: true,
+}
+
+var sliceCommitGenerateCmd = &cobra.Command{
+	Use:          "generate [<work-item-id>] [current|previous|<slice-name>]",
+	Short:        "Print a structured commit message to stdout",
+	RunE:         runSliceCommitGenerate,
 	SilenceUsage: true,
 }
 
@@ -148,6 +175,12 @@ func init() {
 	sliceCmd.AddCommand(sliceCurrentCmd)
 	sliceCmd.AddCommand(sliceLintCmd)
 	sliceCmd.AddCommand(sliceCommitCmd)
+
+	sliceCommitCmd.AddCommand(sliceCommitAddCmd)
+	sliceCommitCmd.AddCommand(sliceCommitRemoveCmd)
+	sliceCommitCmd.AddCommand(sliceCommitGenerateCmd)
+	sliceCommitAddCmd.Flags().Bool("no-commit", false, "Do not commit changes")
+	sliceCommitRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	sliceTaskCmd.AddCommand(sliceTaskAddCmd)
 	sliceTaskCmd.AddCommand(sliceTaskRemoveCmd)
