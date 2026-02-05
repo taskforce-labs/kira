@@ -30,10 +30,22 @@ type Config struct {
 	Fields        map[string]FieldConfig `yaml:"fields"`
 	Slices        *SlicesConfig          `yaml:"slices"`
 	Review        *ReviewConfig          `yaml:"review"`
-	Checks        []CheckEntry           `yaml:"checks"`      // optional: list of check commands to run
+	Checks        []CheckEntry           `yaml:"checks"` // optional: list of check commands to run
+	Done          *DoneConfig            `yaml:"done"`
 	DocsFolder    string                 `yaml:"docs_folder"` // default: ".docs"
 	// ConfigDir is the absolute path to the directory containing kira.yml (set at load time; not persisted).
 	ConfigDir string `yaml:"-"`
+}
+
+// DoneConfig contains settings for the done command (merge PR, pull trunk, update status, cleanup).
+type DoneConfig struct {
+	CleanupBranch           *bool  `yaml:"cleanup_branch"`            // default: true (nil = delete branch after merge)
+	CleanupWorktree         *bool  `yaml:"cleanup_worktree"`          // default: true when applicable
+	MergeStrategy           string `yaml:"merge_strategy"`            // merge, squash, rebase; default: "rebase"
+	RequireChecks           *bool  `yaml:"require_checks"`            // default: true
+	RequireCommentsResolved *bool  `yaml:"require_comments_resolved"` // default: true when possible via API
+	MergeCommitMessage      string `yaml:"merge_commit_message"`      // template: {id}, {title}
+	SquashCommitMessage     string `yaml:"squash_commit_message"`     // template: {id}, {title}
 }
 
 // ReviewConfig contains settings for the review (submit-for-review) command.
@@ -691,6 +703,7 @@ func mergeWithDefaults(config *Config) {
 	mergeGitDefaults(config)
 	mergeStartDefaults(config)
 	mergeReviewDefaults(config)
+	mergeDoneDefaults(config)
 	mergeWorkspaceDefaults(config)
 	mergeUsersDefaults(config)
 	mergeSlicesDefaults(config)
@@ -778,6 +791,22 @@ func mergeReviewDefaults(config *Config) {
 		commitMove := true
 		config.Review.CommitMove = &commitMove
 	}
+}
+
+func mergeDoneDefaults(config *Config) {
+	if config.Done == nil {
+		config.Done = &DoneConfig{}
+	}
+	if config.Done.MergeStrategy == "" {
+		config.Done.MergeStrategy = "rebase"
+	}
+	if config.Done.MergeCommitMessage == "" {
+		config.Done.MergeCommitMessage = "{id} merge: {title}"
+	}
+	if config.Done.SquashCommitMessage == "" {
+		config.Done.SquashCommitMessage = "{id}: {title}"
+	}
+	// CleanupBranch, CleanupWorktree, RequireChecks, RequireCommentsResolved default to true when nil (apply at runtime)
 }
 
 func mergeWorkspaceDefaults(config *Config) {
