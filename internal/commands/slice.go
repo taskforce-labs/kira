@@ -180,6 +180,7 @@ func init() {
 	sliceCommitCmd.AddCommand(sliceCommitRemoveCmd)
 	sliceCommitCmd.AddCommand(sliceCommitGenerateCmd)
 	sliceCommitAddCmd.Flags().Bool("no-commit", false, "Do not commit changes")
+	sliceCommitRemoveCmd.Flags().Bool("no-commit", false, "Do not commit changes")
 	sliceCommitRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	sliceTaskCmd.AddCommand(sliceTaskAddCmd)
