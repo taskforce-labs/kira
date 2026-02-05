@@ -1,10 +1,14 @@
 ---
 id: 012
 title: submit for review
-status: review
+status: done
 kind: prd
-assigned:
-created: 2026-01-19
+created: 2026-01-19T00:00:00Z
+assigned: null
+merge_commit_sha: 87399647532a657b1c63152e7acbe25eafe7f29d
+merge_strategy: rebase
+merged_at: "2026-02-04T05:04:45Z"
+pr_number: 16
 tags: [github, review, cli]
 ---
 
