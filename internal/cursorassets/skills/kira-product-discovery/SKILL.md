@@ -65,4 +65,4 @@ Guide the user through a structured product discovery process.
 - When risks require mitigation planning
 - When commercial model needs definition
 
-At each intervention point, present options, list assumptions, and guide the user to make informed decisions.
+At each intervention point, present options, list assumptions, and guide the user to make informed decisions. When presenting clarifying questions with selectable options, follow the clarifying-questions-format skill.

@@ -47,4 +47,4 @@ Guide the user through roadmap and work-item sequencing.
 - When sequencing trade-offs need stakeholder input
 - When scope or priority changes
 
-At each intervention point, present options and guide the user to make informed decisions.
+At each intervention point, present options and guide the user to make informed decisions. When presenting clarifying questions with selectable options, follow the clarifying-questions-format skill.
