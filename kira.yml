@@ -60,3 +60,13 @@ users:
     saved_users: []
 fields: {}
 docs_folder: .docs
+
+checks:
+  - name: make check
+    command: make check
+    description: Run linting, security, and unit tests before committing
+    tags: [commit]
+  - name: make e2e
+    command: make e2e
+    description: Run end-to-end tests when completing a work item like a prd or issue
+    tags: [e2e, done]

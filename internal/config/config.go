@@ -52,9 +52,10 @@ type SlicesConfig struct {
 
 // CheckEntry represents a single check command in the checks list.
 type CheckEntry struct {
-	Name        string `yaml:"name"`        // required: short identifier (e.g. lint, test)
-	Command     string `yaml:"command"`     // required: shell command to run
-	Description string `yaml:"description"` // optional: human-readable description
+	Name        string   `yaml:"name"`        // required: short identifier (e.g. lint, test)
+	Command     string   `yaml:"command"`     // required: shell command to run
+	Description string   `yaml:"description"` // optional: human-readable description
+	Tags        []string `yaml:"tags"`        // optional: tags for filtering (e.g. commit, e2e)
 }
 
 // GitConfig contains git-related settings.
