@@ -132,7 +132,12 @@ func resolveDonePR(remoteURL, baseURL, workItemID, status string) (*github.PullR
 	if err != nil {
 		return nil, fmt.Errorf("invalid remote URL: %w", err)
 	}
-	pr, err := git.FindPullRequestByWorkItemID(apiCtx, client, owner, repoName, workItemID)
+	var pr *github.PullRequest
+	err = git.WithRateLimitRetry(apiCtx, 2, func() error {
+		var e error
+		pr, e = git.FindPullRequestByWorkItemID(apiCtx, client, owner, repoName, workItemID)
+		return e
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to find pull request: %w", err)
 	}

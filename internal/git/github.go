@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/go-github/v61/github"
 	"golang.org/x/oauth2"
@@ -68,6 +71,64 @@ func NewClient(ctx context.Context, token, baseURL string) (*github.Client, erro
 		return nil, err
 	}
 	return client, nil
+}
+
+// IsRateLimitError reports whether err is a GitHub API rate-limit error (403 or 429).
+func IsRateLimitError(err error) bool {
+	var errResp *github.ErrorResponse
+	if !errors.As(err, &errResp) || errResp.Response == nil {
+		return false
+	}
+	code := errResp.Response.StatusCode
+	return code == http.StatusForbidden || code == 429
+}
+
+// rateLimitRetryAfter returns how long to wait before retrying after a rate-limit error.
+// Uses Retry-After header (seconds) or x-ratelimit-reset (epoch), otherwise 60s.
+func rateLimitRetryAfter(err error) time.Duration {
+	var errResp *github.ErrorResponse
+	if !errors.As(err, &errResp) || errResp.Response == nil {
+		return 60 * time.Second
+	}
+	r := errResp.Response
+	if s := r.Header.Get("Retry-After"); s != "" {
+		if sec, parseErr := strconv.Atoi(s); parseErr == nil && sec > 0 {
+			return time.Duration(sec) * time.Second
+		}
+	}
+	if reset := r.Header.Get("X-RateLimit-Reset"); reset != "" {
+		if epoch, parseErr := strconv.ParseInt(reset, 10, 64); parseErr == nil {
+			wait := time.Until(time.Unix(epoch, 0))
+			if wait > 0 && wait < 10*time.Minute {
+				return wait
+			}
+		}
+	}
+	return 60 * time.Second
+}
+
+// WithRateLimitRetry runs fn and on rate-limit error waits and retries up to maxRetries times.
+// Returns the last error if all retries fail or context is cancelled.
+func WithRateLimitRetry(ctx context.Context, maxRetries int, fn func() error) error {
+	var lastErr error
+	for i := 0; i <= maxRetries; i++ {
+		lastErr = fn()
+		if lastErr == nil {
+			return nil
+		}
+		if !IsRateLimitError(lastErr) || i == maxRetries {
+			return lastErr
+		}
+		wait := rateLimitRetryAfter(lastErr)
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+	return lastErr
 }
 
 // CreateDraftPR creates a draft pull request and returns its HTML URL.
@@ -248,4 +309,32 @@ func CreatePR(ctx context.Context, client *github.Client, owner, repo, base, hea
 		return "", fmt.Errorf("PR created but no HTML URL returned")
 	}
 	return prURL, nil
+}
+
+// GetPullRequest fetches a single pull request by number.
+func GetPullRequest(ctx context.Context, client *github.Client, owner, repo string, number int) (*github.PullRequest, error) {
+	pr, _, err := client.PullRequests.Get(ctx, owner, repo, number)
+	return pr, err
+}
+
+// MergePullRequest merges a pull request with the given strategy and commit message.
+// mergeMethod must be "merge", "squash", or "rebase".
+func MergePullRequest(ctx context.Context, client *github.Client, owner, repo string, number int, commitMessage, mergeMethod string) (*github.PullRequestMergeResult, error) {
+	opts := &github.PullRequestOptions{
+		MergeMethod: mergeMethod,
+	}
+	result, _, err := client.PullRequests.Merge(ctx, owner, repo, number, commitMessage, opts)
+	return result, err
+}
+
+// GetCombinedStatus returns the combined status for a ref (e.g. branch name or SHA).
+func GetCombinedStatus(ctx context.Context, client *github.Client, owner, repo, ref string) (*github.CombinedStatus, error) {
+	status, _, err := client.Repositories.GetCombinedStatus(ctx, owner, repo, ref, nil)
+	return status, err
+}
+
+// DeleteRef deletes a git reference (e.g. "heads/feature-branch").
+func DeleteRef(ctx context.Context, client *github.Client, owner, repo, ref string) error {
+	_, err := client.Git.DeleteRef(ctx, owner, repo, ref)
+	return err
 }
