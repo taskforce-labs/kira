@@ -212,63 +212,63 @@ When working with polyrepo configurations, the command must:
 
 ### Slice 1: Trunk validation utility
 Commit: refactor: add trunk-only validation for kira done
-- [ ] T001: Add validateTrunkBranch(cfg) to ensure current branch is trunk; return clear error if not; make reusable where trunk-only execution is required
-- [ ] T002: Add unit tests for trunk validation (on trunk vs on feature branch)
+- [x] T001: Add validateTrunkBranch(cfg) to ensure current branch is trunk; return clear error if not; make reusable where trunk-only execution is required
+- [x] T002: Add unit tests for trunk validation (on trunk vs on feature branch)
 
 ### Slice 2: CLI command skeleton
 Commit: feat: add kira done command skeleton
-- [ ] T003: Add command registration with required work-item-id argument, flags (--merge-strategy, --no-cleanup, --force, --dry-run), and validate trunk branch before any operations
-- [ ] T004: Add unit tests for command registration, argument and flag parsing, help output
+- [x] T003: Add command registration with required work-item-id argument, flags (--merge-strategy, --no-cleanup, --force, --dry-run), and validate trunk branch before any operations
+- [x] T004: Add unit tests for command registration, argument and flag parsing, help output
 
 ### Slice 3: Work item and PR resolution
 Commit: feat: resolve work item and PR for kira done
-- [ ] T005: Validate work item ID argument (format, existence); implement findPullRequest(workItemID) by branch name pattern or metadata; implement isPRClosedOrMerged() for idempotent path
-- [ ] T006: Add unit tests for work item validation and PR finding (open vs closed)
+- [x] T005: Validate work item ID argument (format, existence); implement findPullRequest(workItemID) by branch name pattern or metadata; implement isPRClosedOrMerged() for idempotent path
+- [x] T006: Add unit tests for work item validation and PR finding (open vs closed)
 
 ### Slice 4: Configuration schema extension
 Commit: feat: extend configuration schema for done command
-- [ ] T007: Add DoneConfig struct and done section in kira.yml (merge_strategy, cleanup_branch, cleanup_worktree, require_checks, require_comments_resolved, merge commit message templates)
-- [ ] T008: Add unit tests for config parsing and flag precedence
+- [x] T007: Add DoneConfig struct and done section in kira.yml (merge_strategy, cleanup_branch, cleanup_worktree, require_checks, require_comments_resolved, merge commit message templates)
+- [x] T008: Add unit tests for config parsing and flag precedence
 
 ### Slice 5: GitHub API client setup
 Commit: feat: add GitHub API client utilities
-- [ ] T009: Create github.go for GitHub API (OAuth2, owner/repo from remote, token validation, rate limiting, retry logic)
-- [ ] T010: Add unit tests and mocks for client initialization (shared with kira review where applicable)
+- [x] T009: Create github.go for GitHub API (OAuth2, owner/repo from remote, token validation, rate limiting, retry logic)
+- [x] T010: Add unit tests and mocks for client initialization (shared with kira review where applicable)
 
 ### Slice 6: PR checks and comments resolution
 Commit: feat: run PR checks and enforce resolved comments before merge
-- [ ] T011: Implement runPRChecks() — run required status checks and block merge until passing; when possible via API check open review comments and block until resolved (unless --force); clear error messages
-- [ ] T012: Add unit tests with mocked API (checks passing/failing, comments resolved/unresolved)
+- [x] T011: Implement runPRChecks() — run required status checks and block merge until passing; when possible via API check open review comments and block until resolved (unless --force); clear error messages
+- [x] T012: Add unit tests with mocked API (checks passing/failing, comments resolved/unresolved)
 
 ### Slice 7: PR merge and pull trunk
 Commit: feat: merge PR when open and pull trunk after merge
-- [ ] T013: Implement mergePullRequest() when PR is open (merge/squash/rebase per config); skip merge when PR already closed/merged; implement pullTrunk() after merge or when already merged
-- [ ] T014: Add unit tests for merge and pull flow; idempotent path when PR already merged
+- [x] T013: Implement mergePullRequest() when PR is open (merge/squash/rebase per config); skip merge when PR already closed/merged; implement pullTrunk() after merge or when already merged
+- [x] T014: Add unit tests for merge and pull flow; idempotent path when PR already merged
 
 ### Slice 8: Work item status update on trunk
 Commit: feat: update work item to done on trunk
-- [ ] T015: Update work item status to "done" on trunk and set completion metadata (merged_at, merge_commit_sha, pr_number, merge_strategy); commit and push; idempotent when already "done"
-- [ ] T016: Add unit tests for status and metadata updates
+- [x] T015: Update work item status to "done" on trunk and set completion metadata (merged_at, merge_commit_sha, pr_number, merge_strategy); commit and push; idempotent when already "done"
+- [x] T016: Add unit tests for status and metadata updates
 
 ### Slice 9: Branch cleanup
 Commit: feat: implement feature branch cleanup after merge
-- [ ] T017: Implement deleteBranch() via GitHub API when cleanup enabled; handle already-deleted branch (idempotent)
-- [ ] T018: Add unit tests for cleanup and --no-cleanup behavior
+- [x] T017: Implement deleteBranch() via GitHub API when cleanup enabled; handle already-deleted branch (idempotent)
+- [x] T018: Add unit tests for cleanup and --no-cleanup behavior
 
 ### Slice 10: Idempotent flow and error handling
 Commit: feat: idempotent flow and UX for kira done
-- [ ] T019: Implement idempotent flow (skip completed steps; complete remaining); progress messages and clear errors with guidance to fix and re-run
-- [ ] T020: Add unit tests for idempotent re-run and error recovery scenarios
+- [x] T019: Implement idempotent flow (skip completed steps; complete remaining); progress messages and clear errors with guidance to fix and re-run
+- [x] T020: Add unit tests for idempotent re-run and error recovery scenarios
 
 ### Slice 11: Integration tests
 Commit: test: add integration tests for kira done workflows
-- [ ] T021: Test full workflow on trunk (open PR → merge → pull trunk → status update → cleanup) and idempotent path (already merged PR → pull trunk → status → cleanup)
-- [ ] T022: Test PR checks and comments blocking merge (unless --force); test different merge strategies and config
+- [x] T021: Test full workflow on trunk (open PR → merge → pull trunk → status update → cleanup) and idempotent path (already merged PR → pull trunk → status → cleanup)
+- [x] T022: Test PR checks and comments blocking merge (unless --force); test different merge strategies and config
 
 ### Slice 12: E2E tests
 Commit: test: add e2e tests for kira done command
-- [ ] T023: Test complete workflow in test environment (trunk only, work item ID arg); verify PR merge, pull trunk, work item update, cleanup
-- [ ] T024: Test not-on-trunk failure and idempotent re-run after failure; test all flags and configurations
+- [x] T023: Test complete workflow in test environment (trunk only, work item ID arg); verify PR merge, pull trunk, work item update, cleanup
+- [x] T024: Test not-on-trunk failure and idempotent re-run after failure; test all flags and configurations
 
 ## Implementation Notes
 
