@@ -3,7 +3,9 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -222,6 +224,20 @@ func mergePullRequest(ctx context.Context, client *github.Client, owner, repo st
 // pullTrunk runs git pull <remote> <trunkBranch> in repoRoot.
 func pullTrunk(ctx context.Context, repoRoot, remoteName, trunkBranch string) error {
 	_, err := executeCommand(ctx, "git", []string{"pull", remoteName, trunkBranch}, repoRoot, false)
+	return err
+}
+
+// deleteBranch deletes the feature branch via GitHub API. Idempotent: 404 (ref already gone) is treated as success.
+func deleteBranch(ctx context.Context, client *github.Client, owner, repo, branchName string) error {
+	ref := "heads/" + branchName
+	err := git.DeleteRef(ctx, client, owner, repo, ref)
+	if err == nil {
+		return nil
+	}
+	var errResp *github.ErrorResponse
+	if errors.As(err, &errResp) && errResp.Response != nil && errResp.Response.StatusCode == http.StatusNotFound {
+		return nil
+	}
 	return err
 }
 

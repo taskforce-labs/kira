@@ -269,8 +269,9 @@ func TestDoneWorkItemAndPRResolution(t *testing.T) {
 }
 
 const (
-	testDoneStatusPath   = "/api/v3/repos/owner/repo/commits/abc123/status"
-	testDoneCommentsPath = "/api/v3/repos/owner/repo/pulls/42/comments"
+	testDoneStatusPath    = "/api/v3/repos/owner/repo/commits/abc123/status"
+	testDoneCommentsPath  = "/api/v3/repos/owner/repo/pulls/42/comments"
+	testDoneDeleteRefPath = "/api/v3/repos/o/r/git/refs/heads/014-feature"
 )
 
 func TestRunPRChecks(t *testing.T) {
@@ -453,4 +454,58 @@ created: "2024-01-01"
 	assert.Equal(t, "abc123", frontMatter["merge_commit_sha"])
 	assert.Equal(t, 42, frontMatter["pr_number"])
 	assert.Equal(t, "squash", frontMatter["merge_strategy"])
+}
+
+func TestDeleteBranch(t *testing.T) {
+	ctx := context.Background()
+	owner, repo := "o", "r"
+
+	t.Run("204 success returns nil", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodDelete || r.URL.Path != testDoneDeleteRefPath {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer server.Close()
+		baseURL, _ := url.Parse(server.URL + "/api/v3/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+		err := deleteBranch(ctx, client, owner, repo, "014-feature")
+		require.NoError(t, err)
+	})
+
+	t.Run("404 already deleted returns nil", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == testDoneDeleteRefPath {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"Reference does not exist"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+		baseURL, _ := url.Parse(server.URL + "/api/v3/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+		err := deleteBranch(ctx, client, owner, repo, "014-feature")
+		require.NoError(t, err)
+	})
+
+	t.Run("500 returns error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == testDoneDeleteRefPath {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+		baseURL, _ := url.Parse(server.URL + "/api/v3/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+		err := deleteBranch(ctx, client, owner, repo, "014-feature")
+		require.Error(t, err)
+	})
 }
