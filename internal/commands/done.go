@@ -166,6 +166,39 @@ func printDoneDryRun(cmd *cobra.Command, ctx *doneContext) error {
 	return nil
 }
 
+// runPRChecks verifies that required status checks pass and, when requested, that there are no
+// unresolved review comments. Returns an error with a clear message if checks fail unless force is true.
+func runPRChecks(ctx context.Context, client *github.Client, owner, repo string, pr *github.PullRequest, requireChecks, requireCommentsResolved, force bool) error {
+	if pr == nil || pr.Head == nil || pr.Head.SHA == nil {
+		return fmt.Errorf("pull request has no head SHA")
+	}
+	headSHA := pr.Head.GetSHA()
+	prNum := pr.GetNumber()
+
+	if requireChecks && !force {
+		status, err := git.GetCombinedStatus(ctx, client, owner, repo, headSHA)
+		if err != nil {
+			return fmt.Errorf("failed to get PR status checks: %w", err)
+		}
+		state := status.GetState()
+		if state != "success" {
+			return fmt.Errorf("required status checks have not passed for PR #%d (state: %s). Fix the failing checks or use --force to merge anyway", prNum, state)
+		}
+	}
+
+	if requireCommentsResolved && !force {
+		comments, err := git.ListPullRequestReviewComments(ctx, client, owner, repo, prNum)
+		if err != nil {
+			return fmt.Errorf("failed to list PR review comments: %w", err)
+		}
+		if len(comments) > 0 {
+			return fmt.Errorf("pull request #%d has %d review comment(s). Resolve all threads in the GitHub UI or use --force to merge anyway", prNum, len(comments))
+		}
+	}
+
+	return nil
+}
+
 // validateTrunkBranch ensures the current branch is the configured trunk branch.
 // Used by kira done so that the feature branch can be removed after merge.
 func validateTrunkBranch(cfg *config.Config) error {

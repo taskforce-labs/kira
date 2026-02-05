@@ -333,6 +333,12 @@ func GetCombinedStatus(ctx context.Context, client *github.Client, owner, repo, 
 	return status, err
 }
 
+// ListPullRequestReviewComments lists all review comments on the specified pull request.
+func ListPullRequestReviewComments(ctx context.Context, client *github.Client, owner, repo string, number int) ([]*github.PullRequestComment, error) {
+	comments, _, err := client.PullRequests.ListComments(ctx, owner, repo, number, nil)
+	return comments, err
+}
+
 // DeleteRef deletes a git reference (e.g. "heads/feature-branch").
 func DeleteRef(ctx context.Context, client *github.Client, owner, repo, ref string) error {
 	_, err := client.Git.DeleteRef(ctx, owner, repo, ref)
