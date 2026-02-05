@@ -2,7 +2,10 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-github/v61/github"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1953,5 +1957,179 @@ priority: invalid
 		assert.Contains(t, outputStr, "Issues requiring manual attention")
 		// Must not falsely claim that all issues have been resolved
 		assert.NotContains(t, outputStr, "All issues have been resolved!")
+	})
+}
+
+// TestKiraDoneIntegration runs the kira binary with temp repo and mock GitHub for "kira done" flows.
+func TestKiraDoneIntegration(t *testing.T) {
+	const pullsPath = "/api/v3/repos/owner/repo/pulls"
+
+	t.Run("dry-run with merged PR prints idempotent path", func(t *testing.T) {
+		mergedAt := "2024-06-01T12:00:00Z"
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == pullsPath {
+				prs := []*github.PullRequest{
+					{
+						Number:         github.Int(42),
+						Head:           &github.PullRequestBranch{Ref: github.String("014-feature")},
+						MergedAt:       &github.Timestamp{Time: mustParseTime(mergedAt)},
+						MergeCommitSHA: github.String("abc123"),
+					},
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(prs)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		tmpDir := t.TempDir()
+		kiraPath := buildKiraBinary(t, tmpDir)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".work/2_doing/014-test.prd.md"), []byte("---\nid: 014\ntitle: Test\nstatus: doing\nkind: prd\ncreated: 2024-01-01\n---\n"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "init").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", "https://github.com/owner/repo.git").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "add", "f").Run())
+		// #nosec G204 - commit message is fixed
+		require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+		// #nosec G204 - branch name is fixed
+		_ = exec.Command("git", "branch", "-m", "main").Run()
+		kiraYml := fmt.Sprintf("version: \"1.0\"\ngit:\n  trunk_branch: main\nworkspace:\n  git_base_url: %s\n", server.URL)
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte(kiraYml), 0o600))
+
+		restore := setenv("KIRA_GITHUB_TOKEN", "test-token")
+		defer restore()
+
+		cmd, err := safeExecCommand(tmpDir, kiraPath, "done", "014", "--dry-run")
+		require.NoError(t, err)
+		cmd.Dir = tmpDir
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "kira done --dry-run failed: %s", string(output))
+		assert.Contains(t, string(output), "idempotent")
+	})
+
+	t.Run("dry-run with open PR prints merge would run", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == pullsPath {
+				prs := []*github.PullRequest{
+					{
+						Number: github.Int(42),
+						Head:   &github.PullRequestBranch{Ref: github.String("014-feature")},
+						State:  github.String("open"),
+					},
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(prs)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		tmpDir := t.TempDir()
+		kiraPath := buildKiraBinary(t, tmpDir)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".work/2_doing/014-test.prd.md"), []byte("---\nid: 014\ntitle: Test\nstatus: doing\nkind: prd\ncreated: 2024-01-01\n---\n"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "init").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", "https://github.com/owner/repo.git").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "add", "f").Run())
+		// #nosec G204 - commit message is fixed
+		require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+		// #nosec G204 - branch name is fixed
+		_ = exec.Command("git", "branch", "-m", "main").Run()
+		kiraYml := fmt.Sprintf("version: \"1.0\"\ngit:\n  trunk_branch: main\nworkspace:\n  git_base_url: %s\n", server.URL)
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte(kiraYml), 0o600))
+
+		restore := setenv("KIRA_GITHUB_TOKEN", "test-token")
+		defer restore()
+
+		cmd, err := safeExecCommand(tmpDir, kiraPath, "done", "014", "--dry-run")
+		require.NoError(t, err)
+		cmd.Dir = tmpDir
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "kira done --dry-run failed: %s", string(output))
+		assert.Contains(t, string(output), "merge")
+	})
+
+	// Full flow (merge, pull, update, cleanup) requires a real GitHub remote for git pull/push.
+	// When KIRA_GITHUB_TOKEN is set to a real token and the repo has a PR for the work item,
+	// run: go test ./internal/commands/ -run TestKiraDoneIntegration/full_done_flow -v
+	// with the env and a test repo. Here we only run the binary with --dry-run to avoid
+	// needing a real remote.
+	t.Run("done command runs without panic with open PR mock", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == pullsPath {
+				prs := []*github.PullRequest{
+					{
+						Number: github.Int(42),
+						Head:   &github.PullRequestBranch{Ref: github.String("014-feature"), SHA: github.String("abc123")},
+						State:  github.String("open"),
+					},
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(prs)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		tmpDir := t.TempDir()
+		kiraPath := buildKiraBinary(t, tmpDir)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".work/2_doing/014-test.prd.md"), []byte("---\nid: 014\ntitle: Test\nstatus: doing\nkind: prd\ncreated: 2024-01-01\n---\n"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "init").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", "https://github.com/owner/repo.git").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "add", "f").Run())
+		// #nosec G204 - commit message is fixed
+		require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+		// #nosec G204 - branch name is fixed
+		_ = exec.Command("git", "branch", "-m", "main").Run()
+		kiraYml := fmt.Sprintf("version: \"1.0\"\ngit:\n  trunk_branch: main\nworkspace:\n  git_base_url: %s\n", server.URL)
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte(kiraYml), 0o600))
+
+		restore := setenv("KIRA_GITHUB_TOKEN", "test-token")
+		defer restore()
+
+		cmd, err := safeExecCommand(tmpDir, kiraPath, "done", "014", "--dry-run")
+		require.NoError(t, err)
+		cmd.Dir = tmpDir
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "kira done --dry-run failed: %s", string(output))
+		assert.Contains(t, string(output), "merge")
 	})
 }
