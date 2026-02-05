@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/go-github/v61/github"
 	"github.com/spf13/cobra"
@@ -266,6 +268,169 @@ func TestDoneWorkItemAndPRResolution(t *testing.T) {
 		err := rootCmd.Execute()
 		require.NoError(t, err)
 	})
+}
+
+func TestDoneNotOnTrunk(t *testing.T) {
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origDir) }()
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+	require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".work/2_doing/014-test.prd.md"), []byte("---\nid: 014\ntitle: Test\nstatus: doing\nkind: prd\ncreated: 2024-01-01\n---\n"), 0o600))
+	// #nosec G204 - tmpDir from t.TempDir(), command is fixed
+	require.NoError(t, exec.Command("git", "init").Run())
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "add", "f").Run())
+	// #nosec G204 - commit message is fixed
+	require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+	// #nosec G204 - branch name is fixed
+	_ = exec.Command("git", "branch", "-m", "main").Run()
+	// #nosec G204 - branch name is fixed
+	require.NoError(t, exec.Command("git", "checkout", "-b", "014-feature").Run())
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte("version: \"1.0\"\ngit:\n  trunk_branch: main\n"), 0o600))
+
+	rootCmd.SetArgs([]string{"done", "014"})
+	resetHelpFlag(rootCmd)
+	execErr := rootCmd.Execute()
+	require.Error(t, execErr)
+	assert.Contains(t, execErr.Error(), "trunk")
+}
+
+const testDonePullsPath = "/api/v3/repos/owner/repo/pulls"
+
+func TestDonePRNotFound(t *testing.T) {
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origDir) }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == testDonePullsPath {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+	require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".work/2_doing/014-test.prd.md"), []byte("---\nid: 014\ntitle: Test\nstatus: doing\nkind: prd\ncreated: 2024-01-01\n---\n"), 0o600))
+	// #nosec G204 - tmpDir from t.TempDir(), command is fixed
+	require.NoError(t, exec.Command("git", "init").Run())
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "remote", "add", "origin", "https://github.com/owner/repo.git").Run())
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "add", "f").Run())
+	// #nosec G204 - commit message is fixed
+	require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+	// #nosec G204 - branch name is fixed
+	_ = exec.Command("git", "branch", "-m", "main").Run()
+	kiraYml := fmt.Sprintf("version: \"1.0\"\ngit:\n  trunk_branch: main\nworkspace:\n  git_base_url: %s\n", server.URL)
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte(kiraYml), 0o600))
+
+	restore := setenv("KIRA_GITHUB_TOKEN", "test-token")
+	defer restore()
+
+	rootCmd.SetArgs([]string{"done", "014"})
+	resetHelpFlag(rootCmd)
+	execErr := rootCmd.Execute()
+	require.Error(t, execErr)
+	assert.Contains(t, execErr.Error(), "no pull request found")
+}
+
+func setenv(key, value string) func() {
+	old := os.Getenv(key)
+	_ = os.Setenv(key, value)
+	return func() {
+		if old == "" {
+			_ = os.Unsetenv(key)
+		} else {
+			_ = os.Setenv(key, old)
+		}
+	}
+}
+
+func TestDoneDryRunAlreadyMergedPR(t *testing.T) {
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origDir) }()
+
+	mergedAt := "2024-06-01T12:00:00Z"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == testDonePullsPath {
+			prs := []*github.PullRequest{
+				{
+					Number:         github.Int(42),
+					Head:           &github.PullRequestBranch{Ref: github.String("014-feature")},
+					MergedAt:       &github.Timestamp{Time: mustParseTime(mergedAt)},
+					MergeCommitSHA: github.String("abc123"),
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(prs)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+	require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".work/2_doing/014-test.prd.md"), []byte("---\nid: 014\ntitle: Test\nstatus: doing\nkind: prd\ncreated: 2024-01-01\n---\n"), 0o600))
+	// #nosec G204 - tmpDir from t.TempDir(), command is fixed
+	require.NoError(t, exec.Command("git", "init").Run())
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "remote", "add", "origin", "https://github.com/owner/repo.git").Run())
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "add", "f").Run())
+	// #nosec G204 - commit message is fixed
+	require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+	// #nosec G204 - branch name is fixed
+	_ = exec.Command("git", "branch", "-m", "main").Run()
+	kiraYml := fmt.Sprintf("version: \"1.0\"\ngit:\n  trunk_branch: main\nworkspace:\n  git_base_url: %s\n", server.URL)
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte(kiraYml), 0o600))
+
+	restore := setenv("KIRA_GITHUB_TOKEN", "test-token")
+	defer restore()
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetArgs([]string{"done", "014", "--dry-run"})
+	resetHelpFlag(rootCmd)
+	execErr := rootCmd.Execute()
+	require.NoError(t, execErr)
+	assert.Contains(t, buf.String(), "idempotent")
+}
+
+func mustParseTime(s string) time.Time {
+	t, err := time.Parse("2006-01-02T15:04:05Z", s)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 const (

@@ -67,8 +67,176 @@ func runDone(cmd *cobra.Command, args []string) error {
 	if dryRun {
 		return printDoneDryRun(cmd, ctx)
 	}
-	_ = ctx // used in later slices for merge/checks
+	return executeDone(cmd, ctx)
+}
+
+func executeDone(cmd *cobra.Command, ctx *doneContext) error {
+	cfg := ctx.Cfg
+	baseURL := getBaseURL(cfg)
+	if !isGitHubRemote(ctx.RemoteURL, baseURL) {
+		return nil
+	}
+
+	token := os.Getenv("KIRA_GITHUB_TOKEN")
+	if token == "" && ctx.Status != defaultReleaseStatus {
+		return fmt.Errorf("GitHub token required. Set KIRA_GITHUB_TOKEN")
+	}
+
+	remoteName := resolveDoneRemoteName(cfg)
+	trunkBranch, err := resolveTrunkBranchForLatest(cfg, nil, ctx.RepoRoot)
+	if err != nil {
+		return err
+	}
+
+	force, noCleanup, mergeStrategy, requireChecks, requireCommentsResolved := resolveDoneFlags(cfg, cmd)
+
+	apiCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	client, err := git.NewClient(apiCtx, token, baseURL)
+	if err != nil {
+		return err
+	}
+	owner, repoName, err := git.ParseGitHubOwnerRepo(ctx.RemoteURL)
+	if err != nil {
+		return fmt.Errorf("invalid remote URL: %w", err)
+	}
+
+	mergedAt, mergeCommitSHA, prNum, err := applyMergeOrPRMetadata(apiCtx, client, cfg, ctx, mergeStrategy, requireChecks, requireCommentsResolved, force)
+	if err != nil {
+		return err
+	}
+
+	if err := pullTrunkAndUpdateWorkItem(cfg, ctx, remoteName, trunkBranch, mergedAt, mergeCommitSHA, prNum, mergeStrategy); err != nil {
+		return err
+	}
+
+	return maybeCleanupBranch(apiCtx, client, owner, repoName, cfg, noCleanup, token, ctx.PR)
+}
+
+func getBaseURL(cfg *config.Config) string {
+	if cfg.Workspace != nil {
+		return cfg.Workspace.GitBaseURL
+	}
+	return ""
+}
+
+func resolveDoneRemoteName(cfg *config.Config) string {
+	if cfg.Git != nil && cfg.Git.Remote != "" {
+		return cfg.Git.Remote
+	}
+	return defaultRemoteName
+}
+
+func pullTrunkAndUpdateWorkItem(cfg *config.Config, ctx *doneContext, remoteName, trunkBranch, mergedAt, mergeCommitSHA string, prNum int, mergeStrategy string) error {
+	pullCtx, pullCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer pullCancel()
+	if err := pullTrunk(pullCtx, ctx.RepoRoot, remoteName, trunkBranch); err != nil {
+		return fmt.Errorf("pull trunk failed: %w", err)
+	}
+	if mergedAt == "" {
+		mergedAt = time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	}
+	if mergeCommitSHA == "" {
+		mergeCommitSHA = unknownValue
+	}
+	if err := updateWorkItemToDone(cfg, ctx.WorkItemPath, ctx.WorkItemID, mergedAt, mergeCommitSHA, prNum, mergeStrategy, ctx.RepoRoot, remoteName); err != nil {
+		return fmt.Errorf("update work item to done: %w", err)
+	}
 	return nil
+}
+
+func maybeCleanupBranch(ctx context.Context, client *github.Client, owner, repo string, cfg *config.Config, noCleanup bool, token string, pr *github.PullRequest) error {
+	cleanup := !noCleanup
+	if cfg.Done != nil && cfg.Done.CleanupBranch != nil {
+		cleanup = *cfg.Done.CleanupBranch && !noCleanup
+	}
+	if !cleanup || token == "" || pr == nil || pr.Head == nil || pr.Head.Ref == nil {
+		return nil
+	}
+	headRef := pr.Head.GetRef()
+	if err := git.WithRateLimitRetry(ctx, 2, func() error {
+		return deleteBranch(ctx, client, owner, repo, headRef)
+	}); err != nil {
+		return fmt.Errorf("delete branch failed: %w", err)
+	}
+	return nil
+}
+
+// resolveDoneFlags returns force, noCleanup, mergeStrategy, requireChecks, requireCommentsResolved from cmd and cfg.
+func resolveDoneFlags(cfg *config.Config, cmd *cobra.Command) (force, noCleanup bool, mergeStrategy string, requireChecks, requireCommentsResolved bool) {
+	force, _ = cmd.Flags().GetBool("force")
+	noCleanup, _ = cmd.Flags().GetBool("no-cleanup")
+	mergeStrategy, _ = cmd.Flags().GetString("merge-strategy")
+	requireChecks = true
+	requireCommentsResolved = true
+	if cfg.Done != nil {
+		if cfg.Done.RequireChecks != nil {
+			requireChecks = *cfg.Done.RequireChecks
+		}
+		if cfg.Done.RequireCommentsResolved != nil {
+			requireCommentsResolved = *cfg.Done.RequireCommentsResolved
+		}
+	}
+	if mergeStrategy == "" && cfg.Done != nil {
+		mergeStrategy = cfg.Done.MergeStrategy
+	}
+	if mergeStrategy == "" {
+		mergeStrategy = "rebase"
+	}
+	return force, noCleanup, mergeStrategy, requireChecks, requireCommentsResolved
+}
+
+// applyMergeOrPRMetadata runs PR checks and merge if PR is open, or uses existing PR metadata if already merged.
+// Returns mergedAt, mergeCommitSHA, prNum, and an error.
+func applyMergeOrPRMetadata(apiCtx context.Context, client *github.Client, cfg *config.Config, ctx *doneContext, mergeStrategy string, requireChecks, requireCommentsResolved, force bool) (mergedAt, mergeCommitSHA string, prNum int, err error) {
+	if ctx.PR == nil {
+		return "", "", 0, nil
+	}
+	prNum = ctx.PR.GetNumber()
+	owner, repoName, parseErr := git.ParseGitHubOwnerRepo(ctx.RemoteURL)
+	if parseErr != nil {
+		return "", "", 0, fmt.Errorf("invalid remote URL: %w", parseErr)
+	}
+
+	if !git.IsPRClosedOrMerged(ctx.PR) {
+		if err := runPRChecks(apiCtx, client, owner, repoName, ctx.PR, requireChecks, requireCommentsResolved, force); err != nil {
+			return "", "", 0, err
+		}
+		title := ctx.PR.GetTitle()
+		commitMsg := buildDoneCommitMessage("{id}: {title}", ctx.WorkItemID, title)
+		if mergeStrategy == "squash" && cfg.Done != nil && cfg.Done.SquashCommitMessage != "" {
+			commitMsg = buildDoneCommitMessage(cfg.Done.SquashCommitMessage, ctx.WorkItemID, title)
+		} else if cfg.Done != nil && cfg.Done.MergeCommitMessage != "" {
+			commitMsg = buildDoneCommitMessage(cfg.Done.MergeCommitMessage, ctx.WorkItemID, title)
+		}
+		var mergeResult *github.PullRequestMergeResult
+		if err := git.WithRateLimitRetry(apiCtx, 2, func() error {
+			var e error
+			mergeResult, e = git.MergePullRequest(apiCtx, client, owner, repoName, ctx.PR.GetNumber(), commitMsg, mergeStrategy)
+			return e
+		}); err != nil {
+			return "", "", 0, fmt.Errorf("merge failed: %w", err)
+		}
+		mergedAt = time.Now().UTC().Format("2006-01-02T15:04:05Z")
+		if mergeResult != nil && mergeResult.GetSHA() != "" {
+			mergeCommitSHA = mergeResult.GetSHA()
+		} else {
+			mergeCommitSHA = unknownValue
+		}
+		return mergedAt, mergeCommitSHA, prNum, nil
+	}
+
+	// PR already merged
+	if ctx.PR.MergedAt != nil {
+		mergedAt = ctx.PR.MergedAt.Format("2006-01-02T15:04:05Z")
+	} else {
+		mergedAt = time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	}
+	mergeCommitSHA = ctx.PR.GetMergeCommitSHA()
+	if mergeCommitSHA == "" {
+		mergeCommitSHA = unknownValue
+	}
+	return mergedAt, mergeCommitSHA, prNum, nil
 }
 
 func resolveDoneWorkItemAndPR(cfg *config.Config, workItemID string) (*doneContext, error) {
@@ -258,7 +426,7 @@ func updateWorkItemDoneMetadata(filePath, mergedAt, mergeCommitSHA string, prNum
 }
 
 // updateWorkItemToDone moves the work item to done (if needed), sets status and completion metadata, then commits and pushes. Used from runDone when full flow is wired.
-func updateWorkItemToDone(cfg *config.Config, workItemPath, workItemID, mergedAt, mergeCommitSHA string, prNumber int, mergeStrategy, repoRoot, remoteName string) error { //nolint:unused
+func updateWorkItemToDone(cfg *config.Config, workItemPath, workItemID, mergedAt, mergeCommitSHA string, prNumber int, mergeStrategy, repoRoot, remoteName string) error {
 	status, err := statusFromWorkItemPath(workItemPath, cfg)
 	if err != nil {
 		return err
