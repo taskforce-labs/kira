@@ -937,10 +937,12 @@ func formatGeneratedCommitMessage(path string, cfg *config.Config, workItemID, s
 	}
 	var b strings.Builder
 	b.WriteString(workItemID + " " + strings.TrimSpace(oneLine) + "\n")
+	b.WriteString("\n")
 	b.WriteString(slug + "\n")
-	b.WriteString(chosen.Name + "\n")
+	b.WriteString("\n")
+	b.WriteString(chosen.Name + ":\n")
 	for _, t := range chosen.Tasks {
-		b.WriteString(t.ID + " " + t.Description + "\n")
+		b.WriteString("- " + t.ID + " " + t.Description + "\n")
 	}
 	return b.String(), nil
 }
