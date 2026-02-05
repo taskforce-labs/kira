@@ -426,3 +426,31 @@ func TestPullTrunk(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestUpdateWorkItemDoneMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{ConfigDir: tmpDir, Workspace: &config.WorkspaceConfig{WorkFolder: "."}}
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "4_done"), 0o700))
+	workPath := filepath.Join(tmpDir, "4_done", "014-done.prd.md")
+	content := `---
+id: "014"
+title: Done item
+status: done
+kind: prd
+created: "2024-01-01"
+---
+
+# Content
+`
+	require.NoError(t, os.WriteFile(workPath, []byte(content), 0o600))
+
+	err := updateWorkItemDoneMetadata(workPath, "2024-06-01T12:00:00Z", "abc123", 42, "squash", cfg)
+	require.NoError(t, err)
+
+	frontMatter, _, parseErr := parseWorkItemFrontMatter(workPath, cfg)
+	require.NoError(t, parseErr)
+	assert.Equal(t, "2024-06-01T12:00:00Z", frontMatter["merged_at"])
+	assert.Equal(t, "abc123", frontMatter["merge_commit_sha"])
+	assert.Equal(t, 42, frontMatter["pr_number"])
+	assert.Equal(t, "squash", frontMatter["merge_strategy"])
+}
