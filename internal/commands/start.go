@@ -1054,9 +1054,12 @@ func validateOnTrunkBranch(trunkBranch, dir string, dryRun bool) error {
 	return nil
 }
 
+// defaultRemoteName is the default git remote when not configured.
+const defaultRemoteName = "origin"
+
 // resolveRemoteName determines the remote name using priority order:
-// For main repo: git.remote or "origin"
-// For polyrepo project: project.remote > git.remote > "origin"
+// For main repo: git.remote or defaultRemoteName
+// For polyrepo project: project.remote > git.remote > defaultRemoteName
 func resolveRemoteName(cfg *config.Config, project *config.ProjectConfig) string {
 	// For polyrepo project
 	if project != nil {
@@ -1070,7 +1073,7 @@ func resolveRemoteName(cfg *config.Config, project *config.ProjectConfig) string
 		return cfg.Git.Remote
 	}
 
-	return "origin"
+	return defaultRemoteName
 }
 
 // checkRemoteExists checks if a remote exists in the repository

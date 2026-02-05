@@ -147,3 +147,90 @@ func TestUpdateDraftToReady_resourceNotAccessibleError(t *testing.T) {
 	assert.Contains(t, err.Error(), "repo scope")
 	assert.Contains(t, err.Error(), "Pull requests")
 }
+
+func TestIsPRClosedOrMerged(t *testing.T) {
+	t.Run("nil pr returns true", func(t *testing.T) {
+		assert.True(t, IsPRClosedOrMerged(nil))
+	})
+	t.Run("closed state returns true", func(t *testing.T) {
+		pr := &github.PullRequest{State: github.String("closed")}
+		assert.True(t, IsPRClosedOrMerged(pr))
+	})
+	t.Run("merged has MergedAt returns true", func(t *testing.T) {
+		pr := &github.PullRequest{State: github.String("closed"), MergedAt: &github.Timestamp{}}
+		assert.True(t, IsPRClosedOrMerged(pr))
+	})
+	t.Run("open state returns false", func(t *testing.T) {
+		pr := &github.PullRequest{State: github.String("open")}
+		assert.False(t, IsPRClosedOrMerged(pr))
+	})
+}
+
+func TestFindPullRequestByWorkItemID(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns matching open PR by head ref prefix", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Contains(t, r.URL.Path, "/pulls")
+			assert.Equal(t, "open", r.URL.Query().Get("state"))
+			w.Header().Set("Content-Type", "application/json")
+			// One PR with head ref 014-kira-done
+			_, _ = w.Write([]byte(`[{"number":1,"state":"open","head":{"ref":"014-kira-done"},"base":{"ref":"main"}}]`))
+		}))
+		defer server.Close()
+
+		baseURL, err := url.Parse(server.URL + "/")
+		require.NoError(t, err)
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+
+		pr, err := FindPullRequestByWorkItemID(ctx, client, "owner", "repo", "014")
+		require.NoError(t, err)
+		require.NotNil(t, pr)
+		assert.Equal(t, 1, pr.GetNumber())
+		assert.Equal(t, "014-kira-done", pr.GetHead().GetRef())
+	})
+
+	t.Run("returns nil when no matching PR", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		}))
+		defer server.Close()
+
+		baseURL, err := url.Parse(server.URL + "/")
+		require.NoError(t, err)
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+
+		pr, err := FindPullRequestByWorkItemID(ctx, client, "owner", "repo", "999")
+		require.NoError(t, err)
+		assert.Nil(t, pr)
+	})
+
+	t.Run("returns closed PR when no open match", func(t *testing.T) {
+		callCount := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			callCount++
+			if r.URL.Query().Get("state") == "open" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"number":2,"state":"closed","head":{"ref":"014-feature"},"merged_at":"2024-01-01T00:00:00Z"}]`))
+		}))
+		defer server.Close()
+
+		baseURL, err := url.Parse(server.URL + "/")
+		require.NoError(t, err)
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+
+		pr, err := FindPullRequestByWorkItemID(ctx, client, "owner", "repo", "014")
+		require.NoError(t, err)
+		require.NotNil(t, pr)
+		assert.Equal(t, 2, pr.GetNumber())
+		assert.Equal(t, "closed", pr.GetState())
+		assert.GreaterOrEqual(t, callCount, 2)
+	})
+}
