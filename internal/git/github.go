@@ -181,6 +181,45 @@ func SetReviewers(ctx context.Context, client *github.Client, owner, repo string
 	return err
 }
 
+// FindPullRequestByWorkItemID finds a PR whose head branch matches the work item ID pattern {id}-*.
+// Lists PRs (open first, then all) and returns the first whose Head.Ref has prefix workItemID+"-".
+func FindPullRequestByWorkItemID(ctx context.Context, client *github.Client, owner, repo, workItemID string) (*github.PullRequest, error) {
+	prefix := workItemID + "-"
+	opts := &github.PullRequestListOptions{State: "open", ListOptions: github.ListOptions{PerPage: 100}}
+	prs, _, err := client.PullRequests.List(ctx, owner, repo, opts)
+	if err != nil {
+		return nil, err
+	}
+	for _, pr := range prs {
+		if pr.Head != nil && pr.Head.Ref != nil && strings.HasPrefix(*pr.Head.Ref, prefix) {
+			return pr, nil
+		}
+	}
+	// Not open; try closed/merged (idempotent path)
+	opts.State = "closed"
+	prs, _, err = client.PullRequests.List(ctx, owner, repo, opts)
+	if err != nil {
+		return nil, err
+	}
+	for _, pr := range prs {
+		if pr.Head != nil && pr.Head.Ref != nil && strings.HasPrefix(*pr.Head.Ref, prefix) {
+			return pr, nil
+		}
+	}
+	return nil, nil
+}
+
+// IsPRClosedOrMerged returns true if the PR is closed or merged (idempotent path).
+func IsPRClosedOrMerged(pr *github.PullRequest) bool {
+	if pr == nil {
+		return true
+	}
+	if pr.State != nil && *pr.State == "closed" {
+		return true
+	}
+	return pr.MergedAt != nil
+}
+
 // CreatePR creates a pull request (draft or ready) and optionally sets reviewers.
 // Returns the PR HTML URL.
 func CreatePR(ctx context.Context, client *github.Client, owner, repo, base, head, title, body string, draft bool, reviewers []string) (prURL string, err error) {

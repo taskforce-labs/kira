@@ -7,11 +7,24 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"kira/internal/config"
 )
+
+// resetHelpFlag clears the help flag on cmd and its children so a previous test's --help doesn't affect the next Execute().
+func resetHelpFlag(cmd *cobra.Command) {
+	for c := cmd; c != nil; c = c.Parent() {
+		if f := c.Flags().Lookup("help"); f != nil {
+			_ = f.Value.Set("false")
+		}
+	}
+	for _, c := range cmd.Commands() {
+		resetHelpFlag(c)
+	}
+}
 
 func TestValidateTrunkBranch(t *testing.T) {
 	t.Run("returns nil when on trunk branch", func(t *testing.T) {
@@ -146,5 +159,105 @@ func TestDoneCommandArgsAndFlags(t *testing.T) {
 		err := rootCmd.Execute()
 		require.NoError(t, err)
 		// Dry-run with valid trunk succeeds; output may go to cobra's Out
+	})
+}
+
+func TestDoneWorkItemAndPRResolution(t *testing.T) {
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origDir) }()
+
+	t.Run("fails when work item ID invalid", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		// #nosec G204 - tmpDir from t.TempDir(), command is fixed
+		require.NoError(t, exec.Command("git", "init").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "add", "f").Run())
+		// #nosec G204 - commit message is fixed
+		require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+		// #nosec G204 - branch name is fixed
+		_ = exec.Command("git", "branch", "-m", "main").Run()
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte("version: \"1.0\"\ngit:\n  trunk_branch: main\n"), 0o600))
+
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		canonTmp, _ := filepath.EvalSymlinks(tmpDir)
+		canonCwd, _ := filepath.EvalSymlinks(cwd)
+		require.Equal(t, canonTmp, canonCwd, "test must run in tmpDir so config and .work are correct")
+
+		rootCmd.SetArgs([]string{"done", "abc"})
+		resetHelpFlag(rootCmd)
+		execErr := rootCmd.Execute()
+		require.Error(t, execErr, "Execute() should fail for invalid work item ID (cwd: %s)", tmpDir)
+		assert.Contains(t, execErr.Error(), "invalid work item ID")
+	})
+
+	t.Run("fails when work item not found", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		// #nosec G204 - tmpDir from t.TempDir(), command is fixed
+		require.NoError(t, exec.Command("git", "init").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "add", "f").Run())
+		// #nosec G204 - commit message is fixed
+		require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+		// #nosec G204 - branch name is fixed
+		_ = exec.Command("git", "branch", "-m", "main").Run()
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte("version: \"1.0\"\ngit:\n  trunk_branch: main\n"), 0o600))
+
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		canonTmp, _ := filepath.EvalSymlinks(tmpDir)
+		canonCwd, _ := filepath.EvalSymlinks(cwd)
+		require.Equal(t, canonTmp, canonCwd, "test must run in tmpDir so config and .work are correct")
+
+		rootCmd.SetArgs([]string{"done", "999"})
+		resetHelpFlag(rootCmd)
+		execErr := rootCmd.Execute()
+		require.Error(t, execErr, "Execute() should fail when work item not found (cwd: %s)", tmpDir)
+		assert.Contains(t, execErr.Error(), "work item 999 not found")
+	})
+
+	t.Run("succeeds with non-GitHub remote in dry-run", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".work/2_doing/014-test.prd.md"), []byte("---\nid: 014\ntitle: Test\nstatus: doing\nkind: prd\ncreated: 2024-01-01\n---\n"), 0o600))
+		// #nosec G204 - tmpDir from t.TempDir(), command is fixed
+		require.NoError(t, exec.Command("git", "init").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", "https://gitlab.com/owner/repo.git").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "add", "f").Run())
+		// #nosec G204 - commit message is fixed
+		require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+		// #nosec G204 - branch name is fixed
+		_ = exec.Command("git", "branch", "-m", "main").Run()
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte("version: \"1.0\"\ngit:\n  trunk_branch: main\n"), 0o600))
+
+		rootCmd.SetArgs([]string{"done", "014", "--dry-run"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
 	})
 }
