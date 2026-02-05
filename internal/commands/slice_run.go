@@ -840,7 +840,7 @@ func runSliceCommitRemove(cmd *cobra.Command, args []string) error {
 	return runSliceRemove(cmd, []string{id, sliceName})
 }
 
-// runSliceCommitGenerate prints a structured commit message to stdout. Stub: one-line message; full format in slice 3.
+// runSliceCommitGenerate prints a structured commit message to stdout in the PRD format.
 func runSliceCommitGenerate(_ *cobra.Command, args []string) error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -850,8 +850,12 @@ func runSliceCommitGenerate(_ *cobra.Command, args []string) error {
 		return err
 	}
 	workItemID := ""
+	selector := "current"
 	if len(args) > 0 {
 		workItemID = args[0]
+	}
+	if len(args) > 1 {
+		selector = args[1]
 	}
 	path, err := resolveSliceWorkItem(workItemID, cfg, "slice commit generate")
 	if err != nil {
@@ -861,9 +865,84 @@ func runSliceCommitGenerate(_ *cobra.Command, args []string) error {
 	if id == "" {
 		id = workItemID
 	}
-	msg := generateSliceCommitMessage(path, cfg, id)
-	fmt.Println(msg)
+	out, err := formatGeneratedCommitMessage(path, cfg, id, selector)
+	if err != nil {
+		return err
+	}
+	fmt.Print(out)
 	return nil
+}
+
+// selectSliceBySelector returns the slice for generate: current (first with open tasks), previous, or by name.
+func selectSliceBySelector(slices []Slice, selector string) (*Slice, error) {
+	if len(slices) == 0 {
+		return nil, fmt.Errorf("no slices in work item")
+	}
+	switch strings.ToLower(selector) {
+	case "current":
+		s := firstSliceWithOpenTasks(slices)
+		if s == nil {
+			return nil, fmt.Errorf("no slice with open tasks (all done)")
+		}
+		return s, nil
+	case "previous":
+		curIdx := -1
+		for i := range slices {
+			for _, t := range slices[i].Tasks {
+				if !t.Done {
+					curIdx = i
+					break
+				}
+			}
+			if curIdx >= 0 {
+				break
+			}
+		}
+		if curIdx <= 0 {
+			return nil, fmt.Errorf("no previous slice")
+		}
+		return &slices[curIdx-1], nil
+	default:
+		s := findSliceByName(slices, selector)
+		if s == nil {
+			return nil, fmt.Errorf("slice %q not found", selector)
+		}
+		return s, nil
+	}
+}
+
+// formatGeneratedCommitMessage builds the exact PRD format: line1 id+message, line2 id-kebab-title, line3 slice name, then task lines.
+func formatGeneratedCommitMessage(path string, cfg *config.Config, workItemID, selector string) (string, error) {
+	content, err := safeReadFile(path, cfg)
+	if err != nil {
+		return "", fmt.Errorf("failed to read work item: %w", err)
+	}
+	slices, err := ParseSlicesSection(content)
+	if err != nil || slices == nil {
+		return "", fmt.Errorf("failed to parse Slices section: %w", err)
+	}
+	chosen, err := selectSliceBySelector(slices, selector)
+	if err != nil {
+		return "", err
+	}
+	fullMsg := generateSliceCommitMessage(path, cfg, workItemID)
+	oneLine := fullMsg
+	if idx := strings.Index(fullMsg, "\n"); idx >= 0 {
+		oneLine = fullMsg[:idx]
+	}
+	_, _, title, _, _, _ := extractWorkItemMetadata(path, cfg)
+	slug := workItemID + "-" + kebabCase(title)
+	if title == "" || title == unknownValue {
+		slug = workItemID
+	}
+	var b strings.Builder
+	b.WriteString(workItemID + " " + strings.TrimSpace(oneLine) + "\n")
+	b.WriteString(slug + "\n")
+	b.WriteString(chosen.Name + "\n")
+	for _, t := range chosen.Tasks {
+		b.WriteString(t.ID + " " + t.Description + "\n")
+	}
+	return b.String(), nil
 }
 
 // generateSliceCommitMessage builds a commit message from task state changes, or fallback.

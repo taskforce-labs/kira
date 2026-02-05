@@ -3,6 +3,7 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kira/internal/config"
@@ -461,6 +462,95 @@ kind: prd
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
 
 		rootCmd.SetArgs([]string{"slice", "commit", "remove", "SomeSlice"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no work item in doing folder")
+	})
+}
+
+func TestSliceCommitGenerate(t *testing.T) {
+	workItemGenerate := `---
+id: 001
+title: Implement OIDC login flow
+status: doing
+kind: prd
+---
+# Auth
+## Slices
+### Auth Token Validation
+- [ ] T001: Implement OIDC login flow
+- [ ] T002: Add JWT token validation
+### Other Slice
+- [ ] T003: Other task
+`
+	t.Run("generate output format: line1 id+message, line2 slug, line3 slice name, then task lines", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/001-auth.prd.md", []byte(workItemGenerate), 0o600))
+
+		cfg, _ := config.LoadConfig()
+		out, err := formatGeneratedCommitMessage(".work/2_doing/001-auth.prd.md", cfg, "001", "current")
+		require.NoError(t, err)
+		lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+		require.GreaterOrEqual(t, len(lines), 4)
+		assert.True(t, strings.HasPrefix(lines[0], "001 "))
+		assert.Equal(t, "001-implement-oidc-login-flow", lines[1])
+		assert.Equal(t, "Auth Token Validation", lines[2])
+		assert.Equal(t, "T001 Implement OIDC login flow", lines[3])
+		assert.Equal(t, "T002 Add JWT token validation", lines[4])
+	})
+	t.Run("generate with named slice selector", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/001-auth.prd.md", []byte(workItemGenerate), 0o600))
+
+		cfg, _ := config.LoadConfig()
+		out, err := formatGeneratedCommitMessage(".work/2_doing/001-auth.prd.md", cfg, "001", "Other Slice")
+		require.NoError(t, err)
+		lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+		require.GreaterOrEqual(t, len(lines), 4)
+		assert.Equal(t, "Other Slice", lines[2])
+		assert.Equal(t, "T003 Other task", lines[3])
+	})
+	t.Run("generate previous slice selector", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		// First slice all done so "current" is second slice; "previous" is first
+		wi := `---
+id: 001
+title: Test
+status: doing
+kind: prd
+---
+# Test
+## Slices
+### First
+- [x] T001: Done
+### Second
+- [ ] T002: Open
+`
+		require.NoError(t, os.WriteFile(".work/2_doing/001-test.prd.md", []byte(wi), 0o600))
+
+		cfg, _ := config.LoadConfig()
+		out, err := formatGeneratedCommitMessage(".work/2_doing/001-test.prd.md", cfg, "001", "previous")
+		require.NoError(t, err)
+		lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+		assert.Equal(t, "First", lines[2])
+		assert.Equal(t, "T001 Done", lines[3])
+	})
+	t.Run("generate with no work-item-id and zero work items in doing returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "generate"})
 		err := rootCmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no work item in doing folder")
