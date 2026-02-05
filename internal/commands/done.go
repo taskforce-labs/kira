@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,6 +134,11 @@ func executeDone(cmd *cobra.Command, ctx *doneContext) error {
 		return err
 	}
 
+	// Cleanup worktree before branch (worktree may be checked out to the feature branch)
+	if err := maybeCleanupWorktree(cfg, ctx, noCleanup, out); err != nil {
+		return err
+	}
+
 	if err := maybeCleanupBranch(apiCtx, client, owner, repoName, cfg, noCleanup, token, ctx.PR, out); err != nil {
 		return err
 	}
@@ -195,6 +201,86 @@ func maybeCleanupBranch(ctx context.Context, client *github.Client, owner, repo 
 	}
 	donePrintln(out, "  ✓ Branch deleted")
 	return nil
+}
+
+func maybeCleanupWorktree(cfg *config.Config, ctx *doneContext, noCleanup bool, out io.Writer) error {
+	cleanup := !noCleanup
+	if cfg.Done != nil && cfg.Done.CleanupWorktree != nil {
+		cleanup = *cfg.Done.CleanupWorktree && !noCleanup
+	}
+	if !cleanup {
+		return nil
+	}
+
+	// Find worktree path for this work item
+	worktreePath, err := findWorktreePathForWorkItem(cfg, ctx.WorkItemID, ctx.WorkItemPath)
+	if err != nil {
+		// If we can't find the worktree path, it might not exist - that's idempotent, skip
+		return nil
+	}
+	if worktreePath == "" {
+		// No worktree found - idempotent, skip
+		return nil
+	}
+
+	donePrintf(out, "  Removing worktree %s...\n", worktreePath)
+	if err := removeWorktree(worktreePath, false, false); err != nil {
+		return fmt.Errorf("delete worktree failed: %w", err)
+	}
+	donePrintln(out, "  ✓ Worktree removed")
+	return nil
+}
+
+// findWorktreePathForWorkItem finds the worktree path for a work item by reconstructing the path
+// that would have been created by kira start.
+func findWorktreePathForWorkItem(cfg *config.Config, workItemID, workItemPath string) (string, error) {
+	// Extract title from work item
+	_, _, title, _, _, err := extractWorkItemMetadata(workItemPath, cfg)
+	if err != nil {
+		return "", err
+	}
+
+	// Sanitize title (same logic as kira start)
+	sanitizedTitle, err := sanitizeTitle(title, workItemID)
+	if err != nil {
+		return "", err
+	}
+
+	// Build branch name (same as kira start)
+	branchName := fmt.Sprintf("%s-%s", workItemID, sanitizedTitle)
+
+	// Derive worktree root (same logic as kira start)
+	behavior := inferWorkspaceBehavior(cfg)
+	worktreeRoot, err := deriveWorktreeRoot(cfg, behavior)
+	if err != nil {
+		return "", err
+	}
+
+	// Build worktree path
+	worktreePath := filepath.Join(worktreeRoot, branchName)
+	if behavior == WorkspaceBehaviorPolyrepo {
+		// For polyrepo, the main worktree is in a "main" subdirectory
+		worktreePath = filepath.Join(worktreePath, "main")
+	}
+
+	// Check if git recognizes this as a worktree
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return "", nil // Can't verify, skip cleanup
+	}
+	checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// List all worktrees and check if our path is in the list
+	listOutput, err := executeCommand(checkCtx, "git", []string{"worktree", "list"}, repoRoot, false)
+	if err != nil {
+		return "", nil // Can't list worktrees, skip cleanup (idempotent)
+	}
+	// Check if our worktree path appears in the list
+	if !strings.Contains(listOutput, worktreePath) {
+		return "", nil // Worktree not in git's list - doesn't exist (idempotent)
+	}
+
+	return worktreePath, nil
 }
 
 // resolveDoneFlags returns force, noCleanup, mergeStrategy, requireChecks, requireCommentsResolved from cmd and cfg.
@@ -449,6 +535,97 @@ func deleteBranch(ctx context.Context, client *github.Client, owner, repo, branc
 	return err
 }
 
+// commitWorkItemUpdate commits the work item update (move or metadata change).
+func commitWorkItemUpdate(ctx context.Context, status, workItemPath, targetPath, subject, body string, needsUpdate bool, repoRoot string) error {
+	if status != defaultReleaseStatus {
+		return commitMove(workItemPath, targetPath, subject, body, false)
+	}
+	// Work item already in done status - only commit if metadata was updated
+	if needsUpdate {
+		return commitMetadataUpdateIfChanged(ctx, targetPath, subject, repoRoot)
+	}
+	// Metadata didn't need updating, skip commit entirely (idempotent)
+	return nil
+}
+
+// commitMetadataUpdateIfChanged stages and commits the file only if there are changes (idempotent).
+func commitMetadataUpdateIfChanged(ctx context.Context, targetPath, subject, repoRoot string) error {
+	// Stage the file
+	_, _ = executeCommand(ctx, "git", []string{"add", targetPath}, repoRoot, false)
+	// Check if there are staged changes before committing (idempotent: skip if no changes)
+	// git diff --cached --quiet returns exit code 0 if no differences, 1 if differences exist
+	_, diffErr := executeCommand(ctx, "git", []string{"diff", "--cached", "--quiet", targetPath}, repoRoot, false)
+	if diffErr != nil {
+		// diffErr != nil means there ARE staged changes (exit code 1 = differences found)
+		// Proceed with commit
+		_, err := executeCommand(ctx, "git", []string{"commit", "-m", subject}, repoRoot, false)
+		if err != nil {
+			// Check if error is "nothing to commit" (idempotent case - handle gracefully)
+			errStr := err.Error()
+			if !strings.Contains(errStr, "nothing to commit") && !strings.Contains(errStr, "no changes added to commit") {
+				return fmt.Errorf("failed to commit metadata update: %w", err)
+			}
+			// Idempotent: metadata already matches, no commit needed
+		}
+	}
+	// If diffErr == nil, there are no staged changes (exit code 0 = no differences)
+	// This is idempotent: metadata already matches what's in git, skip commit
+	return nil
+}
+
+// workItemMetadataNeedsUpdate checks if the work item's completion metadata needs updating.
+// Returns true if any field differs from the provided values.
+func workItemMetadataNeedsUpdate(filePath, mergedAt, mergeCommitSHA string, prNumber int, mergeStrategy string, cfg *config.Config) (bool, error) {
+	frontMatter, _, err := parseWorkItemFrontMatter(filePath, cfg)
+	if err != nil {
+		return false, err
+	}
+	if frontMatter == nil {
+		return true, nil // No front matter, needs update
+	}
+
+	// Compare each field
+	if getString(frontMatter, "merged_at") != mergedAt {
+		return true, nil
+	}
+	if getString(frontMatter, "merge_commit_sha") != mergeCommitSHA {
+		return true, nil
+	}
+	// pr_number might be stored as int or string
+	currentPRNum := 0
+	if v, ok := frontMatter["pr_number"]; ok {
+		switch val := v.(type) {
+		case int:
+			currentPRNum = val
+		case float64:
+			currentPRNum = int(val)
+		case string:
+			if parsed, err := strconv.Atoi(val); err == nil {
+				currentPRNum = parsed
+			}
+		}
+	}
+	if currentPRNum != prNumber {
+		return true, nil
+	}
+	if getString(frontMatter, "merge_strategy") != mergeStrategy {
+		return true, nil
+	}
+
+	return false, nil // All fields match, no update needed
+}
+
+// getString safely extracts a string value from front matter map.
+func getString(fm map[string]interface{}, key string) string {
+	if v, ok := fm[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+		return fmt.Sprintf("%v", v)
+	}
+	return ""
+}
+
 // updateWorkItemDoneMetadata sets completion metadata in the work item front matter.
 func updateWorkItemDoneMetadata(filePath, mergedAt, mergeCommitSHA string, prNumber int, mergeStrategy string, cfg *config.Config) error {
 	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath, cfg)
@@ -488,8 +665,15 @@ func updateWorkItemToDone(cfg *config.Config, workItemPath, workItemID, mergedAt
 		}
 	}
 
-	if err := updateWorkItemDoneMetadata(targetPath, mergedAt, mergeCommitSHA, prNumber, mergeStrategy, cfg); err != nil {
-		return fmt.Errorf("failed to set completion metadata: %w", err)
+	// Check if metadata needs updating before modifying the file (idempotent optimization)
+	needsUpdate, err := workItemMetadataNeedsUpdate(targetPath, mergedAt, mergeCommitSHA, prNumber, mergeStrategy, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to check metadata: %w", err)
+	}
+	if needsUpdate {
+		if err := updateWorkItemDoneMetadata(targetPath, mergedAt, mergeCommitSHA, prNumber, mergeStrategy, cfg); err != nil {
+			return fmt.Errorf("failed to set completion metadata: %w", err)
+		}
 	}
 
 	workItemType, id, title, _, _, err := extractWorkItemMetadata(targetPath, cfg)
@@ -504,16 +688,8 @@ func updateWorkItemToDone(cfg *config.Config, workItemPath, workItemID, mergedAt
 	commitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if status != defaultReleaseStatus {
-		if err := commitMove(workItemPath, targetPath, subject, body, false); err != nil {
-			return fmt.Errorf("failed to commit: %w", err)
-		}
-	} else {
-		_, _ = executeCommand(commitCtx, "git", []string{"add", targetPath}, repoRoot, false)
-		_, err = executeCommand(commitCtx, "git", []string{"commit", "-m", subject}, repoRoot, false)
-		if err != nil {
-			return fmt.Errorf("failed to commit metadata update: %w", err)
-		}
+	if err := commitWorkItemUpdate(commitCtx, status, workItemPath, targetPath, subject, body, needsUpdate, repoRoot); err != nil {
+		return err
 	}
 
 	trunkBranch, err := resolveTrunkBranchForLatest(cfg, nil, repoRoot)
