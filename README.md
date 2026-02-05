@@ -313,6 +313,8 @@ Runs or lists project check commands defined in `kira.yml` (see [Check commands]
 
 ```bash
 kira check              # Run all configured checks in order (exits on first failure)
+kira check -t commit     # Run only checks tagged "commit"
+kira check -t commit -t e2e   # Run checks that have tag "commit" or "e2e"
 kira check --list       # List configured checks (name and description)
 kira check -l           # Same as --list
 ```
@@ -320,8 +322,9 @@ kira check -l           # Same as --list
 Behavior:
 - Loads config from the current directory (`kira.yml` or `.work/kira.yml`)
 - **Run (default):** Runs each check's command from the config directory in order; streams output; exits non-zero on first failure and reports which check failed
-- **List (`--list` / `-l`):** Prints name and description for each check
-- When no checks are configured, exits 0 with an informational message
+- **Tags (`-t` / `--tags`):** Run or list only checks that have at least one of the given tags (e.g. `kira check -t commit` for pre-commit checks)
+- **List (`--list` / `-l`):** Prints name and description for each check (respects `--tags` when set)
+- When no checks are configured (or no checks match the given tags), exits 0 with an informational message
 
 ### `kira release [status|path] [subfolder]`
 Generates release notes and archives completed work items.
@@ -461,22 +464,29 @@ By default, kira uses the `.work` directory for status folders, templates, and I
 
 ### Check commands
 
-Define a list of check commands (e.g. lint, test, security) in `kira.yml`. Use `kira check` to run them in order from the config directory; kira exits on the first failure and reports which check failed. Use `kira check --list` (or `kira check -l`) to print configured checks without running them. When no checks are configured, `kira check` and `kira check --list` exit 0 with an informational message.
+Define a list of check commands (e.g. lint, test, security) in `kira.yml`. Use `kira check` to run them in order from the config directory; kira exits on the first failure and reports which check failed. Use `kira check --list` (or `kira check -l`) to print configured checks without running them. Use `kira check -t <tag>` to run only checks that have that tag (e.g. `kira check -t commit` for pre-commit checks). When no checks are configured (or no checks match the given tags), `kira check` and `kira check --list` exit 0 with an informational message.
 
 ```yaml
 checks:
   - name: lint
     command: make lint
     description: Run linter
+    tags: [commit]
   - name: security
     command: make security
     description: Run vulnerability scanner
+    tags: [commit]
   - name: test
     command: make test
     description: Run unit tests
+    tags: [commit, ci]
+  - name: e2e
+    command: make e2e
+    description: Run end-to-end tests
+    tags: [e2e, done]
 ```
 
-Each entry requires `name` and `command`; `description` is optional. Commands run from the directory containing `kira.yml`.
+Each entry requires `name` and `command`; `description` and `tags` are optional. Commands run from the directory containing `kira.yml`.
 
 # Field Configuration (optional)
 # Default templates do not include due or estimate; add them here and in custom templates if needed.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -14,8 +15,9 @@ import (
 )
 
 const (
-	noChecksMessage = "no checks configured; add a `checks` section to kira.yml"
-	checkTimeout    = 10 * time.Minute
+	noChecksMessage   = "no checks configured; add a `checks` section to kira.yml"
+	noMatchingMessage = "no checks match the given tag(s)"
+	checkTimeout      = 10 * time.Minute
 )
 
 var checkCmd = &cobra.Command{
@@ -23,12 +25,14 @@ var checkCmd = &cobra.Command{
 	Short: "Run or list project check commands",
 	Long: `Run configured check commands (e.g. lint, test, security) from kira.yml in order.
 Use --list to print configured checks without running them.
+Use --tags to run only checks that have at least one of the given tags (e.g. kira check -t commit).
 When no checks are configured, exits 0 with an informational message.`,
 	RunE: runCheck,
 }
 
 func init() {
 	checkCmd.Flags().BoolP("list", "l", false, "List configured checks (name and description)")
+	checkCmd.Flags().StringSliceP("tags", "t", nil, "Run only checks with at least one of these tags (e.g. -t commit -t e2e)")
 }
 
 func runCheck(cmd *cobra.Command, _ []string) error {
@@ -37,16 +41,42 @@ func runCheck(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	tags, _ := cmd.Flags().GetStringSlice("tags")
 	listFlag, _ := cmd.Flags().GetBool("list")
 	if listFlag {
-		return runCheckList(cfg)
+		return runCheckList(cfg, tags)
 	}
-	return runCheckRun(cfg)
+	return runCheckRun(cfg, tags)
 }
 
-func runCheckRun(cfg *config.Config) error {
-	if len(cfg.Checks) == 0 {
-		fmt.Println(noChecksMessage)
+func filterChecks(checks []config.CheckEntry, tags []string) []config.CheckEntry {
+	if len(tags) == 0 {
+		return checks
+	}
+	tagSet := make(map[string]bool)
+	for _, t := range tags {
+		tagSet[strings.TrimSpace(t)] = true
+	}
+	var out []config.CheckEntry
+	for _, entry := range checks {
+		for _, tag := range entry.Tags {
+			if tagSet[strings.TrimSpace(tag)] {
+				out = append(out, entry)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func runCheckRun(cfg *config.Config, tags []string) error {
+	checks := filterChecks(cfg.Checks, tags)
+	if len(checks) == 0 {
+		if len(cfg.Checks) == 0 {
+			fmt.Println(noChecksMessage)
+		} else {
+			fmt.Println(noMatchingMessage)
+		}
 		return nil
 	}
 
@@ -55,7 +85,7 @@ func runCheckRun(cfg *config.Config) error {
 		configDir = "."
 	}
 
-	for _, entry := range cfg.Checks {
+	for _, entry := range checks {
 		ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 		// #nosec G204 -- command comes from trusted config (kira.yml), not user input
 		c := exec.CommandContext(ctx, "sh", "-c", entry.Command)
@@ -77,13 +107,17 @@ func runCheckRun(cfg *config.Config) error {
 	return nil
 }
 
-func runCheckList(cfg *config.Config) error {
-	if len(cfg.Checks) == 0 {
-		fmt.Println(noChecksMessage)
+func runCheckList(cfg *config.Config, tags []string) error {
+	checks := filterChecks(cfg.Checks, tags)
+	if len(checks) == 0 {
+		if len(cfg.Checks) == 0 {
+			fmt.Println(noChecksMessage)
+		} else {
+			fmt.Println(noMatchingMessage)
+		}
 		return nil
 	}
-	// Slice 3: print each check name and description
-	for _, entry := range cfg.Checks {
+	for _, entry := range checks {
 		desc := entry.Description
 		if desc == "" {
 			desc = "-"
