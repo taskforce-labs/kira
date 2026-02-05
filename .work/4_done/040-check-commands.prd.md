@@ -1,10 +1,14 @@
 ---
 id: 040
 title: check commands
-status: review
+status: done
 kind: prd
-assigned:
-created: 2026-02-02
+created: 2026-02-02T00:00:00Z
+assigned: null
+merge_commit_sha: cdb9fbb73b2a0ccc64757648d4d50c85e98d7ff2
+merge_strategy: rebase
+merged_at: "2026-02-05T04:31:22Z"
+pr_number: 17
 tags: [configuration, cli]
 ---
 
