@@ -84,3 +84,19 @@ func errorStyle(s string) string {
 	}
 	return ansiRed + s + ansiReset
 }
+
+// checkNameStyle returns the check name with optional cyan bold styling.
+func checkNameStyle(s string) string {
+	if !sliceColorEnabled() {
+		return s
+	}
+	return ansiCyan + ansiBold + s + ansiReset
+}
+
+// checkDescStyle returns the check description with optional dim styling.
+func checkDescStyle(s string) string {
+	if !sliceColorEnabled() {
+		return s
+	}
+	return ansiDim + s + ansiReset
+}
