@@ -12,7 +12,7 @@ tags: [github, merge, done, cli]
 
 # kira-done
 
-A command that completes the work item workflow by rebasing the current branch onto the trunk branch, merging the associated pull request on GitHub, and marking the work item as done. This command automates the final step in the Kira workflow, ensuring work items are properly closed and merged.
+A command that completes the work item workflow by merging the associated pull request on GitHub (if still open), pulling the latest trunk, updating the work item to "done" on trunk, and optionally cleaning up the feature branch. It runs only on the trunk branch and is idempotent so it can be re-run after failures or when the work item is already done.
 
 ## Context
 
@@ -20,67 +20,64 @@ In the Kira workflow, work items progress through different statuses: backlog �
 
 The `kira done` command streamlines this final step by:
 
-1. Automatically deriving the work item ID from the current branch name
-2. Rebasing the current branch onto the trunk branch to ensure it's up-to-date
-3. Merging the associated pull request on GitHub using the configured merge strategy
-4. Updating the work item status to "done" on both the feature branch and trunk branch
-5. Cleaning up the feature branch after successful merge (optional)
-6. Supporting only individual work items
+1. Running only when the current branch is the trunk branch (so the feature branch can be removed after merge)
+2. Taking the work item ID as an argument (e.g. `kira done 014`) since there is no feature branch to derive it from
+3. Finding the associated pull request and, if still open: ensuring all PR checks pass and open comments are resolved (when possible), then merging using the configured strategy
+4. If the PR is already closed (merged), continuing with the remaining steps without failing
+5. After merge (or when already merged): pulling the latest trunk from remote
+6. Updating the work item status to "done" on the trunk branch and recording completion metadata
+7. Optionally deleting the feature branch after successful merge
+8. Being idempotent: safe to run again if already done or after correcting a prior failure
 
-This approach ensures that completed work items are properly merged, tracked, and archived, maintaining a clean git history and accurate project state. The command treats the trunk branch as the authoritative source of truth for work item status, ensuring consistency across the repository.
+This approach ensures that completed work items are properly merged, tracked, and archived, and that branch cleanup is possible (you cannot delete the branch you are on, so running from trunk is required).
 
 **Dependencies**: This command requires:
-- An existing pull request (created via `kira review`)
-- GitHub API access for PR merging
-- The current branch to follow kira naming conventions
+- An existing pull request (created via `kira review`), or an already-merged PR for the work item
+- GitHub API access for PR merge and status/comment checks
+- Current branch must be the configured trunk branch
 
 ## Requirements
 
 ### Core Functionality
 
 #### Command Interface
-- **Command**: `kira done [--merge-strategy <strategy>] [--no-cleanup] [--no-trunk-update]`
-- **Behavior**: Automatically derives work item ID from current branch name (must be on a kira-created branch)
-- **Restrictions**: Cannot be run on trunk branch or non-kira branches
+- **Command**: `kira done <work-item-id> [--merge-strategy <strategy>] [--no-cleanup] [--force] [--dry-run]`
+- **Behavior**: Completes the work item by merging its PR (if open), pulling trunk, updating status to "done" on trunk, and optionally cleaning up the feature branch. Work item ID is required (e.g. `kira done 014`).
+- **Restrictions**: Must be run on the trunk branch only. Running on a feature branch would prevent deleting that branch after merge; trunk is required so cleanup can remove the feature branch.
+- **Idempotency**: Safe to run again if the work item is already done or after fixing a prior failure. Completed steps are skipped; remaining steps (e.g. pull trunk, update status, cleanup) are performed as needed.
 - **Flags**:
   - `--merge-strategy <strategy>` - Specify merge strategy (merge, squash, rebase). Defaults to config or "rebase"
   - `--no-cleanup` - Skip deleting the feature branch after merge (overrides config)
-  - `--no-trunk-update` - Skip updating trunk branch status (overrides config)
-  - `--no-rebase` - Skip rebasing current branch before merge (overrides config)
-  - `--force` - Force merge even if PR has failing checks (use with caution)
+  - `--force` - Force merge even if PR has failing checks or unresolved comments (use with caution)
   - `--dry-run` - Preview what would be done without executing
 
 #### Work Item Management
 
-- Derive work item ID from current branch name (format: `{id}-{title}`)
-- Validate current branch was created by `kira start` (not trunk branch)
+- Accept work item ID as required argument (e.g. `014`)
+- Validate current branch is the configured trunk branch; fail with clear message if not
 - Validate work item exists and is accessible
-- Support work items in "review" status (error for other statuses)
-- Move derived work item from "review" to "done" on the current branch
-- Optionally update the work item status to "done" on the trunk branch (when enabled)
-- Update work item front matter with completion metadata (merged date, merge commit SHA, etc.)
+- Allow work items in "review" (merge PR then mark done) or already "done" (idempotent: skip merge, perform any missing steps such as pull trunk or status update)
+- Update the work item status to "done" on the trunk branch and set completion metadata (merged date, merge commit SHA, etc.)
 - Validate that work item has required fields before completion
-- Handle merge conflicts during rebase with user guidance
+- When idempotent run and already done: pull trunk if needed, ensure status/metadata are correct, optionally ensure branch cleanup; do not fail
 
 #### Git Operations
 
-- Fetch latest changes from remote before operations
-- Rebase the current branch onto the trunk branch (when enabled)
-- Ensure branch is up-to-date before merging
-- Handle rebase conflicts with clear user guidance
-- Validate that all commits are pushed to remote before merge
+- Validate that current branch is trunk; fail otherwise
+- After PR is merged (or detected as already merged): pull latest from the trunk branch on remote so local trunk is up to date before status updates and cleanup
+- Fetch latest changes from remote as needed for PR checks and merge
 - Support polyrepo workflows by coordinating operations across multiple repositories
 
 #### GitHub Integration
 
-- Find associated pull request using branch name or work item metadata
-- Validate PR exists and is in mergeable state
-- Check PR status (must be approved/ready, not draft)
-- Optionally check for required status checks (unless `--force` is used)
-- Merge pull request using specified strategy (merge, squash, or rebase)
-- Use git.trunk_branch as the base branch (from existing kira.yml git configuration)
-- Use git.remote for repository identification (from existing kira.yml git configuration)
-- Update PR with merge information
+- Find associated pull request using work item ID (branch name pattern `{id}-*` or work item metadata)
+- If PR is **open**: run all required status checks on the PR before merge; if possible via API, ensure all open review comments are resolved before merge (unless `--force`)
+- If PR is **already closed (merged)**: do not fail; continue with next steps (pull trunk, update work item status, cleanup)
+- Validate PR is in mergeable state when open
+- Check PR status (must be approved/ready, not draft) when open
+- Require all status checks to pass before merge (unless `--force`)
+- Merge pull request using specified strategy when PR is open
+- Use git.trunk_branch and git.remote from kira.yml
 - Optionally delete feature branch after successful merge (when cleanup is enabled)
 - Handle GitHub API rate limiting gracefully
 
@@ -89,132 +86,189 @@ This approach ensures that completed work items are properly merged, tracked, an
 #### kira.yml Extensions
 ```yaml
 done:
-  update_trunk_status: true   # Update work item status on trunk branch as source of truth
-  rebase_before_merge: true   # Rebase current branch before merging PR
   cleanup_branch: true        # Delete feature branch after successful merge
+  cleanup_worktree: true      # Delete worktree after successful merge (when applicable)
   merge_strategy: "rebase"    # Options: merge, squash, rebase
-  require_checks: true        # Require all status checks to pass before merge
-  merge_commit_message: "Merge {id}: {title}"
+  require_checks: true        # Require all PR status checks to pass before merge
+  require_comments_resolved: true  # When possible via API, require open review comments resolved before merge
+  merge_commit_message: "{id} merge: {title}"
   squash_commit_message: "{id}: {title}"
 ```
 
 ### Branch and PR Management
 
 #### Branch Requirements
-- Branch must already exist (created by `kira start`)
-- Branch must follow naming convention: `{id}-{kebab-case-title}`
-- Branch must be pushed to remote
-- Branch must be up-to-date with trunk (or rebased before merge)
+- **Current branch must be trunk**. Command fails with a clear message if run on a feature branch (so that cleanup can delete the feature branch after merge).
+- Feature branch for the work item must exist on remote (or already be merged and deleted) so the PR can be found or merge state determined.
 
 #### PR Merge Logic
-1. Verify branch exists on remote
-2. Fetch latest changes from remote
-3. Rebase branch onto trunk (when enabled)
-4. Validate PR exists and is mergeable
-5. Check PR status (approved, checks passing)
-6. Merge PR using specified strategy
-7. Update work item status to "done"
-8. Optionally delete feature branch
+1. Ensure current branch is trunk; fail if not.
+2. Resolve work item ID from argument and find associated PR (by branch name pattern or metadata).
+3. **If PR is already closed (merged)**: skip merge; continue to step 6.
+4. **If PR is open**: run all required status checks on the PR; if possible via API, ensure all open review comments are resolved (unless `--force`). Validate PR is mergeable and approved.
+5. Merge PR using specified strategy (when PR was open).
+6. **Pull latest from trunk** on remote so local trunk is up to date.
+7. Update work item status to "done" on trunk and set completion metadata.
+8. Optionally delete feature branch (when cleanup is enabled).
+9. Idempotent: if work item is already done or PR already merged, perform only any remaining steps (e.g. pull trunk, status update, cleanup).
 
 ### Error Handling
 
 #### Validation Errors
+- Not on trunk: "Cannot run 'kira done' on a feature branch. Check out the trunk branch ({trunk}) first so the feature branch can be removed after merge."
 - Work item not found: "Work item {id} not found"
-- Invalid status: "Cannot mark as done: work item is in {current_status} status. Only 'review' status work items can be marked as done"
-- PR not found: "No pull request found for branch {branch-name}"
+- PR not found (when not already merged): "No pull request found for work item {id}. Ensure the branch exists and a PR is open, or that the PR was already merged."
 - PR not mergeable: "Pull request #{number} is not in a mergeable state"
-- Branch not on remote: "Branch {branch-name} must be pushed to remote before merging"
+- PR checks failing: "Required status checks have not passed on PR #{number}. Fix failures and run 'kira done' again, or use --force (use with caution)."
+- PR has unresolved comments: "Pull request #{number} has unresolved review comments. Resolve them and run 'kira done' again, or use --force (use with caution)."
 - GitHub token missing: "GitHub token required for PR merge"
 
 #### Git Operations
 - Remote not found: "GitHub remote '{remote}' not configured"
-- Rebase conflicts: Guide user to resolve conflicts before retrying
 - Merge failures: Provide clear error messages with resolution steps
-- Uncommitted changes: "Uncommitted changes detected. Please commit or stash before running 'kira done'"
+- Pull trunk failures: Clear message and guidance to retry after fixing (idempotent: user can fix and run again)
 
 #### GitHub API Errors
 - Rate limiting: Implement backoff and retry logic
 - API errors: Parse and provide user-friendly messages
 - Token issues: Clear guidance on token setup and permissions
-- PR status checks: Clear messages about failing checks and how to proceed
+- PR status/comment checks: Clear messages about failing checks or unresolved comments and how to proceed (or use --force)
 
 ### Polyrepo Support
 
 When working with polyrepo configurations, the command must:
-- Coordinate rebase operations across all related repositories
-- Ensure all repositories are up-to-date before merging
-- Merge PRs in the correct order based on dependencies
+- Ensure trunk branch is current in all related repositories before and after merge
+- Pull trunk in each repository after PRs are merged
+- Merge PRs in the correct order based on dependencies (when open)
 - Update work item status consistently across all repositories
 - Handle failures gracefully with rollback capabilities
 
 ## Acceptance Criteria
 
 ### Core Command Functionality
-- [ ] `kira done` automatically derives work item ID from current branch name
-- [ ] Command fails if run on trunk branch
-- [ ] Command fails if current branch doesn't follow kira naming convention
-- [ ] Command fails if work item is not in "review" status
-- [ ] `kira done` rebases current branch onto trunk branch when enabled
-- [ ] `kira done --no-rebase` skips rebase before merge
-- [ ] `kira done` finds and merges associated pull request
-- [ ] `kira done` updates work item status to "done" on current branch
-- [ ] `kira done` updates work item status to "done" on trunk branch when enabled
-- [ ] `kira done --no-trunk-update` skips trunk status updates
-- [ ] `kira done --merge-strategy squash` uses squash merge strategy
-- [ ] `kira done --merge-strategy rebase` uses rebase merge strategy
-- [ ] `kira done --merge-strategy merge` uses merge commit strategy (default)
+- [ ] `kira done <work-item-id>` requires work item ID as argument (e.g. `kira done 014`)
+- [ ] Command fails with clear message if not run on trunk branch (must run on trunk so feature branch can be removed)
+- [ ] Command finds PR associated with work item (by branch name pattern or metadata)
+- [ ] When PR is open: all required status checks are run and must pass before merge (unless `--force`)
+- [ ] When possible via API: open review comments must be resolved before merge (unless `--force`)
+- [ ] When PR is already closed (merged): command continues with next steps (pull trunk, update status, cleanup) without failing
+- [ ] After merge (or when already merged): command pulls latest from trunk on remote so local trunk is up to date
+- [ ] `kira done` updates work item status to "done" on trunk and sets completion metadata
+- [ ] `kira done --merge-strategy squash` uses squash merge strategy (when PR is open)
+- [ ] `kira done --merge-strategy rebase` uses rebase merge strategy (when PR is open)
+- [ ] `kira done --merge-strategy merge` uses merge commit strategy (when PR is open)
+- [ ] Command is idempotent: safe to run again when work item is already done or after fixing a prior failure; completed steps are skipped
 - [ ] Command fails gracefully when GitHub token is missing
-- [ ] Command shows helpful error messages for invalid work items
-- [ ] Command validates PR is mergeable before attempting merge
+- [ ] Command shows helpful error messages for invalid work items and when not on trunk
+- [ ] Command validates PR is mergeable before attempting merge (when PR is open)
 
 ### GitHub Integration
-- [ ] Finds PR associated with current branch
-- [ ] Validates PR exists and is accessible
-- [ ] Checks PR status (approved, not draft)
-- [ ] Validates PR is mergeable
-- [ ] Optionally checks for passing status checks (unless --force)
-- [ ] Merges PR using specified strategy
-- [ ] Updates PR with merge information
+- [ ] Finds PR associated with work item ID (branch name pattern or metadata)
+- [ ] When PR is open: validates PR exists, is mergeable, approved, not draft
+- [ ] When PR is open: runs all required status checks and blocks merge until passing (unless `--force`)
+- [ ] When possible via API: blocks merge until open review comments are resolved (unless `--force`)
+- [ ] When PR is already merged: continues without error to pull trunk, update status, cleanup
+- [ ] Merges PR using specified strategy when PR is open
 - [ ] Optionally deletes feature branch after merge (when cleanup enabled)
 - [ ] `kira done --no-cleanup` preserves feature branch after merge
 - [ ] Handles GitHub API rate limiting gracefully
 
 ### Work Item Updates
-- [ ] Work item status changes to "done"
+- [ ] Work item status changes to "done" on trunk
 - [ ] Front matter includes merge metadata (merged date, merge commit SHA, PR number)
 - [ ] Updated timestamp reflects completion time
 - [ ] Work item remains in git history with full traceability
-- [ ] Trunk branch status updates work correctly when enabled
+- [ ] Idempotent run when already done: ensures status/metadata correct, pulls trunk if needed
 
-### Rebase and Merge Functionality
-- [ ] Rebase operations complete successfully before merge
-- [ ] Command handles rebase conflicts with clear user guidance
-- [ ] Merge operations complete successfully
+### Merge and Pull Flow
+- [ ] Merge operations complete successfully when PR is open
+- [ ] After merge (or when PR already merged): pull from trunk on remote is performed
 - [ ] Merge commit messages follow configured templates
 - [ ] Squash merge creates single commit with work item title
 - [ ] Rebase merge maintains linear history
-- [ ] Trunk branch configuration respects custom branch names
-- [ ] Disabling rebase via config works correctly
-- [ ] Override flags (--no-trunk-update, --no-rebase, --no-cleanup) work correctly
+- [ ] Trunk branch configuration respected; command only runs on trunk
+- [ ] Override flag --no-cleanup works correctly
 
 ### Error Scenarios
+- [ ] Not on trunk shows clear error: must checkout trunk first so branch can be removed
 - [ ] Invalid work item ID shows clear error message
-- [ ] Work item in wrong status shows appropriate error
-- [ ] PR not found shows clear error with guidance
+- [ ] PR not found shows clear error with guidance (or that PR may already be merged)
 - [ ] PR not mergeable shows appropriate error message
-- [ ] Rebase conflicts provide clear resolution instructions
+- [ ] Failing status checks block merge with clear message; user can fix and run `kira done` again (unless --force)
+- [ ] Unresolved review comments block merge with clear message when API supports it (unless --force)
 - [ ] GitHub API errors are handled gracefully
 - [ ] Network failures retry with exponential backoff
-- [ ] Uncommitted changes prevent execution with clear message
-- [ ] Failing status checks prevent merge (unless --force)
+- [ ] Idempotent: after fixing any failure, re-running `kira done` completes remaining steps
 
 ### Polyrepo Support
 - [ ] Polyrepo workspace configuration is detected correctly
-- [ ] Rebase operations are coordinated across all repositories
-- [ ] PR merges are coordinated across all repositories
+- [ ] Trunk is validated and pull-trunk is coordinated across all repositories
+- [ ] PR merges are coordinated across all repositories (when open)
 - [ ] Work item status updates are consistent across all repositories
 - [ ] Failures in one repository are handled gracefully
 - [ ] All repositories are validated before operations begin
+
+## Slices
+
+### Slice 1: Trunk validation utility
+Commit: refactor: add trunk-only validation for kira done
+- [ ] T001: Add validateTrunkBranch(cfg) to ensure current branch is trunk; return clear error if not; make reusable where trunk-only execution is required
+- [ ] T002: Add unit tests for trunk validation (on trunk vs on feature branch)
+
+### Slice 2: CLI command skeleton
+Commit: feat: add kira done command skeleton
+- [ ] T003: Add command registration with required work-item-id argument, flags (--merge-strategy, --no-cleanup, --force, --dry-run), and validate trunk branch before any operations
+- [ ] T004: Add unit tests for command registration, argument and flag parsing, help output
+
+### Slice 3: Work item and PR resolution
+Commit: feat: resolve work item and PR for kira done
+- [ ] T005: Validate work item ID argument (format, existence); implement findPullRequest(workItemID) by branch name pattern or metadata; implement isPRClosedOrMerged() for idempotent path
+- [ ] T006: Add unit tests for work item validation and PR finding (open vs closed)
+
+### Slice 4: Configuration schema extension
+Commit: feat: extend configuration schema for done command
+- [ ] T007: Add DoneConfig struct and done section in kira.yml (merge_strategy, cleanup_branch, cleanup_worktree, require_checks, require_comments_resolved, merge commit message templates)
+- [ ] T008: Add unit tests for config parsing and flag precedence
+
+### Slice 5: GitHub API client setup
+Commit: feat: add GitHub API client utilities
+- [ ] T009: Create github.go for GitHub API (OAuth2, owner/repo from remote, token validation, rate limiting, retry logic)
+- [ ] T010: Add unit tests and mocks for client initialization (shared with kira review where applicable)
+
+### Slice 6: PR checks and comments resolution
+Commit: feat: run PR checks and enforce resolved comments before merge
+- [ ] T011: Implement runPRChecks() — run required status checks and block merge until passing; when possible via API check open review comments and block until resolved (unless --force); clear error messages
+- [ ] T012: Add unit tests with mocked API (checks passing/failing, comments resolved/unresolved)
+
+### Slice 7: PR merge and pull trunk
+Commit: feat: merge PR when open and pull trunk after merge
+- [ ] T013: Implement mergePullRequest() when PR is open (merge/squash/rebase per config); skip merge when PR already closed/merged; implement pullTrunk() after merge or when already merged
+- [ ] T014: Add unit tests for merge and pull flow; idempotent path when PR already merged
+
+### Slice 8: Work item status update on trunk
+Commit: feat: update work item to done on trunk
+- [ ] T015: Update work item status to "done" on trunk and set completion metadata (merged_at, merge_commit_sha, pr_number, merge_strategy); commit and push; idempotent when already "done"
+- [ ] T016: Add unit tests for status and metadata updates
+
+### Slice 9: Branch cleanup
+Commit: feat: implement feature branch cleanup after merge
+- [ ] T017: Implement deleteBranch() via GitHub API when cleanup enabled; handle already-deleted branch (idempotent)
+- [ ] T018: Add unit tests for cleanup and --no-cleanup behavior
+
+### Slice 10: Idempotent flow and error handling
+Commit: feat: idempotent flow and UX for kira done
+- [ ] T019: Implement idempotent flow (skip completed steps; complete remaining); progress messages and clear errors with guidance to fix and re-run
+- [ ] T020: Add unit tests for idempotent re-run and error recovery scenarios
+
+### Slice 11: Integration tests
+Commit: test: add integration tests for kira done workflows
+- [ ] T021: Test full workflow on trunk (open PR → merge → pull trunk → status update → cleanup) and idempotent path (already merged PR → pull trunk → status → cleanup)
+- [ ] T022: Test PR checks and comments blocking merge (unless --force); test different merge strategies and config
+
+### Slice 12: E2E tests
+Commit: test: add e2e tests for kira done command
+- [ ] T023: Test complete workflow in test environment (trunk only, work item ID arg); verify PR merge, pull trunk, work item update, cleanup
+- [ ] T024: Test not-on-trunk failure and idempotent re-run after failure; test all flags and configurations
 
 ## Implementation Notes
 
@@ -223,17 +277,16 @@ When working with polyrepo configurations, the command must:
 #### Command Structure
 ```
 internal/commands/done.go
-├── doneCmd - Main cobra command
-├── deriveWorkItemFromBranch() - Extract work item ID from current branch name
-├── validateBranchContext() - Ensure command is run on valid kira branch
-├── validateWorkItemStatus() - Ensure work item is in review status
-├── findPullRequest() - Find associated PR for current branch
-├── validatePRStatus() - Check PR is mergeable
-├── rebaseBranch() - Rebase current branch onto trunk
-├── mergePullRequest() - GitHub API integration for PR merge
-├── updateWorkItemStatus() - Update work item to done status
+├── doneCmd - Main cobra command (accepts work-item-id argument)
+├── validateTrunkBranch() - Ensure command is run on trunk branch only
+├── findPullRequest() - Find associated PR for work item (branch name pattern or metadata)
+├── isPRClosedOrMerged() - Detect if PR already merged (idempotent path)
+├── runPRChecks() - Run required status checks; ensure open comments resolved when possible
+├── mergePullRequest() - GitHub API integration for PR merge (when open)
+├── pullTrunk() - Pull latest from trunk on remote after merge
+├── updateWorkItemStatus() - Update work item to done on trunk (current branch)
 ├── cleanupBranch() - Delete feature branch after merge
-└── updateTrunkStatus() - Update work item status on trunk branch
+└── idempotentSkipOrComplete() - Skip completed steps; complete any remaining when re-run
 ```
 
 #### Dependencies
@@ -278,95 +331,44 @@ _, err := client.Git.DeleteRef(ctx, owner, repo, fmt.Sprintf("heads/%s", branchN
 
 ### Work Item Processing
 
-#### Status Validation
+#### Work Item and PR State (Idempotent)
+- Work item ID comes from the required argument (e.g. `kira done 014`).
+- When work item is in "review": merge PR (after checks), pull trunk, update to "done", cleanup.
+- When work item is already "done" or PR is already merged: skip merge; pull trunk if needed, ensure status/metadata correct, perform cleanup if still needed. Do not fail.
+
+#### Trunk-Only and Pull-Trunk Flow
+`kira done` runs only on trunk. After PR is merged (or detected as already merged), pull latest trunk so local is up to date, then update work item on trunk.
+
 ```go
-validStatuses := []string{"review"}
-if !contains(validStatuses, currentStatus) {
-    return fmt.Errorf("work item must be in review status")
+func validateTrunkBranch(cfg *config.Config) error {
+    currentBranch := getCurrentBranch()
+    if currentBranch != cfg.Git.TrunkBranch {
+        return fmt.Errorf("cannot run 'kira done' on a feature branch. Check out the trunk branch (%s) first so the feature branch can be removed after merge", cfg.Git.TrunkBranch)
+    }
+    return nil
 }
-```
 
-#### Work Item Derivation
-```go
-func deriveWorkItemFromBranch(currentBranch string) (string, error) {
-    // Branch format: {id}-{title} (e.g., "001-user-authentication")
-    // Extract ID from beginning of branch name
-    dashIndex := strings.Index(currentBranch, "-")
-    if dashIndex == -1 {
-        return "", fmt.Errorf("branch name '%s' does not follow kira naming convention", currentBranch)
+func pullTrunk(trunkBranch string) error {
+    if err := exec.Command("git", "pull", "origin", trunkBranch).Run(); err != nil {
+        return fmt.Errorf("failed to pull trunk: %w. Fix and run 'kira done' again", err)
     }
-
-    workItemID := currentBranch[:dashIndex]
-    if !regexp.MustCompile(`^\d{3}$`).MatchString(workItemID) {
-        return "", fmt.Errorf("invalid work item ID '%s' in branch name", workItemID)
-    }
-
-    return workItemID, nil
+    return nil
 }
-```
 
-#### Trunk Status Update Process
-```go
-func updateTrunkStatus(workItemID string, cfg *config.Config) error {
-    // Get trunk branch from existing git configuration
-    trunkBranch := cfg.Git.TrunkBranch
-
-    // Stash any uncommitted changes
-    stashOutput, _ := exec.Command("git", "stash").Output()
-
-    // Switch to trunk branch
-    if err := exec.Command("git", "checkout", trunkBranch).Run(); err != nil {
-        return fmt.Errorf("failed to checkout trunk branch '%s': %w", trunkBranch, err)
-    }
-
-    // Update work item status
+// Update work item on trunk (caller has already validated we are on trunk)
+func updateWorkItemStatusOnTrunk(workItemID string, metadata map[string]interface{}) error {
     if err := moveWorkItem(workItemID, "done", true); err != nil {
-        return fmt.Errorf("failed to update trunk status: %w", err)
+        return fmt.Errorf("failed to update work item status: %w", err)
     }
-
-    // Commit and push status change
     if err := commitAndPushStatusChange(workItemID); err != nil {
         return fmt.Errorf("failed to commit status change: %w", err)
     }
-
-    // Switch back to original branch (if it still exists)
-    exec.Command("git", "checkout", "-").Run()
-
-    // Restore stashed changes if any
-    if stashOutput != nil {
-        exec.Command("git", "stash", "pop")
-    }
-
     return nil
 }
 ```
 
-#### Rebase Process
-```go
-func rebaseBranch(branchName, trunkBranch string) error {
-    // Fetch latest changes
-    if err := exec.Command("git", "fetch", "origin", trunkBranch).Run(); err != nil {
-        return fmt.Errorf("failed to fetch trunk branch: %w", err)
-    }
-
-    // Perform rebase
-    cmd := exec.Command("git", "rebase", fmt.Sprintf("origin/%s", trunkBranch))
-    if err := cmd.Run(); err != nil {
-        // Check if rebase failed due to conflicts
-        if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-            return fmt.Errorf("rebase failed due to conflicts. Please resolve conflicts and run 'git rebase --continue', then retry 'kira done'")
-        }
-        return fmt.Errorf("rebase failed: %w", err)
-    }
-
-    // Force push rebased branch
-    if err := exec.Command("git", "push", "--force-with-lease", "origin", branchName).Run(); err != nil {
-        return fmt.Errorf("failed to push rebased branch: %w", err)
-    }
-
-    return nil
-}
-```
+#### Idempotent Flow
+When re-running after a failure or when work item is already done: skip steps already completed (e.g. PR already merged, status already "done"); perform only remaining steps (pull trunk, ensure status/metadata correct, cleanup).
 
 #### Metadata Updates
 ```go
@@ -382,233 +384,7 @@ frontMatter := map[string]interface{}{
 
 ### Implementation Strategy
 
-The feature should be implemented incrementally with the following commit progression. Each phase includes unit tests integrated into the implementation, with integration and E2E tests as separate phases.
-
-#### Phase 1. Refactor: Extract Shared Branch Utilities
-```
-refactor: extract branch derivation and validation utilities
-
-- Extract deriveWorkItemFromBranch() from PRD spec into utils.go
-  - Parse branch name format: {id}-{title}
-  - Validate ID format (3 digits)
-  - Return work item ID or error
-- Extract validateBranchContext() into utils.go
-  - Check branch is not trunk branch
-  - Validate branch follows kira naming convention
-  - Reusable for both kira review and kira done commands
-- Add unit tests for branch derivation (valid/invalid formats, edge cases)
-- Add unit tests for branch validation (trunk rejection, invalid names)
-- Update existing code that could benefit from these utilities
-```
-
-**Refactoring Opportunity**: These utilities will be needed by both `kira review` (PRD 012) and `kira done` commands. Extract them first to avoid duplication.
-
-#### Phase 2. Refactor: Extract Trunk Status Update Utilities
-```
-refactor: extract trunk status update utilities
-
-- Extract updateTrunkStatus() pattern into utils.go
-  - Stash uncommitted changes
-  - Checkout trunk branch
-  - Update work item status using moveWorkItem()
-  - Commit and push status change
-  - Restore original branch and stashed changes
-- Make it reusable with parameters: workItemID, targetStatus, cfg
-- Add unit tests for trunk status update flow
-- Test error scenarios (checkout failures, commit failures, etc.)
-- Test with dry-run mode
-```
-
-**Refactoring Opportunity**: The `kira review` PRD (012) also needs trunk status updates. Extract this pattern to share between commands.
-
-#### Phase 3. Refactor: Extract Rebase Utilities
-```
-refactor: extract git rebase utilities
-
-- Extract rebaseBranch() into utils.go
-  - Fetch latest trunk branch
-  - Perform rebase operation
-  - Handle rebase conflicts with clear error messages
-  - Force push rebased branch (with --force-with-lease)
-- Add unit tests for rebase operations
-- Test conflict detection and error messages
-- Test force push behavior
-- Integrate with existing executeCommand() utility
-```
-
-**Refactoring Opportunity**: Rebase logic will be shared between `kira review` and `kira done`. Extract to avoid duplication.
-
-#### Phase 4. CLI Command Structure
-```
-feat: add kira done command skeleton
-
-- Add basic command registration and CLI interface
-- Implement command help and basic argument parsing
-- Add placeholder for main command logic
-- Update command routing in root.go
-- Add command flags (--merge-strategy, --no-cleanup, --no-trunk-update, --no-rebase, --force, --dry-run)
-- Add unit tests for command registration and flag parsing
-- Test help output and flag validation
-```
-
-#### Phase 5. Work Item Derivation and Validation
-```
-feat: implement work item derivation and validation for kira done
-
-- Use refactored deriveWorkItemFromBranch() utility
-- Use refactored validateBranchContext() utility
-- Validate work item exists and is accessible
-- Implement validateWorkItemStatus() - only "review" status allowed
-- Create validation error messages
-- Add work item context building
-- Add unit tests for work item validation (status checks, existence checks)
-- Test error scenarios (invalid status, missing work item, wrong branch)
-```
-
-#### Phase 6. Configuration Schema Extension
-```
-feat: extend configuration schema for done command
-
-- Add DoneConfig struct to config package
-- Add done section to kira.yml schema
-- Support merge_strategy, update_trunk_status, rebase_before_merge, cleanup_branch, require_checks
-- Add merge commit message templates
-- Add configuration validation
-- Add unit tests for configuration parsing
-- Test configuration defaults and overrides
-- Test command-line flag precedence over config
-```
-
-#### Phase 7. GitHub API Client Setup
-```
-feat: add GitHub API client utilities
-
-- Create github.go utility file for GitHub API operations
-- Implement GitHub client initialization with OAuth2
-- Add token validation and error handling
-- Implement repository owner/repo extraction from git remote
-- Add rate limiting and retry logic
-- Add unit tests for client initialization
-- Mock GitHub API for testing
-- Test token validation and error scenarios
-```
-
-**Refactoring Opportunity**: This will be shared with `kira review` and future `kira start --draft-pr` features. Extract early.
-
-#### Phase 8. Pull Request Finding and Validation
-```
-feat: implement PR finding and validation for kira done
-
-- Implement findPullRequest() using GitHub API
-  - Find PR by branch name
-  - Validate PR exists and is accessible
-- Implement validatePRStatus()
-  - Check PR is not draft
-  - Check PR is mergeable
-  - Optionally check status checks (unless --force)
-- Add clear error messages for invalid PR states
-- Add unit tests for PR finding logic
-- Mock GitHub API responses for different PR states
-- Test error scenarios (PR not found, not mergeable, failing checks)
-```
-
-#### Phase 9. Rebase Before Merge
-```
-feat: implement rebase before merge for kira done
-
-- Use refactored rebaseBranch() utility
-- Check for uncommitted changes before rebase
-- Fetch latest trunk branch
-- Perform rebase operation
-- Handle rebase conflicts with user guidance
-- Force push rebased branch
-- Add unit tests for rebase flow
-- Test conflict handling
-- Test --no-rebase flag behavior
-```
-
-#### Phase 10. Pull Request Merging
-```
-feat: implement GitHub PR merging for kira done
-
-- Implement mergePullRequest() using GitHub API
-- Support merge strategies: merge, squash, rebase
-- Generate merge commit messages from templates
-- Handle merge failures gracefully
-- Extract merge commit SHA for work item metadata
-- Add unit tests for PR merge operations
-- Mock GitHub API for different merge strategies
-- Test error scenarios (merge failures, API errors)
-```
-
-#### Phase 11. Work Item Status Update
-```
-feat: implement work item status update to done
-
-- Update work item status to "done" on current branch
-- Use refactored updateTrunkStatus() utility when enabled
-- Update work item front matter with merge metadata:
-  - merged_at timestamp
-  - merge_commit_sha
-  - pr_number
-  - merge_strategy
-- Commit status change on feature branch
-- Add unit tests for work item updates
-- Test metadata extraction and updates
-- Test trunk status update integration
-```
-
-#### Phase 12. Branch Cleanup
-```
-feat: implement feature branch cleanup after merge
-
-- Implement deleteBranch() using GitHub API
-- Delete feature branch after successful merge (when cleanup enabled)
-- Handle branch deletion failures gracefully
-- Add unit tests for branch cleanup
-- Test --no-cleanup flag behavior
-- Test cleanup error scenarios
-```
-
-#### Phase 13. Error Handling and User Experience
-```
-feat: enhance error handling and UX for kira done
-
-- Add comprehensive error messages for all failure scenarios
-- Implement progress messages for each operation step
-- Add success message with merge information
-- Improve error messages with actionable guidance
-- Add consistent output formatting
-- Add unit tests for error message formatting
-- Test progress message output
-- Test error recovery scenarios
-```
-
-#### Phase 14. Integration Tests
-```
-test: add integration tests for kira done workflows
-
-- Test full workflow with test GitHub repository
-- Test PR merge with different strategies (merge, squash, rebase)
-- Test branch cleanup verification
-- Test trunk status update verification
-- Test rebase conflict resolution flow
-- Test error recovery scenarios
-- Test with different PR states (approved, failing checks, etc.)
-```
-
-#### Phase 15. E2E Tests
-```
-test: add e2e tests for kira done command
-
-- Test complete command workflow in test environment
-- Verify PR merge and work item updates
-- Test branch cleanup
-- Test error scenarios (missing PR, wrong status, etc.)
-- Test all command flags and configurations
-- Test polyrepo scenarios (if applicable)
-- Test with real GitHub repository (optional, may require test account)
-```
+Implement in the order given in the **Slices** section above. Each slice corresponds to one commit; unit tests are included in the same slice. Integration and E2E tests are Slices 11 and 12.
 
 ### Testing Strategy
 
@@ -620,29 +396,24 @@ Unit tests are written as part of each implementation phase, ensuring that:
 - Issues are caught early before moving to the next phase
 
 Unit tests cover:
-- Work item ID derivation from branch names
-- Branch validation (trunk branch rejection, invalid formats)
-- PR finding and validation logic
-- Mock GitHub API responses for PR merge
-- Trunk status update functionality
-- Rebase operations and conflict handling
-- Work item metadata updates
-- Error scenarios and edge cases
+- Trunk-only validation (reject when not on trunk)
+- Work item ID argument validation and PR resolution (open vs closed)
+- PR checks and comments resolution (block merge until passing/resolved unless --force)
+- Merge when open; skip merge when PR already closed; pull trunk after merge
+- Work item status update on trunk and completion metadata
+- Idempotent flow (already done or PR already merged)
 - Configuration parsing and flag handling
+- Error scenarios and edge cases
 
-#### Integration Tests (Phase 14)
-- Full workflow testing with test GitHub repository
-- PR merge testing with different strategies
-- Branch cleanup verification
-- Trunk status update verification
-- Rebase conflict resolution flow
+#### Integration Tests (Phase 11)
+- Full workflow on trunk: open PR → checks → merge → pull trunk → status → cleanup
+- Idempotent: already merged PR → pull trunk → status → cleanup
+- PR checks and comments blocking merge (unless --force)
 
-#### E2E Tests (Phase 15)
-- `kira done` command in test environment
-- Verify PR merge and work item updates
-- Test branch cleanup
-- Test error scenarios (missing PR, wrong status, etc.)
-- Test all command flags and configurations
+#### E2E Tests (Phase 12)
+- `kira done <work-item-id>` on trunk; verify merge, pull trunk, status, cleanup
+- Not-on-trunk failure; idempotent re-run after failure
+- All flags and configurations
 
 ### Security Considerations
 
@@ -662,33 +433,31 @@ Unit tests cover:
 - Provide clear error messages for rate limit issues
 
 #### Merge Safety
-- Validate PR is approved before merging
-- Check for required status checks (unless --force)
-- Prevent accidental merges of unapproved PRs
-- Require explicit confirmation for destructive operations
+- Run only on trunk branch so feature branch can be removed after merge
+- Validate PR is approved and mergeable before merging (when PR is open)
+- Require all status checks to pass and, when possible via API, all open review comments resolved (unless --force)
+- Prevent accidental merges of unapproved or failing PRs
+- Require explicit confirmation for destructive operations where appropriate
 
 ## Release Notes
 
 ### New Features
-- **Done Command**: New `kira done` command that automatically derives work item from current branch for streamlined PR merging
-- **Smart Context Detection**: Automatically identifies work items from kira-created branch names
-- **Branch Validation**: Prevents accidental execution on trunk branches or invalid branches
-- **Trunk Status Updates**: Optional updates to trunk branch status for maintaining source of truth (configurable)
-- **Automatic Rebasing**: Seamless rebase of feature branch before merging
-- **GitHub Integration**: Seamless integration with GitHub for PR merging and branch cleanup
+- **Done Command**: New `kira done <work-item-id>` command (e.g. `kira done 014`) run on trunk to complete a work item: merge PR (if open), pull trunk, update status to "done", and optionally delete the feature branch
+- **Trunk-Only Execution**: Must be run on the trunk branch so the feature branch can be removed after merge; clear error when run on a feature branch
+- **PR Checks Before Merge**: All required status checks must pass on the PR before merge (unless `--force`); when possible via API, all open review comments must be resolved
+- **Already-Merged PR Handling**: If the PR is already closed (merged), command continues with next steps (pull trunk, update status, cleanup) without failing
+- **Pull Trunk After Merge**: Once the PR is merged on the remote, pulls latest from trunk so local trunk is up to date before status updates and cleanup
+- **Idempotent**: Safe to run again if the work item is already done or after fixing a prior failure; completed steps are skipped, remaining steps are performed
+- **GitHub Integration**: PR merge, status/comment checks, and branch cleanup via GitHub API
 - **Merge Strategy Support**: Configurable merge strategies (merge, squash, rebase)
 
 ### Improvements
-- Streamlined command interface - no need to specify work item IDs manually
-- Smart context awareness - automatically detects work items from branch names
-- Enhanced safety - prevents execution on trunk branches
-- Enhanced work item metadata tracking for completion processes
-- Configurable trunk branch status updates (can be disabled if not desired)
-- Improved error messages and user guidance for merge workflows and rebasing
-- Automatic branch cleanup after successful merge (configurable)
+- Clear workflow: run on trunk with work item ID; PR checks and comments enforced before merge
+- Idempotent re-runs allow correcting failures and re-running `kira done` without starting over
+- Trunk is updated from remote after merge so status and cleanup operate on latest state
+- Automatic branch cleanup after successful merge (configurable via `--no-cleanup`)
 
 ### Technical Changes
-- Added GitHub API client dependency for PR merge management
-- Extended configuration schema for done and merge settings
-- New command structure following established Kira patterns
-- Integration with existing git operations utilities
+- Added GitHub API client dependency for PR merge, status checks, and comment resolution
+- Extended configuration schema for done (require_checks, require_comments_resolved, cleanup, merge_strategy)
+- Command structure: work-item-id argument, trunk validation, pull-trunk step, idempotent flow
