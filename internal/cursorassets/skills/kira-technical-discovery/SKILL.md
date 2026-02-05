@@ -47,4 +47,4 @@ Guide the user through technical discovery and architecture decisions.
 - When trade-offs need stakeholder input
 - When ADR consequences need validation
 
-At each intervention point, present options and guide the user to make informed decisions.
+At each intervention point, present options and guide the user to make informed decisions. When presenting clarifying questions with selectable options, follow the clarifying-questions-format skill.

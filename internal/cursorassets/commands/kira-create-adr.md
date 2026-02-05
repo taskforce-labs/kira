@@ -1,5 +1,7 @@
 # Create ADR
 
+TODO: Once commands have been implemented
+
 ## Overview
 Generate Architecture Decision Records (ADRs) to document significant technical or architectural decisions.
 
