@@ -3,10 +3,14 @@ id: 008
 title: List users
 status: done
 kind: prd
-assigned:
+created: 2025-12-04T00:00:00Z
+assigned: null
+due: 2025-12-04T00:00:00Z
 estimate: 0
-created: 2025-12-04
-due: 2025-12-04
+merge_commit_sha: 8abe1f3ce3a121e350ea027dc4960615a1ce956c
+merge_strategy: rebase
+merged_at: "2026-01-20T21:38:03Z"
+pr_number: 1
 tags: []
 ---
 
