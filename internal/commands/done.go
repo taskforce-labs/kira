@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -117,7 +118,7 @@ func resolveDonePR(remoteURL, baseURL, workItemID, status string) (*github.PullR
 		return nil, nil
 	}
 	token := os.Getenv("KIRA_GITHUB_TOKEN")
-	if token == "" && status != "done" {
+	if token == "" && status != defaultReleaseStatus {
 		return nil, fmt.Errorf("GitHub token required for PR merge. Set KIRA_GITHUB_TOKEN or run with --dry-run")
 	}
 	if token == "" {
@@ -142,7 +143,7 @@ func resolveDonePR(remoteURL, baseURL, workItemID, status string) (*github.PullR
 	if err != nil {
 		return nil, fmt.Errorf("failed to find pull request: %w", err)
 	}
-	if pr == nil && status != "done" {
+	if pr == nil && status != defaultReleaseStatus {
 		return nil, fmt.Errorf("no pull request found for work item %s. Ensure the branch exists and a PR is open, or that the PR was already merged", workItemID)
 	}
 	return pr, nil
@@ -221,6 +222,81 @@ func mergePullRequest(ctx context.Context, client *github.Client, owner, repo st
 // pullTrunk runs git pull <remote> <trunkBranch> in repoRoot.
 func pullTrunk(ctx context.Context, repoRoot, remoteName, trunkBranch string) error {
 	_, err := executeCommand(ctx, "git", []string{"pull", remoteName, trunkBranch}, repoRoot, false)
+	return err
+}
+
+// updateWorkItemDoneMetadata sets completion metadata in the work item front matter.
+func updateWorkItemDoneMetadata(filePath, mergedAt, mergeCommitSHA string, prNumber int, mergeStrategy string, cfg *config.Config) error {
+	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath, cfg)
+	if err != nil {
+		return err
+	}
+	if frontMatter == nil {
+		frontMatter = make(map[string]interface{})
+	}
+	frontMatter["merged_at"] = mergedAt
+	frontMatter["merge_commit_sha"] = mergeCommitSHA
+	frontMatter["pr_number"] = prNumber
+	frontMatter["merge_strategy"] = mergeStrategy
+	return writeWorkItemFrontMatter(filePath, frontMatter, bodyLines)
+}
+
+// updateWorkItemToDone moves the work item to done (if needed), sets status and completion metadata, then commits and pushes. Used from runDone when full flow is wired.
+func updateWorkItemToDone(cfg *config.Config, workItemPath, workItemID, mergedAt, mergeCommitSHA string, prNumber int, mergeStrategy, repoRoot, remoteName string) error { //nolint:unused
+	status, err := statusFromWorkItemPath(workItemPath, cfg)
+	if err != nil {
+		return err
+	}
+
+	workFolder := config.GetWorkFolderPath(cfg)
+	doneFolder, ok := cfg.StatusFolders[defaultReleaseStatus]
+	if !ok {
+		return fmt.Errorf("status %q is not configured", defaultReleaseStatus)
+	}
+	targetPath := filepath.Join(workFolder, doneFolder, filepath.Base(workItemPath))
+	if status == defaultReleaseStatus {
+		targetPath = workItemPath
+	}
+
+	if status != defaultReleaseStatus {
+		if err := moveWorkItemWithoutCommit(cfg, workItemID, defaultReleaseStatus); err != nil {
+			return fmt.Errorf("failed to move work item to done: %w", err)
+		}
+	}
+
+	if err := updateWorkItemDoneMetadata(targetPath, mergedAt, mergeCommitSHA, prNumber, mergeStrategy, cfg); err != nil {
+		return fmt.Errorf("failed to set completion metadata: %w", err)
+	}
+
+	workItemType, id, title, _, _, err := extractWorkItemMetadata(targetPath, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to read work item metadata: %w", err)
+	}
+	subject, body, err := buildCommitMessage(cfg, workItemType, id, title, status, defaultReleaseStatus)
+	if err != nil {
+		return fmt.Errorf("failed to build commit message: %w", err)
+	}
+
+	commitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if status != defaultReleaseStatus {
+		if err := commitMove(workItemPath, targetPath, subject, body, false); err != nil {
+			return fmt.Errorf("failed to commit: %w", err)
+		}
+	} else {
+		_, _ = executeCommand(commitCtx, "git", []string{"add", targetPath}, repoRoot, false)
+		_, err = executeCommand(commitCtx, "git", []string{"commit", "-m", subject}, repoRoot, false)
+		if err != nil {
+			return fmt.Errorf("failed to commit metadata update: %w", err)
+		}
+	}
+
+	trunkBranch, err := resolveTrunkBranchForLatest(cfg, nil, repoRoot)
+	if err != nil {
+		return err
+	}
+	_, err = executeCommand(commitCtx, "git", []string{"push", remoteName, trunkBranch}, repoRoot, false)
 	return err
 }
 
