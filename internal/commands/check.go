@@ -86,6 +86,14 @@ func runCheckRun(cfg *config.Config, tags []string) error {
 	}
 
 	for _, entry := range checks {
+		desc := entry.Description
+		if desc == "" {
+			desc = "-"
+		}
+		fmt.Println(checkNameStyle(entry.Name))
+		fmt.Println(checkDescStyle(desc))
+		fmt.Println()
+
 		ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
 		// #nosec G204 -- command comes from trusted config (kira.yml), not user input
 		c := exec.CommandContext(ctx, "sh", "-c", entry.Command)
@@ -103,6 +111,7 @@ func runCheckRun(cfg *config.Config, tags []string) error {
 			_, _ = fmt.Fprintf(os.Stderr, "check %q failed: %v\n", entry.Name, err)
 			return fmt.Errorf("check %q failed: %w", entry.Name, err)
 		}
+		fmt.Println() // blank line before next check
 	}
 	return nil
 }
