@@ -2802,6 +2802,73 @@ else
   exit 1
 fi
 
+# Test 36: kira done - complete work item (trunk-only, dry-run, flags, not-on-trunk failure)
+echo ""
+echo "📋 Test 36: kira done command"
+# Ensure we're on main and have a work item in doing
+git checkout main 2>/dev/null || true
+# Add a non-GitHub remote so resolveDoneRemote succeeds (done skips PR steps for non-GitHub)
+git remote add origin https://gitlab.com/e2e/repo.git 2>/dev/null || git remote set-url origin https://gitlab.com/e2e/repo.git
+mkdir -p .work/2_doing
+cat > .work/2_doing/036-done-e2e.prd.md << 'EOF'
+---
+id: 036
+title: Done E2E
+status: doing
+kind: prd
+created: 2024-01-01
+---
+# Content
+EOF
+
+# Require work-item-id
+if ! "$KIRA_BIN" done 2>&1 | grep -q "accepts 1 arg(s)\|received 0\|work-item-id\|required\|Usage"; then
+  echo "  ❌ kira done without work-item-id should fail with usage"
+  exit 1
+fi
+echo "  ✅ kira done requires work-item-id"
+
+# Not on trunk: create branch and run done, expect trunk error
+git add .work/2_doing/036-done-e2e.prd.md
+git commit -m "Add 036 for done e2e" >/dev/null 2>&1 || true
+git checkout -b 036-done-feature 2>/dev/null || true
+DONE_NOT_TRUNK=$("$KIRA_BIN" done 036 2>&1) || true
+if echo "$DONE_NOT_TRUNK" | grep -q "trunk\|Cannot run 'kira done'"; then
+  echo "  ✅ kira done on feature branch fails with trunk message"
+else
+  echo "  ❌ kira done on feature branch should fail with trunk message"
+  echo "Output: $DONE_NOT_TRUNK"
+  exit 1
+fi
+git checkout main 2>/dev/null || true
+
+# Dry-run on trunk (non-GitHub remote: validates trunk and work item, skips PR)
+DONE_DRY=$("$KIRA_BIN" done 036 --dry-run 2>&1)
+if echo "$DONE_DRY" | grep -q "DRY RUN\|not GitHub\|validated"; then
+  echo "  ✅ kira done --dry-run runs validation and skips PR for non-GitHub"
+else
+  echo "  ❌ kira done --dry-run should succeed on trunk"
+  echo "Output: $DONE_DRY"
+  exit 1
+fi
+
+# Help shows flags
+if "$KIRA_BIN" done --help 2>&1 | grep -q "merge-strategy\|no-cleanup\|dry-run\|force"; then
+  echo "  ✅ kira done --help documents flags"
+else
+  echo "  ❌ kira done --help should document flags"
+  exit 1
+fi
+
+# Invalid work item ID
+if ! "$KIRA_BIN" done abc 2>&1 | grep -q "invalid work item ID"; then
+  echo "  ❌ kira done abc should fail with invalid work item ID"
+  exit 1
+fi
+echo "  ✅ kira done with invalid ID fails"
+
+echo "  ✅ kira done (trunk check, dry-run, flags, validation)"
+
 # Cleanup
 echo ""
 if [ "$KEEP" -eq 1 ] || [ "${KEEP_TEST_DIR:-0}" -ne 0 ]; then
@@ -2852,6 +2919,7 @@ echo "  ✅ Doctor field fixes"
 echo "  ✅ Backward compatibility"
 echo "  ✅ Slice command (add, task add, show)"
 echo "  ✅ kira review (submit for review, dry-run, move)"
+echo "  ✅ kira done (trunk check, dry-run, flags, validation)"
 echo ""
 echo "🚀 Kira is ready for use!"
 
