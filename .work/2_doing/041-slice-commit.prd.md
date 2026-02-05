@@ -1,7 +1,7 @@
 ---
 id: 041
 title: slice commit
-status: backlog
+status: doing
 kind: prd
 assigned:
 created: 2026-02-05
