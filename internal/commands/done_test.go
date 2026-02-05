@@ -658,6 +658,23 @@ func TestDeleteBranch(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("422 already deleted returns nil", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == testDoneDeleteRefPath {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(`{"message":"Reference does not exist"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+		baseURL, _ := url.Parse(server.URL + "/api/v3/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+		err := deleteBranch(ctx, client, owner, repo, "014-feature")
+		require.NoError(t, err)
+	})
+
 	t.Run("500 returns error", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == testDoneDeleteRefPath {
@@ -672,5 +689,71 @@ func TestDeleteBranch(t *testing.T) {
 		client.BaseURL = baseURL
 		err := deleteBranch(ctx, client, owner, repo, "014-feature")
 		require.Error(t, err)
+	})
+}
+
+func TestDeleteLocalBranch(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("deletes existing branch", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Create git repo
+		// #nosec G204 - tmpDir is from t.TempDir(), command is fixed
+		require.NoError(t, exec.Command("git", "init").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "add", "f").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "commit", "-m", "initial").Run())
+
+		// Create and checkout a branch
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "checkout", "-b", "test-branch").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "checkout", "main").Run())
+
+		// Verify branch exists
+		// #nosec G204 - command is fixed
+		checkCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/test-branch")
+		require.NoError(t, checkCmd.Run(), "branch should exist before deletion")
+
+		// Delete branch
+		err := deleteLocalBranch(ctx, tmpDir, "test-branch")
+		require.NoError(t, err)
+
+		// Verify branch is gone
+		// #nosec G204 - command is fixed
+		checkCmd = exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/test-branch")
+		require.Error(t, checkCmd.Run(), "branch should not exist after deletion")
+	})
+
+	t.Run("idempotent: returns nil if branch doesn't exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Create git repo
+		// #nosec G204 - tmpDir is from t.TempDir(), command is fixed
+		require.NoError(t, exec.Command("git", "init").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "add", "f").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "commit", "-m", "initial").Run())
+
+		// Try to delete non-existent branch
+		err := deleteLocalBranch(ctx, tmpDir, "non-existent-branch")
+		require.NoError(t, err, "should return nil for non-existent branch (idempotent)")
 	})
 }
