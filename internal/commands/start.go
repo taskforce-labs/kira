@@ -1334,6 +1334,11 @@ func removeWorktree(worktreePath string, force, dryRun bool) error {
 
 	_, err = executeCommand(ctx, "git", args, repoRoot, dryRun)
 	if err != nil {
+		// Idempotent: if worktree doesn't exist, treat as success
+		errStr := err.Error()
+		if strings.Contains(errStr, "is not a working tree") || strings.Contains(errStr, "not a working tree") {
+			return nil
+		}
 		return fmt.Errorf("failed to remove worktree at %s: %w", worktreePath, err)
 	}
 
