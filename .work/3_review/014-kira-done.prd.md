@@ -1,7 +1,7 @@
 ---
 id: 014
 title: kira-done
-status: doing
+status: review
 kind: prd
 assigned:
 estimate:
