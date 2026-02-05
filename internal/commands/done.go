@@ -139,7 +139,7 @@ func executeDone(cmd *cobra.Command, ctx *doneContext) error {
 		return err
 	}
 
-	if err := maybeCleanupBranch(apiCtx, client, owner, repoName, cfg, noCleanup, token, ctx.PR, out); err != nil {
+	if err := maybeCleanupBranch(apiCtx, client, owner, repoName, cfg, noCleanup, token, ctx.PR, ctx.RepoRoot, out); err != nil {
 		return err
 	}
 
@@ -184,22 +184,62 @@ func pullTrunkAndUpdateWorkItem(cfg *config.Config, ctx *doneContext, remoteName
 	return nil
 }
 
-func maybeCleanupBranch(ctx context.Context, client *github.Client, owner, repo string, cfg *config.Config, noCleanup bool, token string, pr *github.PullRequest, out io.Writer) error {
+func maybeCleanupBranch(ctx context.Context, client *github.Client, owner, repo string, cfg *config.Config, noCleanup bool, token string, pr *github.PullRequest, repoRoot string, out io.Writer) error {
 	cleanup := !noCleanup
 	if cfg.Done != nil && cfg.Done.CleanupBranch != nil {
 		cleanup = *cfg.Done.CleanupBranch && !noCleanup
 	}
-	if !cleanup || token == "" || pr == nil || pr.Head == nil || pr.Head.Ref == nil {
+	if !cleanup || pr == nil || pr.Head == nil || pr.Head.Ref == nil {
 		return nil
 	}
 	headRef := pr.Head.GetRef()
-	donePrintf(out, "  Deleting feature branch %s...\n", headRef)
-	if err := git.WithRateLimitRetry(ctx, 2, func() error {
-		return deleteBranch(ctx, client, owner, repo, headRef)
-	}); err != nil {
-		return fmt.Errorf("delete branch failed: %w", err)
+
+	// Delete local branch first (idempotent: skip if doesn't exist)
+	donePrintf(out, "  Deleting local branch %s...\n", headRef)
+	if err := deleteLocalBranch(ctx, repoRoot, headRef); err != nil {
+		// Log but don't fail - local branch might not exist
+		donePrintln(out, "  ⚠ Local branch not found (may already be deleted)")
+	} else {
+		donePrintln(out, "  ✓ Local branch deleted")
 	}
-	donePrintln(out, "  ✓ Branch deleted")
+
+	// Delete remote branch (idempotent: deleteBranch handles 404/422 as success)
+	if token != "" {
+		donePrintf(out, "  Deleting remote branch %s...\n", headRef)
+		if err := git.WithRateLimitRetry(ctx, 2, func() error {
+			return deleteBranch(ctx, client, owner, repo, headRef)
+		}); err != nil {
+			return fmt.Errorf("delete remote branch failed: %w", err)
+		}
+		donePrintln(out, "  ✓ Remote branch deleted")
+	}
+	return nil
+}
+
+// deleteLocalBranch deletes a local git branch. Idempotent: returns nil if branch doesn't exist.
+func deleteLocalBranch(ctx context.Context, repoRoot, branchName string) error {
+	// Check if branch exists first
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, err := executeCommand(checkCtx, "git", []string{"show-ref", "--verify", "--quiet", "refs/heads/" + branchName}, repoRoot, false)
+	if err != nil {
+		// Branch doesn't exist - idempotent, return success
+		return nil
+	}
+
+	// Branch exists, delete it
+	deleteCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, err = executeCommand(deleteCtx, "git", []string{"branch", "-d", branchName}, repoRoot, false)
+	if err != nil {
+		// Try force delete if regular delete fails (e.g., branch not fully merged)
+		forceCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		_, err = executeCommand(forceCtx, "git", []string{"branch", "-D", branchName}, repoRoot, false)
+		if err != nil {
+			return fmt.Errorf("failed to delete local branch: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -521,7 +561,7 @@ func pullTrunk(ctx context.Context, repoRoot, remoteName, trunkBranch string) er
 	return err
 }
 
-// deleteBranch deletes the feature branch via GitHub API. Idempotent: 404 (ref already gone) is treated as success.
+// deleteBranch deletes the feature branch via GitHub API. Idempotent: 404/422 (ref already gone) is treated as success.
 func deleteBranch(ctx context.Context, client *github.Client, owner, repo, branchName string) error {
 	ref := "heads/" + branchName
 	err := git.DeleteRef(ctx, client, owner, repo, ref)
@@ -529,8 +569,13 @@ func deleteBranch(ctx context.Context, client *github.Client, owner, repo, branc
 		return nil
 	}
 	var errResp *github.ErrorResponse
-	if errors.As(err, &errResp) && errResp.Response != nil && errResp.Response.StatusCode == http.StatusNotFound {
-		return nil
+	if errors.As(err, &errResp) && errResp.Response != nil {
+		statusCode := errResp.Response.StatusCode
+		// 404: Reference not found (already deleted)
+		// 422: Reference does not exist (already deleted or invalid)
+		if statusCode == http.StatusNotFound || statusCode == http.StatusUnprocessableEntity {
+			return nil
+		}
 	}
 	return err
 }
