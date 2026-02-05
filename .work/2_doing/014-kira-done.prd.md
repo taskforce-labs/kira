@@ -1,7 +1,7 @@
 ---
 id: 014
 title: kira-done
-status: backlog
+status: doing
 kind: prd
 assigned:
 estimate:
