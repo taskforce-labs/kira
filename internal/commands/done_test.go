@@ -2,11 +2,16 @@ package commands
 
 import (
 	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/google/go-github/v61/github"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -259,5 +264,108 @@ func TestDoneWorkItemAndPRResolution(t *testing.T) {
 		rootCmd.SetArgs([]string{"done", "014", "--dry-run"})
 		err := rootCmd.Execute()
 		require.NoError(t, err)
+	})
+}
+
+const (
+	testDoneStatusPath   = "/api/v3/repos/owner/repo/commits/abc123/status"
+	testDoneCommentsPath = "/api/v3/repos/owner/repo/pulls/42/comments"
+)
+
+func TestRunPRChecks(t *testing.T) {
+	ctx := context.Background()
+	owner, repo := "owner", "repo"
+	headSHA := "abc123"
+	prNum := 42
+	pr := &github.PullRequest{
+		Number: github.Int(prNum),
+		Head: &github.PullRequestBranch{
+			SHA: github.String(headSHA),
+		},
+	}
+
+	t.Run("checks passing and no comments returns nil", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case testDoneStatusPath:
+				_, _ = w.Write([]byte(`{"state":"success","total_count":1}`))
+			case testDoneCommentsPath:
+				_, _ = w.Write([]byte(`[]`))
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer server.Close()
+
+		baseURL, _ := url.Parse(server.URL + "/api/v3/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+
+		err := runPRChecks(ctx, client, owner, repo, pr, true, true, false)
+		require.NoError(t, err)
+	})
+
+	t.Run("checks failing returns error unless force", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case testDoneStatusPath:
+				_, _ = w.Write([]byte(`{"state":"failure","total_count":2}`))
+			case testDoneCommentsPath:
+				_, _ = w.Write([]byte(`[]`))
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer server.Close()
+
+		baseURL, _ := url.Parse(server.URL + "/api/v3/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+
+		err := runPRChecks(ctx, client, owner, repo, pr, true, true, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required status checks have not passed")
+		assert.Contains(t, err.Error(), "state: failure")
+		assert.Contains(t, err.Error(), "--force")
+
+		errForce := runPRChecks(ctx, client, owner, repo, pr, true, true, true)
+		require.NoError(t, errForce)
+	})
+
+	t.Run("unresolved comments returns error unless force", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case testDoneStatusPath:
+				_, _ = w.Write([]byte(`{"state":"success","total_count":0}`))
+			case testDoneCommentsPath:
+				_, _ = w.Write([]byte(`[{"id":1,"body":"comment"}]`))
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer server.Close()
+
+		baseURL, _ := url.Parse(server.URL + "/api/v3/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+
+		err := runPRChecks(ctx, client, owner, repo, pr, true, true, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "review comment")
+		assert.Contains(t, err.Error(), "42")
+		assert.Contains(t, err.Error(), "--force")
+
+		errForce := runPRChecks(ctx, client, owner, repo, pr, true, true, true)
+		require.NoError(t, errForce)
+	})
+
+	t.Run("nil pr head SHA returns error", func(t *testing.T) {
+		badPR := &github.PullRequest{Number: github.Int(1)}
+		err := runPRChecks(ctx, nil, owner, repo, badPR, true, true, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no head SHA")
 	})
 }
