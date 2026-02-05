@@ -321,6 +321,152 @@ func TestSliceCommitRequiresSubcommand(t *testing.T) {
 	})
 }
 
+func TestSliceCommitAdd(t *testing.T) {
+	workItemWithSlices := `---
+id: 041
+title: slice commit
+status: doing
+kind: prd
+---
+# slice commit
+## Slices
+### MySlice
+- [ ] T001: First task
+`
+	t.Run("add with explicit work-item-id adds task to slice", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemWithSlices), 0o600))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "add", "--no-commit", "041", "MySlice", "New task"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+
+		cfg, _ := config.LoadConfig()
+		_, slices, err := loadSlicesFromFile(".work/2_doing/041-slice-commit.prd.md", cfg)
+		require.NoError(t, err)
+		require.Len(t, slices, 1)
+		require.Len(t, slices[0].Tasks, 2)
+		assert.Equal(t, "T002", slices[0].Tasks[1].ID)
+		assert.Equal(t, "New task", slices[0].Tasks[1].Description)
+	})
+	t.Run("add with 2 args uses doing folder when one work item", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemWithSlices), 0o600))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "add", "--no-commit", "MySlice", "Another task"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+
+		cfg, _ := config.LoadConfig()
+		_, slices, err := loadSlicesFromFile(".work/2_doing/041-slice-commit.prd.md", cfg)
+		require.NoError(t, err)
+		require.Len(t, slices[0].Tasks, 2)
+		assert.Equal(t, "Another task", slices[0].Tasks[1].Description)
+	})
+	t.Run("add with no work-item-id and zero work items in doing returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "add", "SomeSlice", "desc"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no work item in doing folder")
+	})
+	t.Run("add with no work-item-id and multiple work items in doing returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/041-a.prd.md", []byte(workItemWithSlices), 0o600))
+		other := `---
+id: 042
+title: other
+status: doing
+kind: prd
+---
+# other
+## Slices
+### S1
+- [ ] T001: x
+`
+		require.NoError(t, os.WriteFile(".work/2_doing/042-b.prd.md", []byte(other), 0o600))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "add", "S1", "desc"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "multiple work items in doing folder")
+	})
+}
+
+func TestSliceCommitRemove(t *testing.T) {
+	workItemTwoSlices := `---
+id: 041
+title: slice commit
+status: doing
+kind: prd
+---
+# slice commit
+## Slices
+### Keep
+- [ ] T001: Keep task
+### RemoveMe
+- [ ] T002: Remove task
+`
+	t.Run("remove with explicit work-item-id and slice name removes slice", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemTwoSlices), 0o600))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "remove", "--yes", "--no-commit", "041", "RemoveMe"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+
+		cfg, _ := config.LoadConfig()
+		_, slices, err := loadSlicesFromFile(".work/2_doing/041-slice-commit.prd.md", cfg)
+		require.NoError(t, err)
+		require.Len(t, slices, 1)
+		assert.Equal(t, "Keep", slices[0].Name)
+	})
+	t.Run("remove with 1 arg uses doing folder when one work item", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemTwoSlices), 0o600))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "remove", "--yes", "--no-commit", "RemoveMe"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+
+		cfg, _ := config.LoadConfig()
+		_, slices, err := loadSlicesFromFile(".work/2_doing/041-slice-commit.prd.md", cfg)
+		require.NoError(t, err)
+		require.Len(t, slices, 1)
+		assert.Equal(t, "Keep", slices[0].Name)
+	})
+	t.Run("remove with no work-item-id and zero work items in doing returns error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "remove", "SomeSlice"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no work item in doing folder")
+	})
+}
+
 func TestSliceAddAndShow(t *testing.T) {
 	t.Run("slice add then show", func(t *testing.T) {
 		tmpDir := t.TempDir()
