@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -232,5 +233,86 @@ func TestFindPullRequestByWorkItemID(t *testing.T) {
 		assert.Equal(t, 2, pr.GetNumber())
 		assert.Equal(t, "closed", pr.GetState())
 		assert.GreaterOrEqual(t, callCount, 2)
+	})
+}
+
+func TestIsRateLimitError(t *testing.T) {
+	t.Run("nil is not rate limit", func(t *testing.T) {
+		assert.False(t, IsRateLimitError(nil))
+	})
+	t.Run("other error is not rate limit", func(t *testing.T) {
+		assert.False(t, IsRateLimitError(errors.New("other")))
+	})
+	t.Run("403 ErrorResponse is rate limit", func(t *testing.T) {
+		err := &github.ErrorResponse{Response: &http.Response{StatusCode: 403}}
+		assert.True(t, IsRateLimitError(err))
+	})
+	t.Run("429 ErrorResponse is rate limit", func(t *testing.T) {
+		err := &github.ErrorResponse{Response: &http.Response{StatusCode: 429}}
+		assert.True(t, IsRateLimitError(err))
+	})
+	t.Run("404 is not rate limit", func(t *testing.T) {
+		err := &github.ErrorResponse{Response: &http.Response{StatusCode: 404}}
+		assert.False(t, IsRateLimitError(err))
+	})
+}
+
+func TestWithRateLimitRetry(t *testing.T) {
+	ctx := context.Background()
+	t.Run("succeeds on first call", func(t *testing.T) {
+		calls := 0
+		err := WithRateLimitRetry(ctx, 2, func() error {
+			calls++
+			return nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, calls)
+	})
+	t.Run("returns non-rate-limit error immediately", func(t *testing.T) {
+		calls := 0
+		wantErr := errors.New("other")
+		err := WithRateLimitRetry(ctx, 2, func() error {
+			calls++
+			return wantErr
+		})
+		assert.Same(t, wantErr, err)
+		assert.Equal(t, 1, calls)
+	})
+	t.Run("retries on rate limit then succeeds", func(t *testing.T) {
+		calls := 0
+		// Retry-After: 1 keeps test fast (1s wait before retry).
+		resp := &http.Response{StatusCode: 403, Header: http.Header{"Retry-After": {"1"}}}
+		err := WithRateLimitRetry(ctx, 2, func() error {
+			calls++
+			if calls < 2 {
+				return &github.ErrorResponse{Response: resp}
+			}
+			return nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 2, calls)
+	})
+	t.Run("respects context cancel", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(ctx)
+		cancel()
+		calls := 0
+		err := WithRateLimitRetry(ctx, 2, func() error {
+			calls++
+			return &github.ErrorResponse{Response: &http.Response{StatusCode: 403}}
+		})
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, context.Canceled))
+		assert.Equal(t, 1, calls)
+	})
+	t.Run("returns last error after max retries", func(t *testing.T) {
+		calls := 0
+		// Retry-After: 1 so we don't block 60s between retries.
+		rateErr := &github.ErrorResponse{Response: &http.Response{StatusCode: 403, Header: http.Header{"Retry-After": {"1"}}}}
+		err := WithRateLimitRetry(ctx, 2, func() error {
+			calls++
+			return rateErr
+		})
+		assert.Same(t, rateErr, err)
+		assert.Equal(t, 3, calls) // initial + 2 retries
 	})
 }
