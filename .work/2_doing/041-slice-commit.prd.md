@@ -96,24 +96,24 @@ Existing behaviour in 026: `kira slice add`, `kira slice remove`, `kira slice ta
 
 ### Replace commit with subcommands
 Commit: Replace slice commit with subcommands; add add, remove, generate
-- [ ] T001: Remove old slice commit behaviour: drop `commit [work-item-id] [message]`; require a subcommand (add, remove, generate); print usage and exit non-zero when no subcommand
-- [ ] T002: Add `slice commit add` and `slice commit remove` subcommands; wire to existing slice task add and slice remove logic (or delegate); support optional work-item-id and doing-folder resolution
-- [ ] T003: Add `slice commit generate` subcommand (stub or full); support optional work-item-id and doing-folder resolution
+- [x] T001: Remove old slice commit behaviour: drop `commit [work-item-id] [message]`; require a subcommand (add, remove, generate); print usage and exit non-zero when no subcommand
+- [x] T002: Add `slice commit add` and `slice commit remove` subcommands; wire to existing slice task add and slice remove logic (or delegate); support optional work-item-id and doing-folder resolution
+- [x] T003: Add `slice commit generate` subcommand (stub or full); support optional work-item-id and doing-folder resolution
 
 ### Commit add and remove
 Commit: Complete slice commit add and remove: delegate to task add and slice remove
-- [ ] T004: Implement `slice commit add [<work-item-id>] <slice-name> <task-description>`; delegate to runSliceTaskAdd; optional work-item-id from doing folder
-- [ ] T005: Implement `slice commit remove [<work-item-id>] <slice-name>`; delegate to runSliceRemove; optional work-item-id from doing folder; same confirmation/--yes as slice remove
+- [x] T004: Implement `slice commit add [<work-item-id>] <slice-name> <task-description>`; delegate to runSliceTaskAdd; optional work-item-id from doing folder
+- [x] T005: Implement `slice commit remove [<work-item-id>] <slice-name>`; delegate to runSliceRemove; optional work-item-id from doing folder; same confirmation/--yes as slice remove
 
 ### Generate message format and slice selector
 Commit: Complete slice commit generate: new message format, current/previous/slice-name selector
-- [ ] T006: Implement generate slice selector (current | previous | <slice-name>); default current; use existing task-change detection and fallbacks for message content
-- [ ] T007: Format output exactly: line 1 <work-item-id> <message>, line 2 <work-item-id>-<kebab-title>, line 3 <slice-name>, then <task-id> <description> per task (for chosen slice or changed tasks per product decision)
+- [x] T006: Implement generate slice selector (current | previous | <slice-name>); default current; use existing task-change detection and fallbacks for message content
+- [x] T007: Format output exactly: line 1 <work-item-id> <message>, line 2 <work-item-id>-<kebab-title>, line 3 <slice-name>, then <task-id> <description> per task (for chosen slice or changed tasks per product decision)
 
 ### Tests and docs
 Commit: Complete slice commit tests and docs: unit/integration tests, AGENTS.md and docs
-- [ ] T008: Add unit and/or integration tests for add, remove, generate (format and slice selector), optional work-item-id, doing-folder resolution errors
-- [ ] T009: Update AGENTS.md and any docs that reference `kira slice commit` to describe new subcommands and workflow
+- [x] T008: Add unit and/or integration tests for add, remove, generate (format and slice selector), optional work-item-id, doing-folder resolution errors
+- [x] T009: Update AGENTS.md and any docs that reference `kira slice commit` to describe new subcommands and workflow
 
 ## Implementation Notes
 
