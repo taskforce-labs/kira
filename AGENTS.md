@@ -29,7 +29,7 @@ Work items can include a `## Slices` section with slices and tasks (e.g. `### Sl
 **Agent implementation loop (recommended):**
 1. Get context: `kira slice current` or `kira slice task current` (omit work-item-id when one work item is in doing). Use `--output json` for machine-readable output.
 2. Implement the current task (use task_id and description from step 1).
-3. Mark task done: `kira slice task current toggle`, then optionally `kira slice commit`.
+3. Mark task done: `kira slice task current toggle`, then optionally create a commit: run `kira slice commit generate` and use the output with `git commit -F -`, or use `kira slice commit add` / `kira slice commit remove` to add a task or remove a slice.
 4. If you edited the Slices section markdown directly, run `kira slice lint` and fix any reported errors.
 5. Repeat from step 1 for the next task, or stop if no open tasks.
 
