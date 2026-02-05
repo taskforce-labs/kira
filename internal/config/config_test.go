@@ -168,6 +168,41 @@ review:
 	})
 }
 
+func TestDoneConfigDefaults(t *testing.T) {
+	t.Run("applies default done config when not specified", func(t *testing.T) {
+		_ = os.Remove("kira.yml")
+		_ = os.Remove(".work/kira.yml")
+
+		cfg, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Done)
+		assert.Equal(t, "rebase", cfg.Done.MergeStrategy)
+		assert.Equal(t, "{id} merge: {title}", cfg.Done.MergeCommitMessage)
+		assert.Equal(t, "{id}: {title}", cfg.Done.SquashCommitMessage)
+	})
+
+	t.Run("preserves custom done config", func(t *testing.T) {
+		testConfig := `version: "1.0"
+done:
+  merge_strategy: squash
+  merge_commit_message: "Merge {id}"
+  squash_commit_message: "Squash {id}: {title}"
+  cleanup_branch: false
+`
+		require.NoError(t, os.WriteFile("kira.yml", []byte(testConfig), 0o600))
+		defer func() { _ = os.Remove("kira.yml") }()
+
+		cfg, err := LoadConfig()
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Done)
+		assert.Equal(t, "squash", cfg.Done.MergeStrategy)
+		assert.Equal(t, "Merge {id}", cfg.Done.MergeCommitMessage)
+		assert.Equal(t, "Squash {id}: {title}", cfg.Done.SquashCommitMessage)
+		require.NotNil(t, cfg.Done.CleanupBranch)
+		assert.False(t, *cfg.Done.CleanupBranch)
+	})
+}
+
 func TestSlicesConfigDefaults(t *testing.T) {
 	t.Run("applies default slices config when not specified", func(t *testing.T) {
 		_ = os.Remove("kira.yml")
