@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -367,5 +368,61 @@ func TestRunPRChecks(t *testing.T) {
 		err := runPRChecks(ctx, nil, owner, repo, badPR, true, true, false)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no head SHA")
+	})
+}
+
+func TestBuildDoneCommitMessage(t *testing.T) {
+	assert.Equal(t, "014: My feature", buildDoneCommitMessage("{id}: {title}", "014", "My feature"))
+	assert.Equal(t, "014 merge: My feature", buildDoneCommitMessage("{id} merge: {title}", "014", "My feature"))
+	assert.Equal(t, "no placeholders", buildDoneCommitMessage("no placeholders", "014", "Title"))
+}
+
+func TestMergePullRequest(t *testing.T) {
+	ctx := context.Background()
+	owner, repo := "o", "r"
+	pr := &github.PullRequest{Number: github.Int(10)}
+
+	t.Run("calls merge API with strategy and message", func(t *testing.T) {
+		var mergeMethod, commitMsg string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPut || r.URL.Path != "/api/v3/repos/o/r/pulls/10/merge" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			var body struct {
+				CommitMessage string `json:"commit_message"`
+				MergeMethod   string `json:"merge_method"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mergeMethod = body.MergeMethod
+			commitMsg = body.CommitMessage
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"sha":"merged-sha","merged":true,"message":"Merged"}`))
+		}))
+		defer server.Close()
+
+		baseURL, _ := url.Parse(server.URL + "/api/v3/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+
+		err := mergePullRequest(ctx, client, owner, repo, pr, "squash", "014: My PR")
+		require.NoError(t, err)
+		assert.Equal(t, "squash", mergeMethod)
+		assert.Equal(t, "014: My PR", commitMsg)
+	})
+
+	t.Run("nil PR returns error", func(t *testing.T) {
+		client := github.NewClient(nil)
+		err := mergePullRequest(ctx, client, owner, repo, nil, "merge", "msg")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid pull request")
+	})
+}
+
+func TestPullTrunk(t *testing.T) {
+	ctx := context.Background()
+	t.Run("invalid repo root returns error", func(t *testing.T) {
+		err := pullTrunk(ctx, "/nonexistent-dir-kira-done-test", "origin", "main")
+		require.Error(t, err)
 	})
 }

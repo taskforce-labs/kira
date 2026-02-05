@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/go-github/v61/github"
@@ -197,6 +198,30 @@ func runPRChecks(ctx context.Context, client *github.Client, owner, repo string,
 	}
 
 	return nil
+}
+
+// buildDoneCommitMessage fills {id} and {title} in the template. Used for merge/squash commit messages.
+func buildDoneCommitMessage(template, id, title string) string {
+	s := strings.ReplaceAll(template, "{id}", id)
+	s = strings.ReplaceAll(s, "{title}", title)
+	return s
+}
+
+// mergePullRequest merges the PR with the given strategy and commit message.
+// PR must be open; caller should skip when git.IsPRClosedOrMerged(pr).
+func mergePullRequest(ctx context.Context, client *github.Client, owner, repo string, pr *github.PullRequest, mergeStrategy, commitMessage string) error {
+	if pr == nil || pr.Number == nil {
+		return fmt.Errorf("invalid pull request")
+	}
+	number := pr.GetNumber()
+	_, err := git.MergePullRequest(ctx, client, owner, repo, number, commitMessage, mergeStrategy)
+	return err
+}
+
+// pullTrunk runs git pull <remote> <trunkBranch> in repoRoot.
+func pullTrunk(ctx context.Context, repoRoot, remoteName, trunkBranch string) error {
+	_, err := executeCommand(ctx, "git", []string{"pull", remoteName, trunkBranch}, repoRoot, false)
+	return err
 }
 
 // validateTrunkBranch ensures the current branch is the configured trunk branch.
