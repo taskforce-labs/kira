@@ -1,7 +1,7 @@
 ---
 id: 034
 title: ci update pr details
-status: backlog
+status: doing
 kind: prd
 assigned:
 created: 2026-02-01
