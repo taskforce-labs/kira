@@ -438,12 +438,15 @@ const (
 	testDoneStatusPath    = "/api/v3/repos/owner/repo/commits/abc123/status"
 	testDoneCommentsPath  = "/api/v3/repos/owner/repo/pulls/42/comments"
 	testDoneDeleteRefPath = "/api/v3/repos/o/r/git/refs/heads/014-feature"
+	testOwner             = "owner"
+	testRepo              = "repo"
+	testHeadSHA           = "abc123"
 )
 
 func TestRunPRChecks(t *testing.T) {
 	ctx := context.Background()
-	owner, repo := "owner", "repo"
-	headSHA := "abc123"
+	owner, repo := testOwner, testRepo
+	headSHA := testHeadSHA
 	prNum := 42
 	pr := &github.PullRequest{
 		Number: github.Int(prNum),
@@ -452,6 +455,7 @@ func TestRunPRChecks(t *testing.T) {
 		},
 	}
 
+	// Basic checks
 	t.Run("checks passing and no comments returns nil", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -535,6 +539,113 @@ func TestRunPRChecks(t *testing.T) {
 		err := runPRChecks(ctx, nil, owner, repo, badPR, true, true, false)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no head SHA")
+	})
+}
+
+func TestRunPRChecksMergeable(t *testing.T) {
+	ctx := context.Background()
+	owner, repo := testOwner, testRepo
+	headSHA := testHeadSHA
+	prNum := 42
+
+	t.Run("PR with Mergeable=true passes without API call", func(t *testing.T) {
+		mergeablePR := &github.PullRequest{
+			Number:    github.Int(prNum),
+			Mergeable: github.Bool(true),
+			Head: &github.PullRequestBranch{
+				SHA: github.String(headSHA),
+			},
+		}
+		// No server needed - should use Mergeable field directly
+		client := github.NewClient(nil)
+		err := runPRChecks(ctx, client, owner, repo, mergeablePR, true, false, false)
+		require.NoError(t, err)
+	})
+
+	t.Run("PR with Mergeable=false fails", func(t *testing.T) {
+		mergeablePR := &github.PullRequest{
+			Number:    github.Int(prNum),
+			Mergeable: github.Bool(false),
+			Head: &github.PullRequestBranch{
+				SHA: github.String(headSHA),
+			},
+		}
+		client := github.NewClient(nil)
+		err := runPRChecks(ctx, client, owner, repo, mergeablePR, true, false, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not mergeable")
+		assert.Contains(t, err.Error(), "--force")
+	})
+}
+
+func TestRunPRChecksPending(t *testing.T) {
+	ctx := context.Background()
+	owner, repo := testOwner, testRepo
+	headSHA := testHeadSHA
+	prNum := 42
+
+	t.Run("pending status with no failing checks passes", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case testDoneStatusPath:
+				// Pending state with all checks pending or success
+				_, _ = w.Write([]byte(`{"state":"pending","total_count":2,"statuses":[{"state":"pending","context":"check1"},{"state":"success","context":"check2"}]}`))
+			case testDoneCommentsPath:
+				_, _ = w.Write([]byte(`[]`))
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer server.Close()
+
+		baseURL, _ := url.Parse(server.URL + "/api/v3/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+
+		// PR with Mergeable=nil (not set) to trigger combined status check
+		prNoMergeable := &github.PullRequest{
+			Number:    github.Int(prNum),
+			Mergeable: nil,
+			Head: &github.PullRequestBranch{
+				SHA: github.String(headSHA),
+			},
+		}
+		err := runPRChecks(ctx, client, owner, repo, prNoMergeable, true, false, false)
+		require.NoError(t, err, "pending status with no failing checks should pass")
+	})
+
+	t.Run("pending status with failing checks fails", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case testDoneStatusPath:
+				// Pending state but one check is failing
+				_, _ = w.Write([]byte(`{"state":"pending","total_count":2,"statuses":[{"state":"failure","context":"check1"},{"state":"pending","context":"check2"}]}`))
+			case testDoneCommentsPath:
+				_, _ = w.Write([]byte(`[]`))
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer server.Close()
+
+		baseURL, _ := url.Parse(server.URL + "/api/v3/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+
+		prNoMergeable := &github.PullRequest{
+			Number:    github.Int(prNum),
+			Mergeable: nil,
+			Head: &github.PullRequestBranch{
+				SHA: github.String(headSHA),
+			},
+		}
+		err := runPRChecks(ctx, client, owner, repo, prNoMergeable, true, false, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "required status checks have not passed")
+		assert.Contains(t, err.Error(), "check1")
+		assert.Contains(t, err.Error(), "failure")
 	})
 }
 

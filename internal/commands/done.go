@@ -510,30 +510,80 @@ func runPRChecks(ctx context.Context, client *github.Client, owner, repo string,
 	if pr == nil || pr.Head == nil || pr.Head.SHA == nil {
 		return fmt.Errorf("pull request has no head SHA")
 	}
-	headSHA := pr.Head.GetSHA()
 	prNum := pr.GetNumber()
 
 	if requireChecks && !force {
-		status, err := git.GetCombinedStatus(ctx, client, owner, repo, headSHA)
-		if err != nil {
-			return fmt.Errorf("failed to get PR status checks: %w", err)
-		}
-		state := status.GetState()
-		if state != "success" {
-			return fmt.Errorf("required status checks have not passed for PR #%d (state: %s). Fix the failing checks or use --force to merge anyway", prNum, state)
+		if err := checkPRStatusChecks(ctx, client, owner, repo, pr); err != nil {
+			return err
 		}
 	}
 
 	if requireCommentsResolved && !force {
-		comments, err := git.ListPullRequestReviewComments(ctx, client, owner, repo, prNum)
-		if err != nil {
-			return fmt.Errorf("failed to list PR review comments: %w", err)
-		}
-		if len(comments) > 0 {
-			return fmt.Errorf("pull request #%d has %d review comment(s). Resolve all threads in the GitHub UI or use --force to merge anyway", prNum, len(comments))
+		if err := checkPRComments(ctx, client, owner, repo, prNum); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+// checkPRStatusChecks verifies that PR status checks have passed.
+// Uses PR.Mergeable if available, otherwise falls back to combined status API.
+func checkPRStatusChecks(ctx context.Context, client *github.Client, owner, repo string, pr *github.PullRequest) error {
+	prNum := pr.GetNumber()
+
+	// First, try to use the PR's Mergeable field if available (most reliable)
+	if pr.Mergeable != nil {
+		if !*pr.Mergeable {
+			return fmt.Errorf("pull request #%d is not mergeable. Check the PR page for details or use --force to merge anyway", prNum)
+		}
+		// If mergeable is true, checks have passed - we're good
+		return nil
+	}
+
+	// Fallback: check combined status, but allow "pending" if no checks are failing
+	return checkCombinedStatus(ctx, client, owner, repo, pr)
+}
+
+// checkCombinedStatus checks the combined status API and only fails if checks are actually failing.
+func checkCombinedStatus(ctx context.Context, client *github.Client, owner, repo string, pr *github.PullRequest) error {
+	headSHA := pr.Head.GetSHA()
+	prNum := pr.GetNumber()
+
+	status, err := git.GetCombinedStatus(ctx, client, owner, repo, headSHA)
+	if err != nil {
+		return fmt.Errorf("failed to get PR status checks: %w", err)
+	}
+
+	state := status.GetState()
+	// Only fail if state is "failure" or "error", not "pending"
+	// "pending" means checks are still running but haven't failed yet
+	if state == "failure" || state == "error" {
+		return fmt.Errorf("required status checks have not passed for PR #%d (state: %s). Fix the failing checks or use --force to merge anyway", prNum, state)
+	}
+
+	// If state is "pending", check individual statuses to see if any are failing
+	if state == "pending" {
+		for _, s := range status.Statuses {
+			if s.State != nil && (*s.State == "failure" || *s.State == "error") {
+				return fmt.Errorf("required status checks have not passed for PR #%d (check '%s' is %s). Fix the failing checks or use --force to merge anyway", prNum, s.GetContext(), *s.State)
+			}
+		}
+		// All checks are pending or success - allow merge (pending checks will complete)
+	}
+
+	return nil
+}
+
+// checkPRComments verifies that there are no unresolved review comments.
+func checkPRComments(ctx context.Context, client *github.Client, owner, repo string, prNum int) error {
+	comments, err := git.ListPullRequestReviewComments(ctx, client, owner, repo, prNum)
+	if err != nil {
+		return fmt.Errorf("failed to list PR review comments: %w", err)
+	}
+	if len(comments) > 0 {
+		return fmt.Errorf("pull request #%d has %d review comment(s). Resolve all threads in the GitHub UI or use --force to merge anyway", prNum, len(comments))
+	}
 	return nil
 }
 
