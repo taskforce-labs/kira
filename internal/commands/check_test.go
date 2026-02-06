@@ -60,7 +60,20 @@ func TestRunCheckRun(t *testing.T) {
 				{Name: "fail", Command: "false", Description: "fails"},
 			},
 		}
+		// Suppress stdout/stderr output during test to avoid polluting test output
+		oldStdout := os.Stdout
+		oldStderr := os.Stderr
+		stdoutR, stdoutW, _ := os.Pipe()
+		stderrR, stderrW, _ := os.Pipe()
+		os.Stdout = stdoutW
+		os.Stderr = stderrW
 		err := runCheckRun(cfg, nil)
+		_ = stdoutW.Close()
+		_ = stderrW.Close()
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+		_, _ = io.Copy(io.Discard, stdoutR) // Drain the pipes
+		_, _ = io.Copy(io.Discard, stderrR)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "fail")
 		assert.Contains(t, err.Error(), "failed")
@@ -75,7 +88,20 @@ func TestRunCheckRun(t *testing.T) {
 				{Name: "second", Command: "true", Description: "would succeed"},
 			},
 		}
+		// Suppress stdout/stderr output during test to avoid polluting test output
+		oldStdout := os.Stdout
+		oldStderr := os.Stderr
+		stdoutR, stdoutW, _ := os.Pipe()
+		stderrR, stderrW, _ := os.Pipe()
+		os.Stdout = stdoutW
+		os.Stderr = stderrW
 		err := runCheckRun(cfg, nil)
+		_ = stdoutW.Close()
+		_ = stderrW.Close()
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+		_, _ = io.Copy(io.Discard, stdoutR) // Drain the pipes
+		_, _ = io.Copy(io.Discard, stderrR)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "first")
 		// Second check should not have run (we can't easily verify without side effects)
