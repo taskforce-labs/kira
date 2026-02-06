@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -713,11 +714,17 @@ func TestDeleteLocalBranch(t *testing.T) {
 		// #nosec G204 - command is fixed
 		require.NoError(t, exec.Command("git", "commit", "-m", "initial").Run())
 
+		// Get the current branch name (default branch may be main, master, etc.)
+		// #nosec G204 - command is fixed
+		currentBranchOutput, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
+		require.NoError(t, err)
+		defaultBranch := strings.TrimSpace(string(currentBranchOutput))
+
 		// Create and checkout a branch
 		// #nosec G204 - command is fixed
 		require.NoError(t, exec.Command("git", "checkout", "-b", "test-branch").Run())
 		// #nosec G204 - command is fixed
-		require.NoError(t, exec.Command("git", "checkout", "main").Run())
+		require.NoError(t, exec.Command("git", "checkout", defaultBranch).Run())
 
 		// Verify branch exists
 		// #nosec G204 - command is fixed
@@ -725,7 +732,7 @@ func TestDeleteLocalBranch(t *testing.T) {
 		require.NoError(t, checkCmd.Run(), "branch should exist before deletion")
 
 		// Delete branch
-		err := deleteLocalBranch(ctx, tmpDir, "test-branch")
+		err = deleteLocalBranch(ctx, tmpDir, "test-branch")
 		require.NoError(t, err)
 
 		// Verify branch is gone
