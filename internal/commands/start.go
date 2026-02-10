@@ -2199,8 +2199,20 @@ func commitStatusChange(dir, oldPath, newPath, message string) error {
 		// If git rm fails (file wasn't tracked), try git add -u to stage deletions
 		oldDir := filepath.Dir(oldPath)
 		addCtx, addCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
-		_, _ = executeCommand(addCtx, "git", []string{"add", "-u", oldDir}, dir, false)
+		_, fallbackErr := executeCommand(addCtx, "git", []string{"add", "-u", oldDir}, dir, false)
 		addCancel()
+		if fallbackErr != nil {
+			return fmt.Errorf("failed to stage deletion: git rm --cached failed (%v) and git add -u fallback also failed (%w)", err, fallbackErr)
+		}
+	}
+
+	// Verify deletion was staged
+	deletionStaged, err := verifyDeletionStaged(cmdCtx, oldPath, dir, false)
+	if err != nil {
+		return fmt.Errorf("failed to verify deletion was staged: %w", err)
+	}
+	if !deletionStaged {
+		return fmt.Errorf("deletion was not staged: file %s deletion not found in staged changes", oldPath)
 	}
 
 	// Stage the new file addition
