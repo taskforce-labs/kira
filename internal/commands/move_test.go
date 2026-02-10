@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"context"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -391,5 +393,251 @@ func TestMoveWorkItem(t *testing.T) {
 		err := moveWorkItem(cfg, "001", "", false, true)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "target status must be provided when using --dry-run")
+	})
+}
+
+// verifyStagedMove verifies that both deletion and addition are staged (Git may show as D/A or R for rename)
+func verifyStagedMove(t *testing.T, oldPath, newPath string) {
+	cmd := exec.Command("git", "diff", "--cached", "--name-status")
+	output, err := cmd.Output()
+	require.NoError(t, err)
+	outputStr := string(output)
+	// Git may show as deletion+addition (D/A) or rename (R)
+	assert.True(t, strings.Contains(outputStr, "D\t"+oldPath) || (strings.Contains(outputStr, "R") && strings.Contains(outputStr, oldPath)),
+		"Deletion should be staged. Output: %s", outputStr)
+	assert.True(t, strings.Contains(outputStr, "A\t"+newPath) || (strings.Contains(outputStr, "R") && strings.Contains(outputStr, newPath)),
+		"Addition should be staged. Output: %s", outputStr)
+}
+
+func TestStageFileChanges(t *testing.T) {
+	t.Run("stages deletion and addition when git rm --cached succeeds", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create and commit a file
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+		require.NoError(t, exec.Command("git", "add", testFilePath).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Move file on disk (simulating moveWorkItem)
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.Rename(testFilePath, testTargetPath))
+
+		// Stage the changes
+		ctx := context.Background()
+		err := stageFileChanges(ctx, testFilePath, testTargetPath, false)
+		require.NoError(t, err)
+
+		// Verify deletion is staged (Git may show as D or R for rename)
+		cmd := exec.Command("git", "diff", "--cached", "--name-status")
+		output, err := cmd.Output()
+		require.NoError(t, err)
+		outputStr := string(output)
+		// Git may show as deletion+addition (D/A) or rename (R)
+		assert.True(t, strings.Contains(outputStr, "D\t"+testFilePath) || (strings.Contains(outputStr, "R") && strings.Contains(outputStr, testFilePath)),
+			"Deletion should be staged. Output: %s", outputStr)
+		assert.True(t, strings.Contains(outputStr, "A\t"+testTargetPath) || (strings.Contains(outputStr, "R") && strings.Contains(outputStr, testTargetPath)),
+			"Addition should be staged. Output: %s", outputStr)
+	})
+
+	t.Run("stages deletion using git add -u when git rm --cached fails", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create and commit a file
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+		require.NoError(t, exec.Command("git", "add", testFilePath).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Move file on disk
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.Rename(testFilePath, testTargetPath))
+
+		// Manually remove from git index to simulate git rm --cached failure scenario
+		// This simulates a case where the file was already removed from index
+		require.NoError(t, exec.Command("git", "rm", "--cached", testFilePath).Run())
+		require.NoError(t, exec.Command("git", "reset", "HEAD").Run()) // Unstage the deletion
+
+		// Now stageFileChanges should use git add -u fallback
+		ctx := context.Background()
+		err := stageFileChanges(ctx, testFilePath, testTargetPath, false)
+		require.NoError(t, err)
+
+		// Verify deletion is staged (Git may show as D or R for rename)
+		cmd := exec.Command("git", "diff", "--cached", "--name-status")
+		output, err := cmd.Output()
+		require.NoError(t, err)
+		outputStr := string(output)
+		// Git may show as deletion+addition (D/A) or rename (R)
+		assert.True(t, strings.Contains(outputStr, "D\t"+testFilePath) || (strings.Contains(outputStr, "R") && strings.Contains(outputStr, testFilePath)),
+			"Deletion should be staged. Output: %s", outputStr)
+		assert.True(t, strings.Contains(outputStr, "A\t"+testTargetPath) || (strings.Contains(outputStr, "R") && strings.Contains(outputStr, testTargetPath)),
+			"Addition should be staged. Output: %s", outputStr)
+	})
+
+	t.Run("returns error when both git rm --cached and git add -u fail", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create file but don't commit it (file doesn't exist in git)
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+
+		// Move file on disk
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.Rename(testFilePath, testTargetPath))
+
+		// Try to stage changes - should fail because file was never tracked
+		ctx := context.Background()
+		err := stageFileChanges(ctx, testFilePath, testTargetPath, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to stage deletion")
+	})
+
+	t.Run("verifies deletion is staged before proceeding", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create and commit a file
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+		require.NoError(t, exec.Command("git", "add", testFilePath).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Move file on disk
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.Rename(testFilePath, testTargetPath))
+
+		// Stage the changes
+		ctx := context.Background()
+		err := stageFileChanges(ctx, testFilePath, testTargetPath, false)
+		require.NoError(t, err)
+
+		// Verify that both deletion and addition are staged
+		verifyStagedMove(t, testFilePath, testTargetPath)
+	})
+
+	t.Run("dry run does not stage changes", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create and commit a file
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+		require.NoError(t, exec.Command("git", "add", testFilePath).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Move file on disk
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.Rename(testFilePath, testTargetPath))
+
+		// Stage with dry run
+		ctx := context.Background()
+		err := stageFileChanges(ctx, testFilePath, testTargetPath, true)
+		require.NoError(t, err)
+
+		// Verify nothing is staged
+		cmd := exec.Command("git", "diff", "--cached", "--name-only")
+		output, err := cmd.Output()
+		require.NoError(t, err)
+		assert.Empty(t, strings.TrimSpace(string(output)))
+	})
+}
+
+func TestCommitMove(t *testing.T) {
+	t.Run("creates single commit with both deletion and addition", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create initial commit with a placeholder file
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(".work/.gitkeep", []byte(""), 0o600))
+		require.NoError(t, exec.Command("git", "add", ".work/").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Create and commit work item
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+		require.NoError(t, exec.Command("git", "add", testFilePath).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
+
+		// Move file on disk (simulating moveWorkItemWithoutCommit)
+		require.NoError(t, os.Rename(testFilePath, testTargetPath))
+
+		// Update status in file
+		content, err := os.ReadFile(testTargetPath)
+		require.NoError(t, err)
+		contentStr := strings.ReplaceAll(string(content), "status: todo", "status: doing")
+		require.NoError(t, os.WriteFile(testTargetPath, []byte(contentStr), 0o600))
+
+		// Commit the move
+		err = commitMove(testFilePath, testTargetPath, "Move prd 001 to doing", "Test Feature (todo -> doing)", false)
+		require.NoError(t, err)
+
+		// Verify commit was created
+		cmd := exec.Command("git", "log", "--oneline", "-1")
+		output, err := cmd.Output()
+		require.NoError(t, err)
+		assert.Contains(t, string(output), "Move prd 001 to doing")
+
+		// Verify commit contains both deletion and addition (Git may show as D/A or R for rename)
+		cmd = exec.Command("git", "show", "--name-status", "--pretty=format:", "HEAD")
+		output, err = cmd.Output()
+		require.NoError(t, err)
+		outputStr := string(output)
+		lines := strings.Split(outputStr, "\n")
+		foundDeletion := false
+		foundAddition := false
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if (strings.HasPrefix(line, "D\t") && strings.Contains(line, testFilePath)) ||
+				(strings.HasPrefix(line, "R") && strings.Contains(line, testFilePath)) {
+				foundDeletion = true
+			}
+			if (strings.HasPrefix(line, "A\t") && strings.Contains(line, testTargetPath)) ||
+				(strings.HasPrefix(line, "R") && strings.Contains(line, testTargetPath)) {
+				foundAddition = true
+			}
+		}
+		assert.True(t, foundDeletion, "Commit should contain deletion of %s. Output: %s", testFilePath, outputStr)
+		assert.True(t, foundAddition, "Commit should contain addition of %s. Output: %s", testTargetPath, outputStr)
 	})
 }
