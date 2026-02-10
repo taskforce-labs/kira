@@ -14,6 +14,14 @@ import (
 	"kira/internal/config"
 )
 
+const testTaskWorkItemContent = `---
+kind: task
+id: 001
+title: Test Task
+status: backlog
+---
+# Test Task`
+
 func TestValidateWorkItemID(t *testing.T) {
 	cfg := &config.Config{
 		Validation: config.ValidationConfig{
@@ -1685,16 +1693,9 @@ func TestMoveWorkItemWithoutCommit(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".work", "0_backlog"), 0o700))
 
 		// Create a work item file
-		workItemContent := `---
-kind: task
-id: 001
-title: Test Task
-status: backlog
----
-# Test Task`
 		require.NoError(t, os.WriteFile(
 			filepath.Join(tmpDir, ".work", "0_backlog", "001-test-task.md"),
-			[]byte(workItemContent),
+			[]byte(testTaskWorkItemContent),
 			0o600,
 		))
 
@@ -1725,16 +1726,9 @@ status: backlog
 		require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".work", "2_doing"), 0o700))
 
 		// Create a work item file
-		workItemContent := `---
-kind: task
-id: 001
-title: Test Task
-status: backlog
----
-# Test Task`
 		require.NoError(t, os.WriteFile(
 			filepath.Join(cwd, ".work", "0_backlog", "001-test-task.md"),
-			[]byte(workItemContent),
+			[]byte(testTaskWorkItemContent),
 			0o600,
 		))
 
@@ -1757,6 +1751,104 @@ status: backlog
 		newContent, err := safeReadFile(".work/2_doing/001-test-task.md", cfg)
 		require.NoError(t, err)
 		assert.Contains(t, string(newContent), "status: doing")
+	})
+}
+
+func TestCommitStatusChange(t *testing.T) {
+	t.Run("creates single commit with both deletion and addition", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Use actual cwd so path resolution matches
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".work", "0_backlog"), 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".work", "2_doing"), 0o700))
+
+		// Create and commit a work item file
+		oldPath := filepath.Join(cwd, ".work", "0_backlog", "001-test-task.md")
+		require.NoError(t, os.WriteFile(oldPath, []byte(testTaskWorkItemContent), 0o600))
+		// #nosec G204 - oldPath is constructed from test constants and cwd, command is fixed
+		require.NoError(t, exec.Command("git", "add", oldPath).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
+
+		// Move file on disk
+		newPath := filepath.Join(cwd, ".work", "2_doing", "001-test-task.md")
+		require.NoError(t, os.Rename(oldPath, newPath))
+
+		// Commit the status change
+		err = commitStatusChange(cwd, oldPath, newPath, "Move task 001 to doing")
+		require.NoError(t, err)
+
+		// Verify commit was created
+		cmd := exec.Command("git", "log", "--oneline", "-1")
+		cmd.Dir = cwd
+		output, err := cmd.Output()
+		require.NoError(t, err)
+		assert.Contains(t, string(output), "Move task 001 to doing")
+
+		// Verify commit contains both deletion and addition (Git may show as D/A or R for rename)
+		cmd = exec.Command("git", "show", "--name-status", "--pretty=format:", "HEAD")
+		cmd.Dir = cwd
+		output, err = cmd.Output()
+		require.NoError(t, err)
+		outputStr := string(output)
+		lines := strings.Split(outputStr, "\n")
+		foundDeletion := false
+		foundAddition := false
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if (strings.HasPrefix(line, "D\t") && strings.Contains(line, "0_backlog/001-test-task.md")) ||
+				(strings.HasPrefix(line, "R") && strings.Contains(line, "0_backlog/001-test-task.md")) {
+				foundDeletion = true
+			}
+			if (strings.HasPrefix(line, "A\t") && strings.Contains(line, "2_doing/001-test-task.md")) ||
+				(strings.HasPrefix(line, "R") && strings.Contains(line, "2_doing/001-test-task.md")) {
+				foundAddition = true
+			}
+		}
+		assert.True(t, foundDeletion, "Commit should contain deletion. Output: %s", outputStr)
+		assert.True(t, foundAddition, "Commit should contain addition. Output: %s", outputStr)
+	})
+
+	t.Run("returns error when deletion staging fails", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir, _ := os.Getwd()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir(origDir) }()
+
+		// Use actual cwd so path resolution matches
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create .work directory structure
+		require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".work", "0_backlog"), 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".work", "2_doing"), 0o700))
+
+		// Create file but don't commit it (file doesn't exist in git)
+		oldPath := filepath.Join(cwd, ".work", "0_backlog", "001-test-task.md")
+		newPath := filepath.Join(cwd, ".work", "2_doing", "001-test-task.md")
+		require.NoError(t, os.WriteFile(oldPath, []byte("test"), 0o600))
+		require.NoError(t, os.Rename(oldPath, newPath))
+
+		// Try to commit status change - should fail because file was never tracked
+		err = commitStatusChange(cwd, oldPath, newPath, "Move task 001 to doing")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to stage deletion")
 	})
 }
 
