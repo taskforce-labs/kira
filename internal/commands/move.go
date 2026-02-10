@@ -204,6 +204,52 @@ func validateStagedChanges(excludePaths []string) error {
 	return nil
 }
 
+// verifyDeletionStaged checks if the oldPath deletion is staged
+// Git may show this as a deletion (D) or as a rename (R) when both old and new paths are staged
+func verifyDeletionStaged(ctx context.Context, oldPath, dir string, dryRun bool) (bool, error) {
+	if dryRun {
+		return true, nil // Skip verification in dry-run mode
+	}
+	output, err := executeCommand(ctx, "git", []string{"diff", "--cached", "--name-status"}, dir, false)
+	if err != nil {
+		return false, fmt.Errorf("failed to check staged changes: %w", err)
+	}
+	// Convert oldPath to relative path if dir is provided (Git outputs relative paths)
+	checkPath := oldPath
+	if dir != "" {
+		relPath, err := filepath.Rel(dir, oldPath)
+		if err == nil {
+			checkPath = relPath
+		}
+		// Also try with forward slashes (Git uses forward slashes even on Windows)
+		checkPath = filepath.ToSlash(checkPath)
+	}
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Check if this line contains the oldPath
+		// Format: "D\tpath/to/file" (deletion) or "R100\told/path\tnew/path" (rename)
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			status := parts[0]
+			// Normalize path in output to use forward slashes
+			pathInOutput := filepath.ToSlash(parts[1])
+			// Check for deletion
+			if status == "D" && pathInOutput == checkPath {
+				return true, nil
+			}
+			// Check for rename (R followed by similarity percentage)
+			if strings.HasPrefix(status, "R") && len(parts) >= 3 && pathInOutput == checkPath {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // stageFileChanges stages the old file deletion and new file addition for a move
 func stageFileChanges(ctx context.Context, oldPath, newPath string, dryRun bool) error {
 	// Stage the old file deletion first using git rm --cached
@@ -211,7 +257,21 @@ func stageFileChanges(ctx context.Context, oldPath, newPath string, dryRun bool)
 	if cmdErr != nil && !dryRun {
 		// If git rm fails (file wasn't tracked), try git add -u to stage deletions
 		oldDir := filepath.Dir(oldPath)
-		_, _ = executeCommand(ctx, "git", []string{"add", "-u", oldDir}, "", dryRun)
+		_, fallbackErr := executeCommand(ctx, "git", []string{"add", "-u", oldDir}, "", dryRun)
+		if fallbackErr != nil {
+			return fmt.Errorf("failed to stage deletion: git rm --cached failed (%v) and git add -u fallback also failed (%w)", cmdErr, fallbackErr)
+		}
+	}
+
+	// Verify deletion was staged (skip in dry-run mode)
+	if !dryRun {
+		deletionStaged, err := verifyDeletionStaged(ctx, oldPath, "", dryRun)
+		if err != nil {
+			return fmt.Errorf("failed to verify deletion was staged: %w", err)
+		}
+		if !deletionStaged {
+			return fmt.Errorf("deletion was not staged: file %s deletion not found in staged changes", oldPath)
+		}
 	}
 
 	// Stage the new file addition
