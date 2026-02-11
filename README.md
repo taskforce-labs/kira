@@ -110,14 +110,14 @@ workspace:
 
 ### Cursor skills and commands install path
 
-`kira install cursor-skills` and `kira install cursor-commands` copy bundled skills and commands to `~/.cursor/skills/` and `~/.cursor/commands/` by default. To override the base directory (e.g. use a custom home or test directory), set `cursor_install.base_path` in `kira.yml`:
+`kira install cursor-skills` and `kira install cursor-commands` copy bundled skills and commands to `.agent/skills/` and `.cursor/commands/` by default (relative to project root). To override the base directory (e.g. use a custom path), set `cursor_install.base_path` in `kira.yml`:
 
 ```yaml
 cursor_install:
-  base_path: /path/to/base   # optional; omit or leave empty to use $HOME
+  base_path: /path/to/base   # optional; omit or leave empty to use project root
 ```
 
-Skills are installed to `<base_path>/.cursor/skills/`, commands to `<base_path>/.cursor/commands/`.
+Skills are installed to `<base_path>/.agent/skills/`, commands to `<base_path>/.cursor/commands/`.
 
 ## Overview
 

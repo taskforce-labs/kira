@@ -57,7 +57,7 @@ type ReviewConfig struct {
 }
 
 // CursorInstallConfig contains settings for where to install Cursor skills and commands.
-// When BasePath is empty, the user's home directory is used (~/.cursor/skills and ~/.cursor/commands).
+// When BasePath is empty, the project root is used (.agent/skills and .cursor/commands).
 type CursorInstallConfig struct {
 	BasePath string `yaml:"base_path"` // empty = use home directory
 }
@@ -393,12 +393,12 @@ func DocsRoot(cfg *Config, targetDir string) (string, error) {
 var ValidStatusActions = []string{"none", "commit_only", "commit_and_push", "commit_only_branch"}
 
 const (
-	cursorSkillsDir   = ".cursor/skills"
+	cursorSkillsDir   = ".agent/skills"
 	cursorCommandsDir = ".cursor/commands"
 )
 
 // GetCursorSkillsPath returns the absolute path where Cursor skills should be installed.
-// Default is ~/.cursor/skills/; override via cursor_install.base_path in kira.yml.
+// Default is .agent/skills/ relative to project root; override via cursor_install.base_path in kira.yml.
 func GetCursorSkillsPath(cfg *Config) (string, error) {
 	base, err := getCursorInstallBase(cfg)
 	if err != nil {
@@ -408,7 +408,7 @@ func GetCursorSkillsPath(cfg *Config) (string, error) {
 }
 
 // GetCursorCommandsPath returns the absolute path where Cursor commands should be installed.
-// Default is ~/.cursor/commands/; override via cursor_install.base_path in kira.yml.
+// Default is .cursor/commands/ relative to project root; override via cursor_install.base_path in kira.yml.
 func GetCursorCommandsPath(cfg *Config) (string, error) {
 	base, err := getCursorInstallBase(cfg)
 	if err != nil {
@@ -429,11 +429,15 @@ func getCursorInstallBase(cfg *Config) (string, error) {
 		}
 		return abs, nil
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory for cursor install path: %w", err)
+	// Default to project root (ConfigDir) if available, otherwise current directory
+	if cfg != nil && cfg.ConfigDir != "" {
+		return cfg.ConfigDir, nil
 	}
-	return home, nil
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current directory for cursor install path: %w", err)
+	}
+	return wd, nil
 }
 
 func resolveCursorPath(base, subdir string) (string, error) {

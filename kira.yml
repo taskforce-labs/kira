@@ -71,7 +71,7 @@ checks:
     description: Run end-to-end tests when completing a work item like a prd or issue
     tags: [e2e, done]
 
-# Optional: override where Cursor skills and commands are installed (default: home directory).
-# Skills go to <base_path>/.cursor/skills/, commands to <base_path>/.cursor/commands/.
+# Optional: override where Cursor skills and commands are installed (default: project root).
+# Skills go to <base_path>/.agent/skills/, commands to <base_path>/.cursor/commands/.
 # cursor_install:
-#     base_path: ~   # or an absolute path; empty/omit = use $HOME
+#     base_path: .   # or an absolute path; empty/omit = use project root

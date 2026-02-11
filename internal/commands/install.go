@@ -15,10 +15,12 @@ import (
 	yaml "gopkg.in/yaml.v3"
 )
 
+const choiceOverwrite = "overwrite"
+
 var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Install Cursor skills and commands",
-	Long:  `Install bundled Cursor Agent Skills and Commands to the configured path (default ~/.cursor/skills and ~/.cursor/commands).`,
+	Long:  `Install bundled Cursor Agent Skills and Commands to the configured path (default .agent/skills and .cursor/commands).`,
 }
 
 var installCursorSkillsCmd = &cobra.Command{

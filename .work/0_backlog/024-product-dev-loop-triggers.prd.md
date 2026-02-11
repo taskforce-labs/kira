@@ -129,8 +129,8 @@ When architecture is already implemented in code and new facts invalidate assump
    - Include instructions for which skills/commands to use
 
 4. **Skill and Command Activation**
-   - Ensure required skills are installed (check `~/.cursor/skills/`)
-   - Ensure required commands are installed (check `~/.cursor/commands/`)
+   - Ensure required skills are installed (check `.agent/skills/`)
+   - Ensure required commands are installed (check `.cursor/commands/`)
    - Provide prompts that guide agent to use appropriate skills/commands
    - For Cursor CLI, reference skills/commands by name in prompts
    - Handle missing skills/commands gracefully (prompt user to install)
@@ -912,7 +912,7 @@ The Session Manager reads/writes markdown files:
 ### Error Handling Strategy
 
 1. **CLI Not Available**: Check if `agent` command exists, provide installation instructions
-2. **Skills/Commands Missing**: Check `~/.cursor/skills/` and `~/.cursor/commands/`, prompt to run `kira install cursor-skills`
+2. **Skills/Commands Missing**: Check `.agent/skills/` and `.cursor/commands/`, prompt to run `kira install cursor-skills`
 3. **Session Failures**: Capture error output, save session state, allow resume
 4. **Context Errors**: Log missing files, use available context, warn user
 5. **Integration Failures**: Validate artifact structure, provide rollback option
