@@ -1167,12 +1167,24 @@ checks:
 }
 
 func TestGetCursorSkillsPath(t *testing.T) {
-	t.Run("defaults to home .cursor/skills when base_path empty", func(t *testing.T) {
+	t.Run("defaults to project root .agent/skills when base_path empty and ConfigDir set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{ConfigDir: tmpDir, CursorInstall: &CursorInstallConfig{}}
+		path, err := GetCursorSkillsPath(cfg)
+		require.NoError(t, err)
+		require.NotEmpty(t, path)
+		expected := filepath.Join(tmpDir, ".agent", "skills")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(path))
+		// Path must be absolute
+		assert.True(t, filepath.IsAbs(path), "expected absolute path, got %s", path)
+	})
+
+	t.Run("defaults to current directory .agent/skills when base_path and ConfigDir empty", func(t *testing.T) {
 		cfg := &Config{CursorInstall: &CursorInstallConfig{}}
 		path, err := GetCursorSkillsPath(cfg)
 		require.NoError(t, err)
 		require.NotEmpty(t, path)
-		assert.Contains(t, path, string(filepath.Separator)+".cursor"+string(filepath.Separator)+"skills")
+		assert.Contains(t, path, string(filepath.Separator)+".agent"+string(filepath.Separator)+"skills")
 		// Path must be absolute
 		assert.True(t, filepath.IsAbs(path), "expected absolute path, got %s", path)
 	})
@@ -1182,7 +1194,7 @@ func TestGetCursorSkillsPath(t *testing.T) {
 		cfg := &Config{CursorInstall: &CursorInstallConfig{BasePath: tmpDir}}
 		path, err := GetCursorSkillsPath(cfg)
 		require.NoError(t, err)
-		expected := filepath.Join(tmpDir, ".cursor", "skills")
+		expected := filepath.Join(tmpDir, ".agent", "skills")
 		assert.Equal(t, filepath.Clean(expected), filepath.Clean(path))
 	})
 
@@ -1195,7 +1207,18 @@ func TestGetCursorSkillsPath(t *testing.T) {
 }
 
 func TestGetCursorCommandsPath(t *testing.T) {
-	t.Run("defaults to home .cursor/commands when base_path empty", func(t *testing.T) {
+	t.Run("defaults to project root .cursor/commands when base_path empty and ConfigDir set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{ConfigDir: tmpDir, CursorInstall: &CursorInstallConfig{}}
+		path, err := GetCursorCommandsPath(cfg)
+		require.NoError(t, err)
+		require.NotEmpty(t, path)
+		expected := filepath.Join(tmpDir, ".cursor", "commands")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(path))
+		assert.True(t, filepath.IsAbs(path), "expected absolute path, got %s", path)
+	})
+
+	t.Run("defaults to current directory .cursor/commands when base_path and ConfigDir empty", func(t *testing.T) {
 		cfg := &Config{CursorInstall: &CursorInstallConfig{}}
 		path, err := GetCursorCommandsPath(cfg)
 		require.NoError(t, err)
@@ -1225,6 +1248,9 @@ func TestLoadConfigCursorInstall(t *testing.T) {
 		assert.Equal(t, tmpDir, cfg.CursorInstall.BasePath)
 		skillsPath, err := GetCursorSkillsPath(cfg)
 		require.NoError(t, err)
-		assert.Equal(t, filepath.Join(tmpDir, ".cursor", "skills"), filepath.Clean(skillsPath))
+		assert.Equal(t, filepath.Join(tmpDir, ".agent", "skills"), filepath.Clean(skillsPath))
+		commandsPath, err := GetCursorCommandsPath(cfg)
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(tmpDir, ".cursor", "commands"), filepath.Clean(commandsPath))
 	})
 }

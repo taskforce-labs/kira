@@ -134,7 +134,7 @@ cursor_install:
 		err = runInstallCursorSkills(installCmd, nil)
 		require.NoError(t, err)
 
-		skillsPath := filepath.Join(tmpDir, ".cursor", "skills")
+		skillsPath := filepath.Join(tmpDir, ".agent", "skills")
 		entries, err := os.ReadDir(skillsPath)
 		require.NoError(t, err)
 		var skillDirs []string
@@ -194,7 +194,7 @@ func TestEnsureCursorSkillsInstalled(t *testing.T) {
 		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
 		err := EnsureCursorSkillsInstalled(cfg)
 		require.NoError(t, err)
-		skillsPath := filepath.Join(tmpDir, ".cursor", "skills")
+		skillsPath := filepath.Join(tmpDir, ".agent", "skills")
 		entries, err := os.ReadDir(skillsPath)
 		require.NoError(t, err)
 		var dirs []string
