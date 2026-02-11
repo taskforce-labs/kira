@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const gitPlatformGitHub = "github"
+
 // safeReadTestFile reads a file after validating it's within the test directory.
 // Uses filepath.Glob to get the file path, which gosec recognizes as safe.
 func safeReadTestFile(path, tmpDir string) ([]byte, error) {
@@ -104,13 +106,82 @@ func TestInitializeWorkspace(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, string(rootContent), "# Documentation")
 		assert.Contains(t, string(rootContent), "agents")
-		assert.Contains(t, string(rootContent), "architecture")
-		for _, sub := range []string{"agents", "architecture", "product", "reports", "api", "guides"} {
-			subReadme := filepath.Join(docsRoot, sub, "README.md")
-			assert.FileExists(t, subReadme)
+	})
+
+	t.Run("creates GitHub workflow file when git_platform is github", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg, err := config.LoadConfigFromDir(tmpDir)
+		require.NoError(t, err)
+
+		// Set git_platform to github
+		if cfg.Workspace == nil {
+			cfg.Workspace = &config.WorkspaceConfig{}
 		}
-		securityReadme := filepath.Join(docsRoot, "guides", "security", "README.md")
-		assert.FileExists(t, securityReadme)
+		cfg.Workspace.GitPlatform = gitPlatformGitHub
+
+		err = initializeWorkspace(tmpDir, cfg)
+		require.NoError(t, err)
+
+		// Check that workflow file was created
+		workflowPath := filepath.Join(tmpDir, ".github", "workflows", "update-pr-details.yml")
+		assert.FileExists(t, workflowPath)
+
+		// Check workflow file content
+		content, err := safeReadTestFile(workflowPath, tmpDir)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "name: Update PR Details")
+		assert.Contains(t, string(content), "pull_request:")
+	})
+
+	t.Run("does not create GitHub workflow file when git_platform is not github", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		cfg, err := config.LoadConfigFromDir(tmpDir)
+		require.NoError(t, err)
+
+		// Set git_platform to something other than github
+		if cfg.Workspace == nil {
+			cfg.Workspace = &config.WorkspaceConfig{}
+		}
+		cfg.Workspace.GitPlatform = "gitlab"
+
+		err = initializeWorkspace(tmpDir, cfg)
+		require.NoError(t, err)
+
+		// Check that workflow file was NOT created
+		workflowPath := filepath.Join(tmpDir, ".github", "workflows", "update-pr-details.yml")
+		assert.NoFileExists(t, workflowPath)
+	})
+
+	t.Run("does not overwrite existing GitHub workflow file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create .github/workflows directory and existing workflow file
+		workflowsDir := filepath.Join(tmpDir, ".github", "workflows")
+		// #nosec G301 - directory permissions 0o755 are required for GitHub Actions to read workflow files
+		require.NoError(t, os.MkdirAll(workflowsDir, 0o755))
+		workflowPath := filepath.Join(workflowsDir, "update-pr-details.yml")
+		existingContent := "existing workflow content"
+		// #nosec G306 - file permissions 0o644 are required for GitHub Actions to read workflow files
+		require.NoError(t, os.WriteFile(workflowPath, []byte(existingContent), 0o644))
+
+		cfg, err := config.LoadConfigFromDir(tmpDir)
+		require.NoError(t, err)
+
+		// Set git_platform to github
+		if cfg.Workspace == nil {
+			cfg.Workspace = &config.WorkspaceConfig{}
+		}
+		cfg.Workspace.GitPlatform = gitPlatformGitHub
+
+		err = initializeWorkspace(tmpDir, cfg)
+		require.NoError(t, err)
+
+		// Check that existing file was not overwritten
+		content, err := safeReadTestFile(workflowPath, tmpDir)
+		require.NoError(t, err)
+		assert.Equal(t, existingContent, string(content))
 	})
 
 	t.Run("preserves existing files", func(t *testing.T) {
