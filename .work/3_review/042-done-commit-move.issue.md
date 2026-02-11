@@ -1,7 +1,7 @@
 ---
 id: 042
 title: done commit move
-status: doing
+status: review
 kind: issue
 assigned:
 estimate: 0
