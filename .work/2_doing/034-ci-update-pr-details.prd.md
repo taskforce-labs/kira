@@ -41,15 +41,16 @@ This keeps the PR and the work item aligned whenever the branch is pushed, inclu
 #### FR1: CI Trigger
 
 - The job SHALL run on the **pull_request** event with types `opened`, `synchronize`, and `reopened`, for PRs whose base is the trunk branch from kira config (`git.trunk_branch`). Trunk branch is always from config; no hardcoding.
+- The workflow SHALL filter the `pull_request` trigger by base branch using the trunk branch from kira config (e.g., `branches: [master]` or dynamically read from config). This ensures the job only runs for PRs targeting trunk.
 - The job SHALL **never** run when the PR head branch is the configured trunk branch. The workflow SHALL skip the job when `github.head_ref` equals the trunk branch from kira config.
-- The workflow SHALL NOT use `paths-ignore` for the configured work folder so that pushes that only change work items still trigger the job. Use the work folder path from kira config; do not hardcode.
+- The workflow SHALL NOT use `paths-ignore` for the configured work folder so that pushes that only change work items still trigger the job. Use the work folder path from kira config; do not hardcode. The workflow may use `paths-ignore` for other paths (e.g., documentation, unrelated files) but SHALL NOT ignore the configured work folder path.
 - The job SHALL run in a **dedicated, standalone** workflow file (`.github/workflows/update-pr-details.yml`), not in existing ci.yml or other workflows, so it can easily be added to any project and does not interfere with other CI.
 
 #### FR2: `kira current` command
 
 - Kira SHALL provide a **`kira current`** command that:
   - Derives the work item ID from the **current branch name** (same convention as 010: `{id}-{kebab-case-title}`).
-  - Looks for the work item file in the work folder from kira config, **searching all status folders** (e.g. backlog, todo, doing, review, done) until the file with matching `id` in front matter is found.
+  - Looks for the work item file in the work folder from kira config, **searching all status folders** (e.g. backlog, todo, doing, review, done) until the file with matching `id` in front matter is found. The work item file SHALL be found in the checked-out branch (PR head ref) where the workflow runs. In polyrepo workspaces, the work item exists only in the main repo, so the workflow checks out the PR head ref from the main repo.
   - Supports **`--title`**: output the PR title (same format as kira start: work item title prefixed with work item ID).
   - Supports **`--body`**: output the entire content of the work item file (front matter + body).
   - Supports **`prs`** subcommand: discovers all related PRs across all repos (including main repo). Outputs JSON array of PR information: `[{"owner": "org", "repo": "repo-name", "pr_number": 123, "branch": "034-ci-update-pr-details"}, ...]`. Always includes the main repo (where `kira.yml` is located) if it's a GitHub remote. In polyrepo workspaces, also includes all projects from `workspace.projects` that are GitHub remotes. Uses the same logic as `kira start` to resolve the main repo remote and `workspace.projects` with their GitHub remotes. Only includes repos that are GitHub remotes. When not in polyrepo workspace, outputs array with only the main repo PR (if found). When work item is not found or branch name invalid, outputs empty array and exits 0.
@@ -77,6 +78,8 @@ This keeps the PR and the work item aligned whenever the branch is pushed, inclu
 - **Command failures:** If `kira current --title` or `kira current --body` exits with non-zero (work item not found or invalid branch name), the job SHALL catch the error, log an appropriate message (e.g. "Work item not found, skipping PR update" or "Branch name does not match kira format, skipping PR update"), then exit 0 without failing the workflow. The job SHALL NOT fail when `kira current` commands fail—these are expected scenarios for non-kira branches or missing work items.
 - If `kira current prs` returns an empty array (work item not found or invalid branch), the job SHALL exit 0 without updating any PR.
 - When the same branch has multiple open PRs, the job SHALL update only the PR that triggered the event; do not list or update other PRs for that branch.
+- **GitHub API rate limiting:** When updating multiple PRs in polyrepo scenarios, the workflow SHALL handle GitHub API rate limits gracefully. If rate limited (HTTP 429), the workflow SHALL wait and retry with exponential backoff, or log a clear warning and exit 0 (non-fatal). The workflow SHALL prioritize updating the main repo PR first, then other repos.
+- **PR body size limits:** GitHub PR bodies have a size limit (~65KB). If the work item file exceeds this limit, the workflow SHALL truncate the body with a clear indicator (e.g., "... (truncated due to size limit)") and log a warning, or fail with a clear error message instructing the user to reduce the work item size.
 
 ### Configuration
 
@@ -94,6 +97,8 @@ This keeps the PR and the work item aligned whenever the branch is pushed, inclu
 - **GitHub API error for other repo PRs (polyrepo, 403 Forbidden):** Log a clear warning message indicating which repo could not be updated and why: "Warning: Could not update PR in {owner}/{repo}: GITHUB_TOKEN does not have write access to this repository. To enable cross-repo PR updates, ensure the workflow runs with a token that has access to all repos, or configure repository permissions. Skipping this repo." Continue updating other repos. Do not fail the workflow.
 - **GitHub API error for other repo PRs (404 Not Found):** Log a clear message: "Info: No open PR found for branch {branch} in {owner}/{repo}. This is expected if the PR hasn't been created yet or was closed. Skipping this repo." Continue updating other repos. Do not fail the workflow.
 - **Invalid JSON from `kira current prs`:** Log error and fail the workflow with clear message: "Failed to parse PR list from `kira current prs`. Output: {output}"
+- **GitHub API rate limiting (429 Too Many Requests):** Log a warning message indicating rate limit was hit, wait with exponential backoff, and retry. If retries are exhausted, log a clear warning and exit 0 (non-fatal) for other repo PRs, but fail if main repo PR cannot be updated due to rate limits.
+- **PR body exceeds size limit:** If the work item file content exceeds GitHub's PR body size limit (~65KB), log an error and fail the workflow with a clear message: "Work item file exceeds GitHub PR body size limit (~65KB). Please reduce the work item size or split it into multiple work items."
 
 ### Permissions
 
@@ -115,6 +120,7 @@ For **polyrepo** workspaces:
 ## Acceptance Criteria
 
 - [ ] CI job runs on `pull_request` types `opened`, `synchronize`, and `reopened` for PRs targeting trunk.
+- [ ] CI job only runs for PRs whose base branch is the trunk branch from kira config (workflow filters by base branch).
 - [ ] CI job never runs when the PR head branch (or the branch being pushed) is the configured trunk branch.
 - [ ] Work item ID is correctly derived from branch names of the form `{id}-{kebab-title}`.
 - [ ] Job does not fail when branch name does not match (e.g. non-kira branch); it exits successfully without updating any PR.
@@ -137,29 +143,32 @@ For **polyrepo** workspaces:
 - [ ] GitHub API errors for other repo PRs (404 Not Found) log clear info messages and continue without failing the workflow.
 - [ ] Workflow is a dedicated standalone file (`.github/workflows/update-pr-details.yml`); the job is not added to existing ci.yml or other workflows, so it can easily be added to any project and does not interfere with other CI.
 - [ ] When the user runs `kira init` and `git_platform` is `github`, the workflow file `.github/workflows/update-pr-details.yml` is created if it does not exist; existing file is not overwritten.
+- [ ] Workflow handles GitHub API rate limiting (429) gracefully with retries and exponential backoff, prioritizing main repo PR updates.
+- [ ] Workflow detects and handles PR body size limits, failing with a clear error message if work item exceeds GitHub's limit (~65KB).
+- [ ] Work item file is found in the checked-out PR head branch (main repo in polyrepo scenarios).
 
 ## Slices
 
 ### Slice 1: `kira current` command
 Commit: Implement `kira current` command that derives work item from branch name and outputs PR title and body. Supports --title, --body flags and prs subcommand for polyrepo discovery. Searches all status folders for work item file.
-- [ ] T001: Add `kira current` command structure with cobra command and flags (--title, --body) and prs subcommand
-- [ ] T002: Implement branch name parsing to derive work item ID (reuse parseWorkItemIDFromBranch logic)
-- [ ] T003: Implement work item file search across all status folders (modify findWorkItemFile or create new function that searches all status folders)
-- [ ] T004: Implement --title flag: output PR title format (work item ID + title, same as kira start)
-- [ ] T005: Implement --body flag: output entire work item file content (front matter + body)
-- [ ] T006: Implement `prs` subcommand: always include main repo (get remote from git.remote config or "origin", query GitHub API for PRs), detect polyrepo workspace, resolve workspace.projects using same logic as kira start (resolvePolyrepoProjects), get GitHub remotes for each project, query GitHub API to find open PRs with matching branch name, combine main repo + project repos into single JSON array
-- [ ] T007: Handle error cases: for `--title`/`--body` flags: invalid branch name (exit without output, non-zero), work item not found (log and exit non-zero); for `prs` subcommand: invalid branch name or work item not found (output empty array, exit 0); polyrepo detection failures (output empty array, exit 0)
+- [x] T001: Add `kira current` command structure with cobra command and flags (--title, --body) and prs subcommand
+- [x] T002: Implement branch name parsing to derive work item ID (reuse parseWorkItemIDFromBranch logic)
+- [x] T003: Implement work item file search across all status folders (modify findWorkItemFile or create new function that searches all status folders)
+- [x] T004: Implement --title flag: output PR title format (work item ID + title, same as kira start)
+- [x] T005: Implement --body flag: output entire work item file content (front matter + body)
+- [x] T006: Implement `prs` subcommand: always include main repo (get remote from git.remote config or "origin", query GitHub API for PRs), detect polyrepo workspace, resolve workspace.projects using same logic as kira start (resolvePolyrepoProjects), get GitHub remotes for each project, query GitHub API to find open PRs with matching branch name, combine main repo + project repos into single JSON array
+- [x] T007: Handle error cases: for `--title`/`--body` flags: invalid branch name (exit without output, non-zero), work item not found (log and exit non-zero); for `prs` subcommand: invalid branch name or work item not found (output empty array, exit 0); polyrepo detection failures (output empty array, exit 0)
 
 ### Slice 2: CI workflow file
 Commit: Create dedicated GitHub Actions workflow file that triggers on pull_request events, uses kira current to get PR title/body and discover related PRs in polyrepo, and updates PRs via GitHub API. Includes proper triggers, permissions, and error handling.
 - [ ] T008: Create workflow YAML template structure for `.github/workflows/update-pr-details.yml`
-- [ ] T009: Configure pull_request trigger with types: opened, synchronize, reopened
-- [ ] T010: Add base branch filter using trunk branch from kira config (read kira.yml in workflow or pass as input)
-- [ ] T011: Add job condition to skip when github.head_ref equals trunk branch from config
+- [ ] T009: Configure pull_request trigger with types: opened, synchronize, reopened, and filter by base branch using trunk branch from kira config
+- [ ] T010: Read trunk branch from kira.yml using YAML parser (yq) or shell parsing with proper error handling (handle quoted values, comments, etc.)
+- [ ] T011: Add job condition to skip when github.head_ref equals trunk branch from config, and verify base branch matches trunk
 - [ ] T012: Configure permissions: contents: read, pull-requests: write (automatic GITHUB_TOKEN)
 - [ ] T013: Add steps to build kira from source: (1) Set up Go (using `actions/setup-go@v5`), (2) Cache Go modules (using `actions/cache@v4` like existing CI workflow), (3) Build kira using `make build` (reuse existing Makefile target) since `kira current` command hasn't been released yet. Updating to download released binary will be handled in a separate work item.
-- [ ] T014: Implement job steps: checkout PR head ref, run `kira current --title` and `kira current --body`, run `kira current prs` to get all PRs (main repo + project repos), parse JSON output, for each discovered PR update via GitHub API PATCH with proper error handling (403 = warning, 404 = info, continue; fail only on main repo errors)
-- [ ] T016: Add error handling: catch non-zero exits from `kira current --title`/`--body` (work item not found or invalid branch) and handle gracefully (log and exit 0), handle empty array from `kira current prs` (exit 0), no PR exists (exit 0), GitHub API errors for main repo (fail with clear message and permissions link), GitHub API errors for other repos (log warning/info and continue)
+- [ ] T014: Implement job steps: checkout PR head ref (main repo in polyrepo), run `kira current --title` and `kira current --body`, run `kira current prs` to get all PRs (main repo + project repos), parse JSON output with validation, for each discovered PR update via GitHub API PATCH with proper error handling (403 = warning, 404 = info, 429 = retry with backoff, continue; fail only on main repo errors), validate PR body size before updating
+- [ ] T016: Add error handling: catch non-zero exits from `kira current --title`/`--body` (work item not found or invalid branch) and handle gracefully (log and exit 0), handle empty array from `kira current prs` (exit 0), validate JSON structure from `kira current prs` before parsing, no PR exists (exit 0), GitHub API errors for main repo (fail with clear message and permissions link), GitHub API errors for other repos (log warning/info and continue), handle rate limiting (429) with exponential backoff retries, validate PR body size limit (~65KB) and fail with clear error if exceeded
 - [ ] T017: Test workflow locally using `./kdev current` (or build from source) to verify workflow logic before release
 - [ ] T018: Test workflow end-to-end in CI (requires kira release with `kira current` command from Slice 1, or temporarily build from source in workflow)
 - [ ] T019: Test polyrepo workflow: verify it discovers and updates PRs in multiple repos, handles permission errors gracefully
@@ -175,7 +184,7 @@ Commit: Integrate workflow file creation into kira init command. When git_platfo
 
 ### What needs to happen for it to work every time a branch is made with a work item
 
-1. **Trigger:** Use `pull_request` with types `opened`, `synchronize`, and `reopened`. Filter by base branch using the trunk branch from kira config (`git.trunk_branch`)—e.g. read kira.yml in the job or pass trunk as an input; no hardcoded branch name. Skip when `github.head_ref` equals the trunk branch from config.
+1. **Trigger:** Use `pull_request` with types `opened`, `synchronize`, and `reopened`. Filter by base branch using the trunk branch from kira config (`git.trunk_branch`) in the workflow trigger (e.g., `branches: [master]` or dynamically read from config). Additionally, read kira.yml in the job to verify base branch matches trunk (defense in depth). Skip when `github.head_ref` equals the trunk branch from config.
 
 2. **Dedicated standalone workflow:** Use a **dedicated, standalone** workflow file `.github/workflows/update-pr-details.yml`. Do not add this job to existing ci.yml or other workflows—standalone so it can easily be added to any project and does not interfere with other CI. Do not use `paths-ignore` for the configured work folder (from kira config) so pushes that only change work items still trigger the job.
 
@@ -188,9 +197,11 @@ Commit: Integrate workflow file creation into kira init command. When git_platfo
 ### CI Workflow
 
 - Use a **dedicated, standalone** workflow file `.github/workflows/update-pr-details.yml`. Do not add this job to existing ci.yml or other workflows—standalone so it can easily be added to any project and does not interfere with other CI.
-- Trigger: `pull_request` types `opened`, `synchronize`, `reopened`. Base branch filter and job condition: use trunk branch from kira config (`git.trunk_branch`); no hardcoded branch. Skip when `github.head_ref` equals trunk from config.
+- Trigger: `pull_request` types `opened`, `synchronize`, `reopened`. **Base branch filter:** The workflow SHALL filter by base branch using the trunk branch from kira config (e.g., `branches: [master]` in the trigger, or dynamically read from config in a job step and skip if base doesn't match). Job condition: skip when `github.head_ref` equals trunk from config.
 - No `paths-ignore` for the configured work folder (use kira config; do not hardcode path).
+- **Read trunk branch from config:** The workflow SHALL read the trunk branch from `kira.yml` using a YAML parser (e.g., `yq` or a small Go script) or shell parsing with proper error handling. Shell parsing is acceptable but should handle edge cases (quoted values, comments, etc.). As a future enhancement, `kira config get trunk_branch` could be used once available.
 - **Install kira:** The workflow SHALL build kira from source before running `kira current` (since `kira current` hasn't been released yet). Reuse existing Makefile and CI patterns: (1) Set up Go using `actions/setup-go@v5`, (2) Cache Go modules using `actions/cache@v4` (same as existing CI workflow), (3) Build using `make build` (reuse existing Makefile target). This matches the existing CI workflow pattern but only builds instead of running checks. Updating to download released binary will be handled in a separate work item.
+- **Work item file location:** The workflow checks out the PR head ref and looks for the work item file in that branch. In polyrepo workspaces, the work item exists only in the main repo, so the workflow checks out the main repo's PR head ref.
 
 ### `kira current` and Work Item Resolution
 
@@ -198,6 +209,8 @@ Commit: Integrate workflow file creation into kira init command. When git_platfo
   - Run `kira current --title` to get the PR title (work item title prefixed with id, same format as kira start).
   - Run `kira current --body` to get the entire work item file content for the PR body.
 - **`kira current`** derives the work item ID from the current branch name (same parsing as 010: split on first `-`, validate id), then searches the work folder from kira config **across all status folders** for a markdown file whose front matter contains `id: <workItemID>` (reuse `findWorkItemFile`-style logic but search all configured status folders). Flags `--title` and `--body` output those values to stdout for use in CI.
+- **Work item file location:** The work item file SHALL be found in the checked-out branch (PR head ref). In polyrepo workspaces, the work item exists only in the main repo, so the workflow checks out the main repo's PR head ref where the work item file is located.
+- **File encoding:** Work item files SHALL be UTF-8 encoded. The workflow SHALL handle UTF-8 content correctly when reading and updating PR bodies.
 
 ### `kira current prs` and PR Discovery
 
@@ -214,6 +227,7 @@ Commit: Integrate workflow file creation into kira init command. When git_platfo
     - Includes each found project repo PR in the returned array
   - **In standalone/monorepo**, returns array with only the main repo PR (if found)
   - The workflow then updates each discovered PR via `PATCH /repos/{owner}/{repo}/pulls/{pr_number}` with the work item title and body
+  - **JSON parsing:** The workflow SHALL validate the JSON structure from `kira current prs` before parsing. Use `jq` with proper error handling, or validate JSON structure (array, required fields: owner, repo, pr_number, branch) before processing. Handle special characters in PR titles/bodies correctly when constructing JSON payloads for GitHub API.
   - If a repo cannot be accessed (403 Forbidden), log a clear warning and continue with other repos
   - If no PR is found for a repo (404 Not Found), log an info message and continue
   - Only fail the workflow if the main repo's PR cannot be updated (since that's where the workflow runs and where the work item exists)
@@ -223,6 +237,8 @@ Commit: Integrate workflow file creation into kira init command. When git_platfo
 - **All PRs:** For each PR discovered via `kira current prs` (includes main repo + all project repos in polyrepo), `PATCH /repos/{owner}/{repo}/pulls/{pr_number}` with `title` and `body`.
 - Use automatic `GITHUB_TOKEN`; workflow grants `contents: read` and `pull-requests: write`.
 - **Cross-repo access:** The `GITHUB_TOKEN` may not have write access to other repos (in polyrepo). Handle 403 Forbidden errors gracefully by logging clear warnings and continuing with other repos. Only fail if main repo PR cannot be updated (since that's where the workflow runs and where the work item exists).
+- **Rate limiting:** Handle GitHub API rate limits (HTTP 429) with exponential backoff retries. Prioritize updating the main repo PR first, then other repos. If rate limits persist after retries, log warnings for other repos (non-fatal) but fail if main repo PR cannot be updated.
+- **PR body size:** Validate that work item content does not exceed GitHub's PR body size limit (~65KB). If exceeded, fail with a clear error message instructing the user to reduce the work item size.
 
 ### Dependencies
 
@@ -250,6 +266,7 @@ Commit: Integrate workflow file creation into kira init command. When git_platfo
 
 - When the user runs `kira init` and `git_platform` is `github` (in `kira.yml` or set by init), `kira init` SHALL create `.github/workflows/update-pr-details.yml` if it does not exist. If the file already exists, do not overwrite it.
 - Implementation: during `initializeWorkspace`, if config has `git_platform: github`, create `.github/workflows/` if needed and write the workflow YAML from an embedded template; skip if the workflow file already exists.
+- **Note:** The workflow file may already exist in the repository (e.g., manually created or from a previous implementation). The `kira init` integration SHALL check for existing files and skip creation if present, avoiding overwrites.
 
 ## Release Notes
 
