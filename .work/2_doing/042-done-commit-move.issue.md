@@ -113,24 +113,24 @@ Completing work item 014
 ### Fix error handling in stageFileChanges
 Commit: Fix silent error handling in stageFileChanges to ensure deletion is staged
 - [x] T001: Fix error handling in stageFileChanges - return error if git rm --cached fails and git add -u fallback also fails
-- [ ] T002: Check error return from git add -u fallback instead of ignoring it with `_, _`
-- [ ] T003: Return descriptive error message if deletion staging fails
+- [x] T002: Check error return from git add -u fallback instead of ignoring it with `_, _`
+- [x] T003: Return descriptive error message if deletion staging fails
 
 ### Add verification of staged deletion
 Commit: Add verification step to ensure deletion was actually staged before proceeding
-- [ ] T004: Add function to verify deletion is staged using git diff --cached
-- [ ] T005: Call verification after staging deletion in stageFileChanges
-- [ ] T006: Return error if verification fails (deletion not staged)
+- [x] T004: Add function to verify deletion is staged using git diff --cached
+- [x] T005: Call verification after staging deletion in stageFileChanges
+- [x] T006: Return error if verification fails (deletion not staged)
 
 ### Fix similar issue in commitStatusChange
 Commit: Apply same error handling fixes to commitStatusChange in start.go for consistency
-- [ ] T007: Review commitStatusChange function in internal/commands/start.go
-- [ ] T008: Apply same error handling improvements to commitStatusChange
-- [ ] T009: Add verification step to commitStatusChange if needed
+- [x] T007: Review commitStatusChange function in internal/commands/start.go
+- [x] T008: Apply same error handling improvements to commitStatusChange
+- [x] T009: Add verification step to commitStatusChange if needed
 
 ### Add tests for stageFileChanges fix
 Commit: Add unit and integration tests to verify stageFileChanges correctly stages deletions
-- [ ] T010: Add unit tests for stageFileChanges error handling scenarios
-- [ ] T011: Add integration test for kira done move operation to verify single commit contains both deletion and addition
-- [ ] T012: Add test case for when git rm --cached fails but git add -u succeeds
+- [x] T010: Add unit tests for stageFileChanges error handling scenarios
+- [x] T011: Add integration test for kira done move operation to verify single commit contains both deletion and addition
+- [x] T012: Add test case for when git rm --cached fails but git add -u succeeds
 
