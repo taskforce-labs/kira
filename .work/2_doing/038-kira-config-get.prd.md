@@ -1,7 +1,7 @@
 ---
 id: 038
 title: kira config get
-status: backlog
+status: doing
 kind: prd
 assigned:
 created: 2026-02-02
