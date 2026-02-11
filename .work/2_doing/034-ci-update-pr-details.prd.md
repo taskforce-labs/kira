@@ -175,10 +175,10 @@ Commit: Create dedicated GitHub Actions workflow file that triggers on pull_requ
 
 ### Slice 3: kira init integration
 Commit: Integrate workflow file creation into kira init command. When git_platform is github, create .github/workflows/update-pr-details.yml from template if it doesn't exist.
-- [ ] T020: Detect git_platform: github in kira config during initializeWorkspace
-- [ ] T021: Create `.github/workflows/` directory if it doesn't exist
-- [ ] T022: Create `update-pr-details.yml` from embedded template if file doesn't exist
-- [ ] T023: Skip creation if workflow file already exists (do not overwrite)
+- [x] T020: Detect git_platform: github in kira config during initializeWorkspace
+- [x] T021: Create `.github/workflows/` directory if it doesn't exist
+- [x] T022: Create `update-pr-details.yml` from embedded template if file doesn't exist
+- [x] T023: Skip creation if workflow file already exists (do not overwrite)
 
 ## Implementation Notes
 
