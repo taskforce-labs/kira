@@ -26,7 +26,7 @@ This command installs Cursor Agent Skills and Commands that extend Cursor's AI a
 
 **Kira comes loaded with defaults:** Default skills and commands are bundled with Kira. Running `kira install cursor-skills` (and `kira install cursor-commands`) copies these into the Cursor directories so they work across all projects. Only the bundled skills and commands are installed; there is no install from GitHub or local path.
 
-**Installation Location:** The install path is configurable; the only config for this command is to override where skills and commands get installed. Default is always the user's home directory (`~/.cursor/skills/` and `~/.cursor/commands/`). Skills and commands are installed there to make them available across all projects.
+**Installation Location:** The install path is configurable; the only config for this command is to override where skills and commands get installed. Default is the project root (`.agent/skills/` for skills and `.cursor/commands/` for commands). Skills and commands are installed there to make them available to the project.
 
 The installation process:
 1. Creates the appropriate directory structure at the configured path (default: user's home directory)
@@ -111,7 +111,7 @@ Skills can include optional directories:
    - Parallel execution strategies
    - Coordination and conflict resolution
 
-Skills are automatically discovered by Cursor from `.cursor/skills/` and made available to the agent. The agent decides when skills are relevant based on context, or they can be explicitly invoked via `/skill-name`.
+Skills are automatically discovered by Cursor from `.agent/skills/` and made available to the agent. The agent decides when skills are relevant based on context, or they can be explicitly invoked via `/skill-name`.
 
 
 
@@ -121,7 +121,7 @@ Skills are automatically discovered by Cursor from `.cursor/skills/` and made av
 ### Functional Requirements
 
 1. **Install Skills**
-   - Create the skills directory at the configured path if it doesn't exist (default: `~/.cursor/skills/`)
+   - Create the skills directory at the configured path if it doesn't exist (default: `.agent/skills/`)
    - Install only the skills bundled with Kira
    - Each skill is installed as a folder with `SKILL.md` file
    - Support optional skill directories: `scripts/`, `references/`, `assets/`
@@ -129,7 +129,7 @@ Skills are automatically discovered by Cursor from `.cursor/skills/` and made av
    - If skills already exist at the target path, detect and offer to overwrite or cancel
 
 2. **Install Commands**
-   - Create the commands directory at the configured path if it doesn't exist (default: `~/.cursor/commands/`)
+   - Create the commands directory at the configured path if it doesn't exist (default: `.cursor/commands/`)
    - Install only the commands bundled with Kira as markdown files (`.md`)
    - Validate command files are valid markdown
    - If commands already exist at the target path, detect and offer to overwrite or cancel
@@ -144,15 +144,15 @@ Skills are automatically discovered by Cursor from `.cursor/skills/` and made av
 ### Technical Requirements
 
 1. **Directory Structure**
-   - Install path is configurable (e.g. in `kira.yaml`); default is always the user's home directory
-   - Skills: `<configured-base>/.cursor/skills/kira-<skill-name>/SKILL.md` (default: `~/.cursor/skills/kira-<skill-name>/SKILL.md`)
-   - Commands: `<configured-base>/.cursor/commands/kira-<command-name>.md` (default: `~/.cursor/commands/kira-<command-name>.md`)
+   - Install path is configurable (e.g. in `kira.yaml`); default is the project root
+   - Skills: `<configured-base>/.agent/skills/kira-<skill-name>/SKILL.md` (default: `.agent/skills/kira-<skill-name>/SKILL.md`)
+   - Commands: `<configured-base>/.cursor/commands/kira-<command-name>.md` (default: `.cursor/commands/kira-<command-name>.md`)
    - When target already has skills/commands, detect and offer to overwrite or cancel (no overwrite without user choice)
 
 2. **Install Path Config**
    - The only config for install is to override where skills and commands get installed
-   - Config source: `kira.yaml` (in project root) or equivalent; default is always the user's home directory
-   - Install reads the configured path from config; if absent, use `~/.cursor/skills/` and `~/.cursor/commands/`
+   - Config source: `kira.yaml` (in project root) or equivalent; default is the project root
+   - Install reads the configured path from config; if absent, use `.agent/skills/` and `.cursor/commands/` relative to project root
 
 3. **Validation**
    - Validate `SKILL.md` frontmatter (name, description required)
@@ -168,8 +168,8 @@ Skills are automatically discovered by Cursor from `.cursor/skills/` and made av
 
 ## Acceptance Criteria
 
-1. ✅ Running `kira install cursor-skills` successfully installs all bundled skills to the configured path (default: `~/.cursor/skills/`)
-2. ✅ Running `kira install cursor-commands` successfully installs all bundled commands to the configured path (default: `~/.cursor/commands/`)
+1. ✅ Running `kira install cursor-skills` successfully installs all bundled skills to the configured path (default: `.agent/skills/`)
+2. ✅ Running `kira install cursor-commands` successfully installs all bundled commands to the configured path (default: `.cursor/commands/`)
 3. ✅ Skills are installed to the correct path and format that Cursor expects (so they can appear in Cursor Settings → Rules → Agent Decides when Cursor loads them)
 4. ✅ Commands are installed to the correct path and format that Cursor expects (so they can appear when typing `/` in Cursor chat when Cursor loads them)
 5. ✅ Skills can be invoked explicitly via `/skill-name` in chat
@@ -178,7 +178,7 @@ Skills are automatically discovered by Cursor from `.cursor/skills/` and made av
 8. ✅ When skills/commands already exist at the target path, install detects them and offers to overwrite or cancel
 9. ✅ Installation provides clear feedback on success/failure
 10. ✅ Installation validates skill structure and reports errors
-11. ✅ Install path can be overridden via config (e.g. `kira.yaml`); default is always the user's home directory
+11. ✅ Install path can be overridden via config (e.g. `kira.yaml`); default is the project root
 12. ✅ When a required skill or command is not present, Kira automatically installs it (runs the appropriate install for the missing items); no user confirmation required.
 
 ## Implementation Notes
@@ -187,7 +187,7 @@ Skills are automatically discovered by Cursor from `.cursor/skills/` and made av
 
 Kira ships with bundled skills and commands only. The install command:
 
-- **Source:** Only the skills and commands bundled with Kira (e.g. in `kira/assets/cursor-skills/` or similar). Running `kira install cursor-skills` / `kira install cursor-commands` copies these into the configured path (default: `~/.cursor/skills/` and `~/.cursor/commands/`). The only config is to override where skills and commands get installed; default is always the user's home directory.
+- **Source:** Only the skills and commands bundled with Kira (e.g. in `kira/assets/cursor-skills/` or similar). Running `kira install cursor-skills` / `kira install cursor-commands` copies these into the configured path (default: `.agent/skills/` and `.cursor/commands/`). The only config is to override where skills and commands get installed; default is the project root.
 
 Bundled structure (for reference):
 ```
@@ -207,11 +207,11 @@ kira/assets/cursor-skills/   (or similar)
 
 The `kira install cursor-skills` and `kira install cursor-commands` commands should:
 
-1. Resolve install path from config (the only config: where to install skills/commands); default is user's home directory. Create the target base directory (e.g. `~/.cursor/`) if it doesn't exist.
+1. Resolve install path from config (the only config: where to install skills/commands); default is project root. Create the target base directories (e.g. `.agent/` for skills, `.cursor/` for commands) if they don't exist.
 2. Copy bundled skills/commands from Kira's bundle to the configured path
 3. If skills/commands already exist at the target path, detect them and offer to overwrite or cancel (no overwrite without user choice)
 4. Validate structure
-5. Install to the configured directories (default: `~/.cursor/skills/` and `~/.cursor/commands/`)
+5. Install to the configured directories (default: `.agent/skills/` and `.cursor/commands/`)
 6. Report results
 
 **When a skill or command is not present:** Any Kira command or workflow that depends on a skill or command should check the configured path for required items before proceeding. If something is missing, automatically run the appropriate install (`kira install cursor-skills` and/or `kira install cursor-commands`) for the missing items; no user confirmation required.
@@ -351,7 +351,7 @@ Skills and commands should integrate with Kira's workflow:
 
 ### Install Path Config
 
-The only config for this command is to override where skills and commands get installed. Default is always the user's home directory (`~/.cursor/skills/` and `~/.cursor/commands/`). Config is read from `kira.yaml` (project root) or equivalent; we only use it to get the install path override when present.
+The only config for this command is to override where skills and commands get installed. Default is the project root (`.agent/skills/` and `.cursor/commands/`). Config is read from `kira.yaml` (project root) or equivalent; we only use it to get the install path override when present.
 
 ## Release Notes
 
@@ -359,8 +359,8 @@ The only config for this command is to override where skills and commands get in
 
 - Add `kira install cursor-skills` command
 - Add `kira install cursor-commands` command
-- Kira ships with bundled skills/commands only; install command copies them to the configured path (default: `~/.cursor/skills/` and `~/.cursor/commands/`)
-- Only config: override where skills and commands get installed (e.g. via `kira.yaml`); default is always the user's home directory
+- Kira ships with bundled skills/commands only; install command copies them to the configured path (default: `.agent/skills/` and `.cursor/commands/`)
+- Only config: override where skills and commands get installed (e.g. via `kira.yaml`); default is the project root
 - When skills/commands already exist at the target path, offer to overwrite or cancel
 - When a required skill or command is not present, Kira automatically runs the appropriate install for the missing items (no user confirmation required)
 - Install skills for: Product Discovery, Domain Discovery, Technical Discovery, Roadmap Planning, Work Item Elaboration, RALF on Work Items
@@ -373,7 +373,7 @@ The only config for this command is to override where skills and commands get in
 
 ### Install path config
 - [x] T001: Add install path config keys in kira.yaml (e.g. cursor-skills-path, cursor-commands-path or base path) and document in schema/docs
-- [x] T002: Implement path resolver: read config, default to ~/.cursor/skills/ and ~/.cursor/commands/ when absent
+- [x] T002: Implement path resolver: read config, default to .agent/skills/ and .cursor/commands/ when absent
 
 ### Bundled assets layout
 - [x] T003: Define bundled source layout under kira assets (e.g. kira/assets/cursor-skills/skills/ and commands/)
