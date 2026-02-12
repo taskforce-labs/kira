@@ -1,7 +1,7 @@
 ---
 id: 038
 title: kira config get
-status: doing
+status: review
 kind: prd
 assigned:
 created: 2026-02-02
