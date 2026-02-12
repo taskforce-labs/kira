@@ -1,6 +1,6 @@
 ---
 name: work-item-elaboration
-description: Articulate a work item’s intent and behaviour: value, outcomes, business rules, and flows. Operates in the behavioural space (what value is delivered and what correct behaviour looks like), not solution or implementation design. Use existing technical context only to inform accuracy, not to decide solutions. Intended as a prerequisite for slicing and delivery planning.
+description: "Articulate a work item’s intent and behaviour: value, outcomes, business rules, and flows. Operates in the behavioural space (what value is delivered and what correct behaviour looks like), not solution or implementation design. Use existing technical context only to inform accuracy, not to decide solutions. Intended as a prerequisite for slicing and delivery planning."
 disable-model-invocation: false
 ---
 

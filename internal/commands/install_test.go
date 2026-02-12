@@ -143,12 +143,12 @@ cursor_install:
 				skillDirs = append(skillDirs, e.Name())
 			}
 		}
-		require.Contains(t, skillDirs, "kira-product-discovery")
-		skillPath := filepath.Join(skillsPath, "kira-product-discovery", "SKILL.md")
+		require.Contains(t, skillDirs, "kira-work-item-elaboration")
+		skillPath := filepath.Join(skillsPath, "kira-work-item-elaboration", "SKILL.md")
 		// #nosec G304 - path is built from test temp dir and fixed segments
 		data, err := os.ReadFile(skillPath)
 		require.NoError(t, err)
-		assert.Contains(t, string(data), "name: product-discovery")
+		assert.Contains(t, string(data), "name: work-item-elaboration")
 	})
 }
 
@@ -179,12 +179,12 @@ cursor_install:
 				files = append(files, e.Name())
 			}
 		}
-		require.Contains(t, files, "kira-product-discovery.md")
-		cmdPath := filepath.Join(commandsPath, "kira-product-discovery.md")
+		require.Contains(t, files, "kira-elaborate-work-item.md")
+		cmdPath := filepath.Join(commandsPath, "kira-elaborate-work-item.md")
 		// #nosec G304 - path is from test temp dir and fixed segment
 		data, err := os.ReadFile(cmdPath)
 		require.NoError(t, err)
-		assert.Contains(t, string(data), "# Product Discovery")
+		assert.Contains(t, string(data), "# Elaborate Work Item")
 	})
 }
 
@@ -203,7 +203,7 @@ func TestEnsureCursorSkillsInstalled(t *testing.T) {
 				dirs = append(dirs, e.Name())
 			}
 		}
-		require.Contains(t, dirs, "kira-product-discovery")
+		require.Contains(t, dirs, "kira-work-item-elaboration")
 	})
 	t.Run("no-op when all skills already present", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -231,7 +231,7 @@ func TestEnsureCursorCommandsInstalled(t *testing.T) {
 				files = append(files, e.Name())
 			}
 		}
-		require.Contains(t, files, "kira-product-discovery.md")
+		require.Contains(t, files, "kira-elaborate-work-item.md")
 	})
 	t.Run("no-op when all commands already present", func(t *testing.T) {
 		tmpDir := t.TempDir()

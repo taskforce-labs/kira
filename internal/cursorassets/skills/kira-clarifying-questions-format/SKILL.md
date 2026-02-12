@@ -1,6 +1,6 @@
 ---
 name: clarifying-questions-format
-description: Present clarifying questions with selectable options. Use when any skill or command needs to ask stakeholders to choose among options—format questions so answers are easy to give (check a box) and assumptions are visible (suggest an option and why).
+description: "Present clarifying questions with selectable options. Use when any skill or command needs to ask stakeholders to choose among options—format questions so answers are easy to give (check a box) and assumptions are visible (suggest an option and why)."
 disable-model-invocation: false
 ---
 
