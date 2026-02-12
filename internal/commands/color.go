@@ -100,3 +100,35 @@ func checkDescStyle(s string) string {
 	}
 	return ansiDim + s + ansiReset
 }
+
+// pathStyle returns a file path with optional cyan styling.
+func pathStyle(s string) string {
+	if !sliceColorEnabled() {
+		return s
+	}
+	return ansiCyan + s + ansiReset
+}
+
+// itemNameStyle returns an item name (skill/command) with optional bold styling.
+func itemNameStyle(s string) string {
+	if !sliceColorEnabled() {
+		return s
+	}
+	return ansiBold + s + ansiReset
+}
+
+// warningStyle returns warning text with optional yellow styling.
+func warningStyle(s string) string {
+	if !sliceColorEnabled() {
+		return s
+	}
+	return ansiYellow + s + ansiReset
+}
+
+// promptStyle returns prompt text with optional dim styling.
+func promptStyle(s string) string {
+	if !sliceColorEnabled() {
+		return s
+	}
+	return ansiDim + s + ansiReset
+}

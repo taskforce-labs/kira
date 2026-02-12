@@ -19,9 +19,15 @@ and a lightweight CLI to manage and coordinate work.`,
 	PersistentPreRunE: ensureCursorInstall,
 }
 
-func ensureCursorInstall(_ *cobra.Command, args []string) error {
-	if len(args) > 0 && args[0] == "install" {
-		return nil // skip auto-install when user is explicitly running install
+func ensureCursorInstall(cmd *cobra.Command, args []string) error {
+	// Skip auto-install when user is explicitly running install command or its subcommands
+	// Check the command path by walking up the parent chain
+	current := cmd
+	for current != nil {
+		if current.Name() == "install" {
+			return nil
+		}
+		current = current.Parent()
 	}
 	cfg, err := config.LoadConfig()
 	if err != nil {
