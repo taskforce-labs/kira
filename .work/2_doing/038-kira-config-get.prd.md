@@ -125,46 +125,46 @@ When the key contains a dot (`.`), it is treated as a **path** into the merged c
 
 ### Slice 1: Command scaffold and key dispatch
 
-- [ ] T001: Add `config` subcommand and `config get <key>` in `internal/commands`; wire in `root.go`.
-- [ ] T002: Implement key parsing and dispatch (switch or map) to placeholder getters; unknown key returns error and non-zero exit.
-- [ ] T003: Add tests for unknown key and for help listing valid keys.
+- [x] T001: Add `config` subcommand and `config get <key>` in `internal/commands`; wire in `root.go`.
+- [x] T002: Implement key parsing and dispatch (switch or map) to placeholder getters; unknown key returns error and non-zero exit.
+- [x] T003: Add tests for unknown key and for help listing valid keys.
 
 ### Slice 2: Scalar keys (remote, work_folder, docs_folder, config_dir)
 
-- [ ] T004: Implement getters for `remote`, `work_folder`, `docs_folder`, `config_dir` using existing config helpers.
-- [ ] T005: Implement `work_folder_abs` and `docs_folder_abs` using `GetWorkFolderAbsPath` and `DocsRoot(cfg, cfg.ConfigDir)`; handle errors.
-- [ ] T006: Add unit tests for these keys (with default config, with custom kira.yml).
+- [x] T004: Implement getters for `remote`, `work_folder`, `docs_folder`, `config_dir` using existing config helpers.
+- [x] T005: Implement `work_folder_abs` and `docs_folder_abs` using `GetWorkFolderAbsPath` and `DocsRoot(cfg, cfg.ConfigDir)`; handle errors.
+- [x] T006: Add unit tests for these keys (with default config, with custom kira.yml).
 
 ### Slice 3: trunk_branch resolution
 
-- [ ] T007: Implement `trunk_branch` using same logic as `kira start` (config then auto-detect); reuse or refactor `determineTrunkBranch` from start.go so config get stays in sync.
-- [ ] T008: Add tests: configured trunk_branch, empty (auto-detect main/master), not a git repo, and invalid/missing branch.
+- [x] T007: Implement `trunk_branch` using same logic as `kira start` (config then auto-detect); reuse or refactor `determineTrunkBranch` from start.go so config get stays in sync.
+- [x] T008: Add tests: configured trunk_branch, empty (auto-detect main/master), not a git repo, and invalid/missing branch.
 
 ### Slice 4: ide.command and ide.args output formats
 
-- [ ] T009: Implement `ide.command` and `ide.args`; for `ide.args`, support `--output text` (one per line) and `--output json` (array).
-- [ ] T010: Add tests for scalar vs list output and for missing ide config.
+- [x] T009: Implement `ide.command` and `ide.args`; for `ide.args`, support `--output text` (one per line) and `--output json` (array).
+- [x] T010: Add tests for scalar vs list output and for missing ide config.
 
 ### Slice 5: Polyrepo and per-project keys
 
-- [ ] T011: Add `project_names` key: return list of `workspace.projects[].name` (one per line or JSON); empty when no projects.
-- [ ] T012: Add `--project <name>` flag; accept `*` or `all` as “all projects”; validate single project name against `workspace.projects`; error when no projects or unknown name (except `*`/all with no projects → empty output, exit 0).
-- [ ] T013: Implement per-project resolution for `trunk_branch`, `remote`, and `project_path` when `--project <name>` is set (reuse same logic as `kira start`: resolvePolyrepoProjects / resolveTrunkBranch per project path).
-- [ ] T014: Implement “all projects” mode: when `--project '*'` or `--project all`, resolve the key for every project; output text as `name: value` per line, json as `{"name":"value",...}`. No projects → empty output.
-- [ ] T015: Error when `--project` is used with a key that does not support it; error when `project_path` is requested without `--project`.
-- [ ] T016: Add unit tests for project_names (standalone, polyrepo), --project (valid, unknown, no projects), --project '*' (all projects, empty), and per-project trunk_branch/remote/project_path.
+- [x] T011: Add `project_names` key: return list of `workspace.projects[].name` (one per line or JSON); empty when no projects.
+- [x] T012: Add `--project <name>` flag; accept `*` or `all` as “all projects”; validate single project name against `workspace.projects`; error when no projects or unknown name (except `*`/all with no projects → empty output, exit 0).
+- [x] T013: Implement per-project resolution for `trunk_branch`, `remote`, and `project_path` when `--project <name>` is set (reuse same logic as `kira start`: resolvePolyrepoProjects / resolveTrunkBranch per project path).
+- [x] T014: Implement “all projects” mode: when `--project '*'` or `--project all`, resolve the key for every project; output text as `name: value` per line, json as `{"name":"value",...}`. No projects → empty output.
+- [x] T015: Error when `--project` is used with a key that does not support it; error when `project_path` is requested without `--project`.
+- [x] T016: Add unit tests for project_names (standalone, polyrepo), --project (valid, unknown, no projects), --project '*' (all projects, empty), and per-project trunk_branch/remote/project_path.
 
 ### Slice 6: Path syntax (dot-path into config)
 
-- [ ] T017: Implement path detection: if key contains `.`, treat as path; otherwise treat as curated key. Path parser: split on `.`; segments = YAML key names; last segment may be numeric for array index (e.g. `workspace.projects.0`).
-- [ ] T018: Implement path lookup on merged config: walk config by path segments (map struct fields by yaml tag; support numeric index for slices). Return raw value at path. Missing segment or invalid index → error, exit non-zero.
-- [ ] T019: Path output: scalar (string, number, bool) → value only; list → one per line (text) or JSON array (json); nested object → JSON. Ignore `--project` when key is a path.
-- [ ] T020: Add unit tests for path: valid paths (git.trunk_branch, workspace.projects.0.name), missing path, invalid index, list/object output formats.
+- [x] T017: Implement path detection: if key contains `.`, treat as path; otherwise treat as curated key. Path parser: split on `.`; segments = YAML key names; last segment may be numeric for array index (e.g. `workspace.projects.0`).
+- [x] T018: Implement path lookup on merged config: walk config by path segments (map struct fields by yaml tag; support numeric index for slices). Return raw value at path. Missing segment or invalid index → error, exit non-zero.
+- [x] T019: Path output: scalar (string, number, bool) → value only; list → one per line (text) or JSON array (json); nested object → JSON. Ignore `--project` when key is a path.
+- [x] T020: Add unit tests for path: valid paths (git.trunk_branch, workspace.projects.0.name), missing path, invalid index, list/object output formats.
 
 ### Slice 7: Documentation and polish
 
-- [ ] T021: Document supported keys, path syntax (dot-path, array index), `--project`, and `--project '*'` in help text and, if present, in `.docs/` or README.
-- [ ] T022: Run `kira slice lint` and fix any slice/task issues; run `make check` and e2e if applicable.
+- [x] T021: Document supported keys, path syntax (dot-path, array index), `--project`, and `--project '*'` in help text and, if present, in `.docs/` or README.
+- [x] T022: Run `kira slice lint` and fix any slice/task issues; run `make check` and e2e if applicable.
 
 ## Implementation notes
 
