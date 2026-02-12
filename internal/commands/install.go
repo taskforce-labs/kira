@@ -54,6 +54,10 @@ func runInstallCursorSkills(cmd *cobra.Command, _ []string) error {
 }
 
 func runInstallCursorSkillsWithOptions(cfg *config.Config, force bool) error {
+	return runInstallCursorSkillsWithOptionsAndSilent(cfg, force, false)
+}
+
+func runInstallCursorSkillsWithOptionsAndSilent(cfg *config.Config, force bool, silent bool) error {
 	skillsPath, err := config.GetCursorSkillsPath(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to resolve skills path: %w", err)
@@ -88,7 +92,13 @@ func runInstallCursorSkillsWithOptions(cfg *config.Config, force bool) error {
 			return fmt.Errorf("skill %s: %w", name, err)
 		}
 	}
-	fmt.Printf("Installed %d skill(s) to %s\n", len(names), skillsPath)
+	if !silent {
+		fmt.Printf("%s %d skill(s) to %s:\n", successStyle("Installed"), len(names), pathStyle(skillsPath))
+		for _, name := range names {
+			fmt.Printf("  • %s\n", itemNameStyle(name))
+		}
+		fmt.Println()
+	}
 	return nil
 }
 
@@ -102,6 +112,10 @@ func runInstallCursorCommands(cmd *cobra.Command, _ []string) error {
 }
 
 func runInstallCursorCommandsWithOptions(cfg *config.Config, force bool) error {
+	return runInstallCursorCommandsWithOptionsAndSilent(cfg, force, false)
+}
+
+func runInstallCursorCommandsWithOptionsAndSilent(cfg *config.Config, force bool, silent bool) error {
 	commandsPath, err := config.GetCursorCommandsPath(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to resolve commands path: %w", err)
@@ -136,7 +150,13 @@ func runInstallCursorCommandsWithOptions(cfg *config.Config, force bool) error {
 			return fmt.Errorf("command %s: %w", name, err)
 		}
 	}
-	fmt.Printf("Installed %d command(s) to %s\n", len(names), commandsPath)
+	if !silent {
+		fmt.Printf("%s %d command(s) to %s:\n", successStyle("Installed"), len(names), pathStyle(commandsPath))
+		for _, name := range names {
+			fmt.Printf("  • %s\n", itemNameStyle(name+".md"))
+		}
+		fmt.Println()
+	}
 	return nil
 }
 
@@ -155,7 +175,7 @@ func EnsureCursorSkillsInstalled(cfg *config.Config) error {
 		dirPath := filepath.Join(skillsPath, name)
 		info, err := os.Stat(dirPath)
 		if err != nil || !info.IsDir() {
-			return runInstallCursorSkillsWithOptions(cfg, true)
+			return runInstallCursorSkillsWithOptionsAndSilent(cfg, true, true)
 		}
 	}
 	return nil
@@ -176,7 +196,7 @@ func EnsureCursorCommandsInstalled(cfg *config.Config) error {
 		filePath := filepath.Join(commandsPath, name+".md")
 		info, err := os.Stat(filePath)
 		if err != nil || info.IsDir() {
-			return runInstallCursorCommandsWithOptions(cfg, true)
+			return runInstallCursorCommandsWithOptionsAndSilent(cfg, true, true)
 		}
 	}
 	return nil
@@ -193,8 +213,12 @@ func ensureCommandsOverwriteDecision(commandsPath string, force bool) error {
 	if force {
 		return removeKiraCommandFiles(commandsPath, kiraFiles)
 	}
-	fmt.Printf("Commands already exist at %s (%s). Choose: [o]verwrite, [c]ancel\n", commandsPath, strings.Join(kiraFiles, ", "))
-	fmt.Print("Enter choice (o/c): ")
+	fmt.Printf("\n%s at %s:\n", warningStyle("Commands already exist"), pathStyle(commandsPath))
+	for _, f := range kiraFiles {
+		fmt.Printf("  • %s\n", itemNameStyle(f))
+	}
+	fmt.Printf("\nChoose: [o]verwrite, [c]ancel\n")
+	fmt.Print(promptStyle("Enter choice (o/c): "))
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
 	if err != nil {
@@ -270,8 +294,12 @@ func ensureSkillsOverwriteDecision(skillsPath string, force bool) error {
 		}
 		return nil
 	}
-	fmt.Printf("Skills already exist at %s (%s). Choose: [o]verwrite, [c]ancel\n", skillsPath, strings.Join(kiraDirs, ", "))
-	fmt.Print("Enter choice (o/c): ")
+	fmt.Printf("\n%s at %s:\n", warningStyle("Skills already exist"), pathStyle(skillsPath))
+	for _, d := range kiraDirs {
+		fmt.Printf("  • %s\n", itemNameStyle(d))
+	}
+	fmt.Printf("\nChoose: [o]verwrite, [c]ancel\n")
+	fmt.Print(promptStyle("Enter choice (o/c): "))
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
 	if err != nil {
