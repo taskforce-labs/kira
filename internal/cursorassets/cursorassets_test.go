@@ -12,7 +12,8 @@ func TestListSkills(t *testing.T) {
 	names, err := ListSkills()
 	require.NoError(t, err)
 	require.NotEmpty(t, names)
-	assert.Contains(t, names, "kira-product-discovery")
+	assert.Contains(t, names, "kira-clarifying-questions-format")
+	assert.Contains(t, names, "kira-work-item-elaboration")
 	for _, n := range names {
 		assert.True(t, strings.HasPrefix(n, "kira-"), "skill name should have kira- prefix: %s", n)
 	}
@@ -22,18 +23,20 @@ func TestListCommands(t *testing.T) {
 	names, err := ListCommands()
 	require.NoError(t, err)
 	require.NotEmpty(t, names)
-	assert.Contains(t, names, "kira-product-discovery")
+	assert.Contains(t, names, "kira-break-work-item-into-slices")
+	assert.Contains(t, names, "kira-elaborate-work-item")
+	assert.Contains(t, names, "kira-plan-and-build")
 	for _, n := range names {
 		assert.True(t, strings.HasPrefix(n, "kira-"), "command name should have kira- prefix: %s", n)
 	}
 }
 
 func TestReadSkillSKILL(t *testing.T) {
-	data, err := ReadSkillSKILL("kira-product-discovery")
+	data, err := ReadSkillSKILL("kira-work-item-elaboration")
 	require.NoError(t, err)
 	require.NotEmpty(t, data)
 	content := string(data)
-	assert.Contains(t, content, "name: product-discovery")
+	assert.Contains(t, content, "name:")
 	assert.Contains(t, content, "description:")
 }
 
@@ -47,11 +50,11 @@ func TestReadSkillFile_InvalidName(t *testing.T) {
 }
 
 func TestReadCommand(t *testing.T) {
-	data, err := ReadCommand("kira-product-discovery")
+	data, err := ReadCommand("kira-plan-and-build")
 	require.NoError(t, err)
 	require.NotEmpty(t, data)
 	content := string(data)
-	assert.Contains(t, content, "# Product Discovery")
+	assert.Contains(t, content, "# Plan and Build")
 }
 
 func TestReadCommand_InvalidName(t *testing.T) {
@@ -64,7 +67,7 @@ func TestReadCommand_InvalidName(t *testing.T) {
 }
 
 func TestSkillEntries(t *testing.T) {
-	entries, err := SkillEntries("kira-product-discovery")
+	entries, err := SkillEntries("kira-work-item-elaboration")
 	require.NoError(t, err)
 	require.NotEmpty(t, entries)
 	var hasSKILL bool
