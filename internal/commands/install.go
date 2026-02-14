@@ -57,7 +57,11 @@ func runInstallCursorSkillsWithOptions(cfg *config.Config, force bool) error {
 	return runInstallCursorSkillsWithOptionsAndSilent(cfg, force, false)
 }
 
-func runInstallCursorSkillsWithOptionsAndSilent(cfg *config.Config, force bool, silent bool) error {
+func runInstallCursorSkillsWithOptionsAndSilent(
+	cfg *config.Config,
+	force bool,
+	silent bool,
+) error {
 	skillsPath, err := config.GetCursorSkillsPath(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to resolve skills path: %w", err)
@@ -115,7 +119,11 @@ func runInstallCursorCommandsWithOptions(cfg *config.Config, force bool) error {
 	return runInstallCursorCommandsWithOptionsAndSilent(cfg, force, false)
 }
 
-func runInstallCursorCommandsWithOptionsAndSilent(cfg *config.Config, force bool, silent bool) error {
+func runInstallCursorCommandsWithOptionsAndSilent(
+	cfg *config.Config,
+	force bool,
+	silent bool,
+) error {
 	commandsPath, err := config.GetCursorCommandsPath(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to resolve commands path: %w", err)
@@ -269,12 +277,26 @@ func validateCommandMarkdown(content []byte) error {
 }
 
 func ensureSkillsOverwriteDecision(skillsPath string, force bool) error {
+	kiraDirs, err := listExistingKiraSkills(skillsPath)
+	if err != nil {
+		return err
+	}
+	if len(kiraDirs) == 0 {
+		return nil
+	}
+	if force {
+		return removeKiraSkills(skillsPath, kiraDirs)
+	}
+	return promptAndRemoveSkills(skillsPath, kiraDirs)
+}
+
+func listExistingKiraSkills(skillsPath string) ([]string, error) {
 	entries, err := os.ReadDir(skillsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf("failed to read skills path: %w", err)
+		return nil, fmt.Errorf("failed to read skills path: %w", err)
 	}
 	var kiraDirs []string
 	for _, e := range entries {
@@ -282,18 +304,20 @@ func ensureSkillsOverwriteDecision(skillsPath string, force bool) error {
 			kiraDirs = append(kiraDirs, e.Name())
 		}
 	}
-	if len(kiraDirs) == 0 {
-		return nil
-	}
-	if force {
-		for _, d := range kiraDirs {
-			dirPath := filepath.Join(skillsPath, d)
-			if err := os.RemoveAll(dirPath); err != nil {
-				return fmt.Errorf("failed to remove existing skill %s: %w", d, err)
-			}
+	return kiraDirs, nil
+}
+
+func removeKiraSkills(skillsPath string, dirs []string) error {
+	for _, d := range dirs {
+		dirPath := filepath.Join(skillsPath, d)
+		if err := os.RemoveAll(dirPath); err != nil {
+			return fmt.Errorf("failed to remove existing skill %s: %w", d, err)
 		}
-		return nil
 	}
+	return nil
+}
+
+func promptAndRemoveSkills(skillsPath string, kiraDirs []string) error {
 	fmt.Printf("\n%s at %s:\n", warningStyle("Skills already exist"), pathStyle(skillsPath))
 	for _, d := range kiraDirs {
 		fmt.Printf("  • %s\n", itemNameStyle(d))
@@ -306,18 +330,10 @@ func ensureSkillsOverwriteDecision(skillsPath string, force bool) error {
 		return err
 	}
 	choice := strings.ToLower(strings.TrimSpace(input))
-	switch choice {
-	case "o", choiceOverwrite:
-		for _, d := range kiraDirs {
-			dirPath := filepath.Join(skillsPath, d)
-			if err := os.RemoveAll(dirPath); err != nil {
-				return fmt.Errorf("failed to remove existing skill %s: %w", d, err)
-			}
-		}
-		return nil
-	default:
-		return fmt.Errorf("install cancelled")
+	if choice == "o" || choice == choiceOverwrite {
+		return removeKiraSkills(skillsPath, kiraDirs)
 	}
+	return fmt.Errorf("install cancelled")
 }
 
 type skillFrontmatter struct {
