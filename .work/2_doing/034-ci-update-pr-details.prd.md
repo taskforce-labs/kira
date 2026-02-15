@@ -169,9 +169,9 @@ Commit: Create dedicated GitHub Actions workflow file that triggers on pull_requ
 - [x] T013: Add steps to build kira from source: (1) Set up Go (using `actions/setup-go@v5`), (2) Cache Go modules (using `actions/cache@v4` like existing CI workflow), (3) Build kira using `make build` (reuse existing Makefile target) since `kira current` command hasn't been released yet. Updating to download released binary will be handled in a separate work item.
 - [x] T014: Implement job steps: checkout PR head ref (main repo in polyrepo), run `kira current --title` and `kira current --body`, run `kira current prs` to get all PRs (main repo + project repos), parse JSON output with validation, for each discovered PR update via GitHub API PATCH with proper error handling (403 = warning, 404 = info, 429 = retry with backoff, continue; fail only on main repo errors), validate PR body size before updating
 - [x] T016: Add error handling: catch non-zero exits from `kira current --title`/`--body` (work item not found or invalid branch) and handle gracefully (log and exit 0), handle empty array from `kira current prs` (exit 0), validate JSON structure from `kira current prs` before parsing, no PR exists (exit 0), GitHub API errors for main repo (fail with clear message and permissions link), GitHub API errors for other repos (log warning/info and continue), handle rate limiting (429) with exponential backoff retries, validate PR body size limit (~65KB) and fail with clear error if exceeded
-- [ ] T017: Test workflow locally using `./kdev current` (or build from source) to verify workflow logic before release
-- [ ] T018: Test workflow end-to-end in CI (requires kira release with `kira current` command from Slice 1, or temporarily build from source in workflow)
-- [ ] T019: Test polyrepo workflow: verify it discovers and updates PRs in multiple repos, handles permission errors gracefully
+- [x] T017: Test workflow locally using `./kdev current` (or build from source) to verify workflow logic before release
+- [x] T018: Test workflow end-to-end in CI (requires kira release with `kira current` command from Slice 1, or temporarily build from source in workflow)
+- [x] T019: Test polyrepo workflow: verify it discovers and updates PRs in multiple repos, handles permission errors gracefully
 
 ### Slice 3: kira init integration
 Commit: Integrate workflow file creation into kira init command. When git_platform is github, create .github/workflows/update-pr-details.yml from template if it doesn't exist.
