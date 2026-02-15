@@ -1,7 +1,7 @@
 ---
 id: 023
 title: install skills command
-status: doing
+status: review
 kind: prd
 assigned:
 created: 2026-01-27
