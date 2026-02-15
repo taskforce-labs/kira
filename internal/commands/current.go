@@ -19,12 +19,13 @@ import (
 var currentCmd = &cobra.Command{
 	Use:   "current",
 	Short: "Get work item information from current branch",
-	Long: `Derives the work item from the current branch name and outputs PR title, body, or PR list.
+	Long: `Derives the work item from the current branch name and outputs PR title, body, slug, or PR list.
 Used by CI workflows to update PR details from work items.
 
 Examples:
   kira current --title          # Output PR title (e.g. "034: ci update pr details")
   kira current --body           # Output entire work item file content
+  kira current --slug           # Output slug (e.g. "034-ci-update-pr-details") - matches worktree and branch name
   kira current prs              # Output JSON array of related PRs (main repo + project repos in polyrepo)`,
 	RunE:         runCurrent,
 	SilenceUsage: true,
@@ -41,6 +42,7 @@ var currentPRsCmd = &cobra.Command{
 func init() {
 	currentCmd.Flags().Bool("title", false, "Output PR title")
 	currentCmd.Flags().Bool("body", false, "Output work item file content")
+	currentCmd.Flags().Bool("slug", false, "Output slug (full branch name matching worktree and branch, e.g. '034-ci-update-pr-details')")
 	currentCmd.AddCommand(currentPRsCmd)
 }
 
@@ -55,9 +57,21 @@ func runCurrent(cmd *cobra.Command, _ []string) error {
 
 	titleFlag, _ := cmd.Flags().GetBool("title")
 	bodyFlag, _ := cmd.Flags().GetBool("body")
+	slugFlag, _ := cmd.Flags().GetBool("slug")
 
-	if titleFlag && bodyFlag {
-		return fmt.Errorf("cannot use --title and --body flags together")
+	flagCount := 0
+	if titleFlag {
+		flagCount++
+	}
+	if bodyFlag {
+		flagCount++
+	}
+	if slugFlag {
+		flagCount++
+	}
+
+	if flagCount > 1 {
+		return fmt.Errorf("cannot use multiple flags together (--title, --body, --slug)")
 	}
 
 	if titleFlag {
@@ -65,6 +79,9 @@ func runCurrent(cmd *cobra.Command, _ []string) error {
 	}
 	if bodyFlag {
 		return runCurrentBody(cfg)
+	}
+	if slugFlag {
+		return runCurrentSlug(cfg)
 	}
 
 	return cmd.Help()
@@ -100,7 +117,7 @@ func runCurrentTitle(cfg *config.Config) error {
 
 	// Output PR title format: "{id}: {title}" (same as kira start)
 	prTitle := fmt.Sprintf("%s: %s", id, title)
-	fmt.Print(prTitle)
+	fmt.Println(prTitle)
 	return nil
 }
 
@@ -134,7 +151,48 @@ func runCurrentBody(cfg *config.Config) error {
 	}
 
 	fmt.Print(string(content))
+	// Note: Don't add newline here - work item content should be output as-is
 	return nil
+}
+
+func runCurrentSlug(cfg *config.Config) error {
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return fmt.Errorf("not a git repository: %w", err)
+	}
+
+	currentBranch, err := getCurrentBranch(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to determine current branch: %w", err)
+	}
+
+	// Validate branch name format (must be {id}-{slug})
+	_, err = parseWorkItemIDFromBranch(currentBranch, cfg)
+	if err != nil {
+		// Invalid branch name - exit without output, non-zero exit code
+		os.Exit(1)
+	}
+
+	// Output the full branch name (which matches worktree and branch name)
+	// Branch format is "{id}-{slug}" (e.g., "034-ci-update-pr-details")
+	fmt.Println(currentBranch)
+	return nil
+}
+
+// extractSlugFromBranch extracts the slug (kebab-case title) from a branch name.
+// Branch format is "{id}-{slug}" (e.g., "034-ci-update-pr-details" -> "ci-update-pr-details").
+// This is kept for backward compatibility but runCurrentSlug now outputs the full branch name.
+func extractSlugFromBranch(branchName, workItemID string) string {
+	// Expected format: "{id}-{slug}"
+	prefix := workItemID + "-"
+	if !strings.HasPrefix(branchName, prefix) {
+		return ""
+	}
+	slug := strings.TrimPrefix(branchName, prefix)
+	if slug == "" {
+		return ""
+	}
+	return slug
 }
 
 // findWorkItemFileInAllStatusFolders searches for a work item file by ID across all status folders.

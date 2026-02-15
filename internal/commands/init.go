@@ -375,7 +375,23 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Validate branch name format
+        id: validate-branch
+        continue-on-error: true
+        run: |
+          BRANCH=$(./bin/kira current --slug 2>&1)
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "Branch name does not match kira format, skipping PR update"
+            echo "valid=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "Branch: $BRANCH"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "valid=true" >> $GITHUB_OUTPUT
+
       - name: Get PR title
+        if: steps.validate-branch.outputs.valid == 'true'
         id: pr-title
         continue-on-error: true
         run: |
@@ -394,7 +410,7 @@ jobs:
 
       - name: Get PR body
         id: pr-body
-        if: steps.pr-title.outputs.skip != 'true'
+        if: steps.validate-branch.outputs.valid == 'true' && steps.pr-title.outputs.skip != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
@@ -421,7 +437,7 @@ jobs:
 
       - name: Get related PRs
         id: prs
-        if: steps.pr-title.outputs.skip != 'true' && steps.pr-body.outputs.skip != 'true'
+        if: steps.validate-branch.outputs.valid == 'true' && steps.pr-title.outputs.skip != 'true' && steps.pr-body.outputs.skip != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
@@ -445,7 +461,7 @@ jobs:
           echo "skip=false" >> $GITHUB_OUTPUT
 
       - name: Update PRs
-        if: steps.pr-title.outputs.skip != 'true' && steps.pr-body.outputs.skip != 'true' && steps.prs.outputs.skip != 'true'
+        if: steps.validate-branch.outputs.valid == 'true' && steps.pr-title.outputs.skip != 'true' && steps.pr-body.outputs.skip != 'true' && steps.prs.outputs.skip != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
