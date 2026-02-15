@@ -7,7 +7,7 @@ created: 2026-02-02T00:00:00Z
 assigned: null
 merge_commit_sha: 3667cd369eee5dcc450472724b96b6362080415c
 merge_strategy: rebase
-merged_at: "2026-02-15T10:14:16Z"
+merged_at: "2026-02-15T10:14:15Z"
 pr_number: 22
 tags: [configuration, cli]
 ---
