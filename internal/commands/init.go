@@ -237,7 +237,7 @@ func ensureWorkspaceDecision(workPath, docsPath string, force, fillMissing bool)
 	if choice == "f" || choice == "fill-missing" {
 		return nil
 	}
-	if choice == "o" || choice == "overwrite" {
+	if choice == "o" || choice == choiceOverwrite {
 		_ = removePathIfExists(workPath, "work folder")
 		_ = removePathIfExists(docsPath, "docs folder")
 		return nil

@@ -204,6 +204,15 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return printDryRunPreview(ctx)
 	}
 
+	// Ensure Cursor skills and commands are installed before starting workflow
+	// (skip in dry-run mode to avoid side effects)
+	if err := EnsureCursorSkillsInstalled(cfg); err != nil {
+		return fmt.Errorf("failed to ensure cursor skills installed: %w", err)
+	}
+	if err := EnsureCursorCommandsInstalled(cfg); err != nil {
+		return fmt.Errorf("failed to ensure cursor commands installed: %w", err)
+	}
+
 	// Execute git operations
 	return executeGitOperations(ctx)
 }

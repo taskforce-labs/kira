@@ -1165,3 +1165,131 @@ checks:
 		assert.Contains(t, err.Error(), "missing required 'name' or 'command'")
 	})
 }
+
+func TestGetCursorSkillsPath(t *testing.T) {
+	t.Run("defaults to project root .agent/skills when base_path empty and ConfigDir set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{ConfigDir: tmpDir, CursorInstall: &CursorInstallConfig{}}
+		path, err := GetCursorSkillsPath(cfg)
+		require.NoError(t, err)
+		require.NotEmpty(t, path)
+		expected := filepath.Join(tmpDir, ".agent", "skills")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(path))
+		// Path must be absolute
+		assert.True(t, filepath.IsAbs(path), "expected absolute path, got %s", path)
+	})
+
+	t.Run("defaults to current directory .agent/skills when base_path and ConfigDir empty", func(t *testing.T) {
+		cfg := &Config{CursorInstall: &CursorInstallConfig{}}
+		path, err := GetCursorSkillsPath(cfg)
+		require.NoError(t, err)
+		require.NotEmpty(t, path)
+		assert.Contains(t, path, string(filepath.Separator)+".agent"+string(filepath.Separator)+"skills")
+		// Path must be absolute
+		assert.True(t, filepath.IsAbs(path), "expected absolute path, got %s", path)
+	})
+
+	t.Run("uses cursor_install.base_path when set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{CursorInstall: &CursorInstallConfig{BasePath: tmpDir}}
+		path, err := GetCursorSkillsPath(cfg)
+		require.NoError(t, err)
+		expected := filepath.Join(tmpDir, ".agent", "skills")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(path))
+	})
+
+	t.Run("rejects base_path with null byte", func(t *testing.T) {
+		cfg := &Config{CursorInstall: &CursorInstallConfig{BasePath: "home\x00evil"}}
+		_, err := GetCursorSkillsPath(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "null")
+	})
+
+	t.Run("resolves relative base_path relative to ConfigDir not CWD", func(t *testing.T) {
+		// Create temp directories for config and a different CWD
+		configDir := t.TempDir()
+		cwdDir := t.TempDir()
+
+		// Save original working directory and change to cwdDir
+		origWd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(origWd) }()
+		require.NoError(t, os.Chdir(cwdDir))
+
+		// Create config with relative base_path "."
+		cfg := &Config{
+			ConfigDir:     configDir,
+			CursorInstall: &CursorInstallConfig{BasePath: "."},
+		}
+
+		// Get cursor skills path
+		path, err := GetCursorSkillsPath(cfg)
+		require.NoError(t, err)
+
+		// Path should be relative to configDir, not cwdDir
+		expected := filepath.Join(configDir, ".agent", "skills")
+		assert.Equal(t, expected, path)
+		assert.True(t, strings.HasPrefix(path, configDir), "path should start with configDir")
+		assert.False(t, strings.HasPrefix(path, cwdDir), "path should not start with cwdDir")
+	})
+
+	t.Run("rejects relative base_path when ConfigDir is empty", func(t *testing.T) {
+		cfg := &Config{
+			ConfigDir:     "",
+			CursorInstall: &CursorInstallConfig{BasePath: "relative/path"},
+		}
+		_, err := GetCursorSkillsPath(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "relative")
+		assert.Contains(t, err.Error(), "config directory is unknown")
+	})
+}
+
+func TestGetCursorCommandsPath(t *testing.T) {
+	t.Run("defaults to project root .cursor/commands when base_path empty and ConfigDir set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{ConfigDir: tmpDir, CursorInstall: &CursorInstallConfig{}}
+		path, err := GetCursorCommandsPath(cfg)
+		require.NoError(t, err)
+		require.NotEmpty(t, path)
+		expected := filepath.Join(tmpDir, ".cursor", "commands")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(path))
+		assert.True(t, filepath.IsAbs(path), "expected absolute path, got %s", path)
+	})
+
+	t.Run("defaults to current directory .cursor/commands when base_path and ConfigDir empty", func(t *testing.T) {
+		cfg := &Config{CursorInstall: &CursorInstallConfig{}}
+		path, err := GetCursorCommandsPath(cfg)
+		require.NoError(t, err)
+		require.NotEmpty(t, path)
+		assert.Contains(t, path, string(filepath.Separator)+".cursor"+string(filepath.Separator)+"commands")
+		assert.True(t, filepath.IsAbs(path), "expected absolute path, got %s", path)
+	})
+
+	t.Run("uses cursor_install.base_path when set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{CursorInstall: &CursorInstallConfig{BasePath: tmpDir}}
+		path, err := GetCursorCommandsPath(cfg)
+		require.NoError(t, err)
+		expected := filepath.Join(tmpDir, ".cursor", "commands")
+		assert.Equal(t, filepath.Clean(expected), filepath.Clean(path))
+	})
+}
+
+func TestLoadConfigCursorInstall(t *testing.T) {
+	t.Run("merges cursor_install when present in file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		testConfig := fmt.Sprintf("version: \"1.0\"\ncursor_install:\n  base_path: %q\n", tmpDir)
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte(testConfig), 0o600))
+		cfg, err := LoadConfigFromDir(tmpDir)
+		require.NoError(t, err)
+		require.NotNil(t, cfg.CursorInstall)
+		assert.Equal(t, tmpDir, cfg.CursorInstall.BasePath)
+		skillsPath, err := GetCursorSkillsPath(cfg)
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(tmpDir, ".agent", "skills"), filepath.Clean(skillsPath))
+		commandsPath, err := GetCursorCommandsPath(cfg)
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(tmpDir, ".cursor", "commands"), filepath.Clean(commandsPath))
+	})
+}

@@ -33,6 +33,7 @@ type Config struct {
 	Checks        []CheckEntry           `yaml:"checks"` // optional: list of check commands to run
 	Done          *DoneConfig            `yaml:"done"`
 	DocsFolder    string                 `yaml:"docs_folder"` // default: ".docs"
+	CursorInstall *CursorInstallConfig   `yaml:"cursor_install"`
 	// ConfigDir is the absolute path to the directory containing kira.yml (set at load time; not persisted).
 	ConfigDir string `yaml:"-"`
 }
@@ -53,6 +54,12 @@ type ReviewConfig struct {
 	TrunkUpdate *bool `yaml:"trunk_update"` // default: true (nil = run trunk update)
 	Rebase      *bool `yaml:"rebase"`       // default: true (nil = run rebase)
 	CommitMove  *bool `yaml:"commit_move"`  // optional: commit the move to review (align with move command)
+}
+
+// CursorInstallConfig contains settings for where to install Cursor skills and commands.
+// When BasePath is empty, the project root is used (.agent/skills and .cursor/commands).
+type CursorInstallConfig struct {
+	BasePath string `yaml:"base_path"` // empty = use home directory
 }
 
 // SlicesConfig contains settings for slices and tasks in work items.
@@ -385,6 +392,86 @@ func DocsRoot(cfg *Config, targetDir string) (string, error) {
 // ValidStatusActions defines the valid values for start.status_action
 var ValidStatusActions = []string{"none", "commit_only", "commit_and_push", "commit_only_branch"}
 
+const (
+	cursorSkillsDir   = ".agent/skills"
+	cursorCommandsDir = ".cursor/commands"
+)
+
+// GetCursorSkillsPath returns the absolute path where Cursor skills should be installed.
+// Default is .agent/skills/ relative to project root; override via cursor_install.base_path in kira.yml.
+func GetCursorSkillsPath(cfg *Config) (string, error) {
+	base, err := getCursorInstallBase(cfg)
+	if err != nil {
+		return "", err
+	}
+	return resolveCursorPath(base, cursorSkillsDir)
+}
+
+// GetCursorCommandsPath returns the absolute path where Cursor commands should be installed.
+// Default is .cursor/commands/ relative to project root; override via cursor_install.base_path in kira.yml.
+func GetCursorCommandsPath(cfg *Config) (string, error) {
+	base, err := getCursorInstallBase(cfg)
+	if err != nil {
+		return "", err
+	}
+	return resolveCursorPath(base, cursorCommandsDir)
+}
+
+func getCursorInstallBase(cfg *Config) (string, error) {
+	if cfg != nil && cfg.CursorInstall != nil && strings.TrimSpace(cfg.CursorInstall.BasePath) != "" {
+		base := strings.TrimSpace(cfg.CursorInstall.BasePath)
+		if strings.Contains(base, "\x00") {
+			return "", fmt.Errorf("cursor_install.base_path cannot contain null byte")
+		}
+		// If base is relative, resolve it relative to ConfigDir
+		if !filepath.IsAbs(base) {
+			if cfg.ConfigDir == "" {
+				return "", fmt.Errorf("cursor_install.base_path is relative (%q) but config directory is unknown; use an absolute path or run from the project root", base)
+			}
+			base = filepath.Join(cfg.ConfigDir, base)
+		}
+		abs, err := filepath.Abs(base)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve cursor_install.base_path: %w", err)
+		}
+		return abs, nil
+	}
+	// Default to project root (ConfigDir) if available, otherwise current directory
+	if cfg != nil && cfg.ConfigDir != "" {
+		return cfg.ConfigDir, nil
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current directory for cursor install path: %w", err)
+	}
+	return wd, nil
+}
+
+func resolveCursorPath(base, subdir string) (string, error) {
+	joined := filepath.Join(base, subdir)
+	cleanPath := filepath.Clean(joined)
+	// Check for ".." as a path component, not as a substring in directory names
+	pathParts := strings.Split(filepath.ToSlash(cleanPath), "/")
+	for _, part := range pathParts {
+		if part == ".." {
+			return "", fmt.Errorf("invalid cursor install path: path must not contain parent directory reference")
+		}
+	}
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve cursor install path: %w", err)
+	}
+	baseAbs, err := filepath.Abs(base)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve base path: %w", err)
+	}
+	baseWithSep := baseAbs + string(filepath.Separator)
+	if absPath != baseAbs && !strings.HasPrefix(absPath, baseWithSep) {
+		return "", fmt.Errorf("invalid cursor install path: resolved path is outside base")
+	}
+	return absPath, nil
+}
+
 func validateConfig(config *Config) error {
 	// Validate start.move_to is a valid status key
 	if config.Start != nil && config.Start.MoveTo != "" {
@@ -708,7 +795,15 @@ func mergeWithDefaults(config *Config) {
 	mergeUsersDefaults(config)
 	mergeSlicesDefaults(config)
 	mergeChecksDefaults(config)
+	mergeCursorInstallDefaults(config)
 	mergeFieldDefaults(config)
+}
+
+func mergeCursorInstallDefaults(config *Config) {
+	if config.CursorInstall == nil {
+		config.CursorInstall = &CursorInstallConfig{}
+	}
+	// BasePath empty = use home directory at runtime
 }
 
 func mergeSlicesDefaults(config *Config) {
