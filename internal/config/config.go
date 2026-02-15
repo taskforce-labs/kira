@@ -423,6 +423,10 @@ func getCursorInstallBase(cfg *Config) (string, error) {
 		if strings.Contains(base, "\x00") {
 			return "", fmt.Errorf("cursor_install.base_path cannot contain null byte")
 		}
+		// If base is relative, resolve it relative to ConfigDir
+		if !filepath.IsAbs(base) && cfg.ConfigDir != "" {
+			base = filepath.Join(cfg.ConfigDir, base)
+		}
 		abs, err := filepath.Abs(base)
 		if err != nil {
 			return "", fmt.Errorf("failed to resolve cursor_install.base_path: %w", err)
