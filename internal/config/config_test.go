@@ -1232,6 +1232,17 @@ func TestGetCursorSkillsPath(t *testing.T) {
 		assert.True(t, strings.HasPrefix(path, configDir), "path should start with configDir")
 		assert.False(t, strings.HasPrefix(path, cwdDir), "path should not start with cwdDir")
 	})
+
+	t.Run("rejects relative base_path when ConfigDir is empty", func(t *testing.T) {
+		cfg := &Config{
+			ConfigDir:     "",
+			CursorInstall: &CursorInstallConfig{BasePath: "relative/path"},
+		}
+		_, err := GetCursorSkillsPath(cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "relative")
+		assert.Contains(t, err.Error(), "config directory is unknown")
+	})
 }
 
 func TestGetCursorCommandsPath(t *testing.T) {
