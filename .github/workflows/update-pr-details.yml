@@ -164,11 +164,11 @@ jobs:
         if: steps.validate-branch.outputs.valid == 'true' && steps.pr-title.outputs.skip != 'true' && steps.pr-body.outputs.skip != 'true' && steps.prs.outputs.skip != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRS: ${{ steps.prs.outputs.prs }}
+          TITLE: ${{ steps.pr-title.outputs.title }}
+          BODY: ${{ steps.pr-body.outputs.body }}
+          GH_REPOSITORY: ${{ github.repository }}
         run: |
-          PRS='${{ steps.prs.outputs.prs }}'
-          TITLE='${{ steps.pr-title.outputs.title }}'
-          BODY='${{ steps.pr-body.outputs.body }}'
-
           # Parse PRs JSON array
           PR_COUNT=$(echo "$PRS" | jq '. | length')
 
@@ -182,7 +182,7 @@ jobs:
 
             # Check if this is the main repo (where workflow runs)
             IS_MAIN_REPO=false
-            if [ "$OWNER/$REPO" = "${{ github.repository }}" ]; then
+            if [ "$OWNER/$REPO" = "$GH_REPOSITORY" ]; then
               IS_MAIN_REPO=true
             fi
 
