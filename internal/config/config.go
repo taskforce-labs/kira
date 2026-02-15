@@ -450,8 +450,12 @@ func getCursorInstallBase(cfg *Config) (string, error) {
 func resolveCursorPath(base, subdir string) (string, error) {
 	joined := filepath.Join(base, subdir)
 	cleanPath := filepath.Clean(joined)
-	if strings.Contains(cleanPath, "..") {
-		return "", fmt.Errorf("invalid cursor install path: path must not contain parent directory reference")
+	// Check for ".." as a path component, not as a substring in directory names
+	pathParts := strings.Split(filepath.ToSlash(cleanPath), "/")
+	for _, part := range pathParts {
+		if part == ".." {
+			return "", fmt.Errorf("invalid cursor install path: path must not contain parent directory reference")
+		}
 	}
 	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
