@@ -9,7 +9,7 @@ due: 2026-01-21T00:00:00Z
 estimate: null
 merge_commit_sha: be3aaca92dab8124932f0333b6daa1e3fdc16d41
 merge_strategy: rebase
-merged_at: "2026-02-06T09:52:38Z"
+merged_at: "2026-02-06T09:52:37Z"
 pr_number: 19
 tags: [github, merge, done, cli]
 ---
