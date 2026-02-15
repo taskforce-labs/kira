@@ -438,8 +438,26 @@ func validatePathUnder(baseAbs, target string) error {
 	if err != nil {
 		return fmt.Errorf("invalid path: %w", err)
 	}
-	baseWithSep := baseAbs + string(filepath.Separator)
-	if targetAbs != baseAbs && !strings.HasPrefix(targetAbs, baseWithSep) {
+	// Resolve symlinks in both base and target to prevent escape via symlinks
+	baseResolved, err := filepath.EvalSymlinks(baseAbs)
+	if err != nil {
+		// If base doesn't exist yet, use the absolute path as-is
+		baseResolved = baseAbs
+	}
+	targetResolved, err := filepath.EvalSymlinks(targetAbs)
+	if err != nil {
+		// If target doesn't exist yet, resolve parent and append basename
+		targetDir := filepath.Dir(targetAbs)
+		targetDirResolved, err := filepath.EvalSymlinks(targetDir)
+		if err != nil {
+			// Parent doesn't exist, use absolute path as-is
+			targetResolved = targetAbs
+		} else {
+			targetResolved = filepath.Join(targetDirResolved, filepath.Base(targetAbs))
+		}
+	}
+	baseWithSep := baseResolved + string(filepath.Separator)
+	if targetResolved != baseResolved && !strings.HasPrefix(targetResolved, baseWithSep) {
 		return fmt.Errorf("path outside target directory")
 	}
 	return nil
@@ -472,7 +490,12 @@ func copySkillToPath(skillName, targetDir string) error {
 		if err := os.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
 			return err
 		}
-		if err := os.WriteFile(destPath, data, 0o600); err != nil {
+		// Determine file mode: scripts should be executable
+		mode := os.FileMode(0o600)
+		if strings.HasPrefix(rel, "scripts/") || strings.HasPrefix(rel, "scripts\\") {
+			mode = 0o700
+		}
+		if err := os.WriteFile(destPath, data, mode); err != nil {
 			return fmt.Errorf("write %s: %w", rel, err)
 		}
 	}
