@@ -91,8 +91,8 @@ func ReadCommand(name string) ([]byte, error) {
 	return data, nil
 }
 
-// SkillEntries returns all entries (files and dirs) under a skill directory for copying.
-func SkillEntries(name string) ([]fs.DirEntry, error) {
+// skillEntries returns all entries (files and dirs) under a skill directory for copying.
+func skillEntries(name string) ([]fs.DirEntry, error) {
 	if name == "" || strings.Contains(name, "..") || strings.Contains(name, "\x00") {
 		return nil, fmt.Errorf("invalid skill name: %q", name)
 	}

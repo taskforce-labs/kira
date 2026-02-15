@@ -67,7 +67,7 @@ func TestReadCommand_InvalidName(t *testing.T) {
 }
 
 func TestSkillEntries(t *testing.T) {
-	entries, err := SkillEntries("kira-work-item-elaboration")
+	entries, err := skillEntries("kira-work-item-elaboration")
 	require.NoError(t, err)
 	require.NotEmpty(t, entries)
 	var hasSKILL bool
@@ -81,6 +81,6 @@ func TestSkillEntries(t *testing.T) {
 }
 
 func TestSkillEntries_InvalidName(t *testing.T) {
-	_, err := SkillEntries("..")
+	_, err := skillEntries("..")
 	require.Error(t, err)
 }
