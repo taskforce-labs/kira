@@ -268,6 +268,27 @@ func TestEnsureCursorSkillsInstalled(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, string(data), "name: work-item-elaboration")
 	})
+	t.Run("repairs when skill path exists as file instead of directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		skillsPath := filepath.Join(tmpDir, ".agent", "skills")
+		require.NoError(t, os.MkdirAll(skillsPath, 0o700))
+		// Create a file where a skill directory should be (type conflict)
+		conflictPath := filepath.Join(skillsPath, "kira-work-item-elaboration")
+		require.NoError(t, os.WriteFile(conflictPath, []byte("wrong type"), 0o600))
+		// Ensure detects the type conflict and repairs it
+		err := EnsureCursorSkillsInstalled(cfg)
+		require.NoError(t, err)
+		// Verify the file was removed and replaced with a proper skill directory
+		info, err := os.Stat(conflictPath)
+		require.NoError(t, err)
+		assert.True(t, info.IsDir(), "skill path should be a directory after repair")
+		skillMDPath := filepath.Join(conflictPath, "SKILL.md")
+		// #nosec G304 - path is built from test temp dir and fixed segments
+		data, err := os.ReadFile(skillMDPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "name: work-item-elaboration")
+	})
 }
 
 func TestEnsureCursorCommandsInstalled(t *testing.T) {
@@ -331,6 +352,26 @@ func TestEnsureCursorCommandsInstalled(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, string(data), "# Elaborate Work Item")
 	})
+	t.Run("repairs when command path exists as directory instead of file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		commandsPath := filepath.Join(tmpDir, ".cursor", "commands")
+		require.NoError(t, os.MkdirAll(commandsPath, 0o700))
+		// Create a directory where a command file should be (type conflict)
+		conflictPath := filepath.Join(commandsPath, "kira-elaborate-work-item.md")
+		require.NoError(t, os.MkdirAll(conflictPath, 0o700))
+		// Ensure detects the type conflict and repairs it
+		err := EnsureCursorCommandsInstalled(cfg)
+		require.NoError(t, err)
+		// Verify the directory was removed and replaced with a proper command file
+		info, err := os.Stat(conflictPath)
+		require.NoError(t, err)
+		assert.False(t, info.IsDir(), "command path should be a file after repair")
+		// #nosec G304 - path is built from test temp dir and fixed segments
+		data, err := os.ReadFile(conflictPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "# Elaborate Work Item")
+	})
 }
 
 func TestListExistingKiraSkills(t *testing.T) {
@@ -363,6 +404,21 @@ func TestListExistingKiraSkills(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, existing, "kira-work-item-elaboration")
 	})
+
+	t.Run("detects type conflicts - file instead of directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		skillsPath := filepath.Join(tmpDir, ".agent", "skills")
+		require.NoError(t, os.MkdirAll(skillsPath, 0o700))
+
+		// Create a file where a directory should be (type conflict)
+		conflictFile := filepath.Join(skillsPath, "kira-work-item-elaboration")
+		require.NoError(t, os.WriteFile(conflictFile, []byte("wrong type"), 0o600))
+
+		existing, err := listExistingKiraSkills(skillsPath)
+		require.NoError(t, err)
+		// Should detect the type conflict
+		assert.Contains(t, existing, "kira-work-item-elaboration")
+	})
 }
 
 func TestListExistingKiraCommands(t *testing.T) {
@@ -392,6 +448,21 @@ func TestListExistingKiraCommands(t *testing.T) {
 
 		existing, err := listExistingKiraCommands(commandsPath)
 		require.NoError(t, err)
+		assert.Contains(t, existing, "kira-elaborate-work-item.md")
+	})
+
+	t.Run("detects type conflicts - directory instead of file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		commandsPath := filepath.Join(tmpDir, ".cursor", "commands")
+		require.NoError(t, os.MkdirAll(commandsPath, 0o700))
+
+		// Create a directory where a file should be (type conflict)
+		conflictDir := filepath.Join(commandsPath, "kira-elaborate-work-item.md")
+		require.NoError(t, os.MkdirAll(conflictDir, 0o700))
+
+		existing, err := listExistingKiraCommands(commandsPath)
+		require.NoError(t, err)
+		// Should detect the type conflict
 		assert.Contains(t, existing, "kira-elaborate-work-item.md")
 	})
 }

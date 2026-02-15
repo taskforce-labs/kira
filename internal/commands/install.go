@@ -293,7 +293,8 @@ func listExistingKiraCommands(commandsPath string) ([]string, error) {
 	}
 	var kiraFiles []string
 	for _, e := range entries {
-		if !e.IsDir() && bundledFiles[e.Name()] {
+		// Include both files and directories (type conflicts) that match bundled command names
+		if bundledFiles[e.Name()] {
 			kiraFiles = append(kiraFiles, e.Name())
 		}
 	}
@@ -303,7 +304,8 @@ func listExistingKiraCommands(commandsPath string) ([]string, error) {
 func removeKiraCommandFiles(commandsPath string, files []string) error {
 	for _, f := range files {
 		filePath := filepath.Join(commandsPath, f)
-		if err := os.Remove(filePath); err != nil {
+		// Use RemoveAll to handle both files and directories (type conflicts)
+		if err := os.RemoveAll(filePath); err != nil {
 			return fmt.Errorf("failed to remove existing command %s: %w", f, err)
 		}
 	}
@@ -353,7 +355,8 @@ func listExistingKiraSkills(skillsPath string) ([]string, error) {
 	}
 	var kiraDirs []string
 	for _, e := range entries {
-		if e.IsDir() && bundledDirs[e.Name()] {
+		// Include both directories and files (type conflicts) that match bundled skill names
+		if bundledDirs[e.Name()] {
 			kiraDirs = append(kiraDirs, e.Name())
 		}
 	}
