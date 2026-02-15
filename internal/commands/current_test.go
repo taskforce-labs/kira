@@ -168,7 +168,7 @@ func TestRunCurrentTitle(t *testing.T) {
 }
 
 func TestRunCurrentBody(t *testing.T) {
-	t.Run("outputs entire work item file content", func(t *testing.T) {
+	t.Run("outputs work item body without frontmatter", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
@@ -214,8 +214,12 @@ This is the body content.
 		output := buf.String()
 
 		require.NoError(t, err)
-		assert.Contains(t, output, "id: 001")
-		assert.Contains(t, output, "title: Test Feature")
+		// Body should NOT contain YAML frontmatter
+		assert.NotContains(t, output, "---")
+		assert.NotContains(t, output, "id: 001")
+		assert.NotContains(t, output, "title: Test Feature")
+		assert.NotContains(t, output, "status: doing")
+		// Body should contain only the markdown content
 		assert.Contains(t, output, "# Test Feature")
 		assert.Contains(t, output, "This is the body content.")
 	})

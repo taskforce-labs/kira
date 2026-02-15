@@ -144,14 +144,13 @@ func runCurrentBody(cfg *config.Config) error {
 		os.Exit(1)
 	}
 
-	// Output entire work item file content (front matter + body)
-	content, err := safeReadFile(workItemPath, cfg)
+	// Output body only (strip YAML front matter), same as kira start
+	body, err := extractWorkItemBody(workItemPath, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to read work item file: %w", err)
 	}
 
-	fmt.Print(string(content))
-	// Note: Don't add newline here - work item content should be output as-is
+	fmt.Print(body)
 	return nil
 }
 
