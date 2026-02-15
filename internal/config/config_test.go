@@ -1204,6 +1204,34 @@ func TestGetCursorSkillsPath(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "null")
 	})
+
+	t.Run("resolves relative base_path relative to ConfigDir not CWD", func(t *testing.T) {
+		// Create temp directories for config and a different CWD
+		configDir := t.TempDir()
+		cwdDir := t.TempDir()
+
+		// Save original working directory and change to cwdDir
+		origWd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(origWd) }()
+		require.NoError(t, os.Chdir(cwdDir))
+
+		// Create config with relative base_path "."
+		cfg := &Config{
+			ConfigDir:     configDir,
+			CursorInstall: &CursorInstallConfig{BasePath: "."},
+		}
+
+		// Get cursor skills path
+		path, err := GetCursorSkillsPath(cfg)
+		require.NoError(t, err)
+
+		// Path should be relative to configDir, not cwdDir
+		expected := filepath.Join(configDir, ".agent", "skills")
+		assert.Equal(t, expected, path)
+		assert.True(t, strings.HasPrefix(path, configDir), "path should start with configDir")
+		assert.False(t, strings.HasPrefix(path, cwdDir), "path should not start with cwdDir")
+	})
 }
 
 func TestGetCursorCommandsPath(t *testing.T) {
