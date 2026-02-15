@@ -242,3 +242,66 @@ func TestEnsureCursorCommandsInstalled(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+func TestListExistingKiraSkills(t *testing.T) {
+	t.Run("only detects bundled skills", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		skillsPath := filepath.Join(tmpDir, ".agent", "skills")
+		require.NoError(t, os.MkdirAll(skillsPath, 0o700))
+
+		// Create an unrelated kira- directory that is not bundled
+		unrelatedDir := filepath.Join(skillsPath, "kira-user-custom-skill")
+		require.NoError(t, os.MkdirAll(unrelatedDir, 0o700))
+
+		existing, err := listExistingKiraSkills(skillsPath)
+		require.NoError(t, err)
+		// Should not include the unrelated directory
+		assert.NotContains(t, existing, "kira-user-custom-skill")
+	})
+
+	t.Run("detects bundled skills when present", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		skillsPath := filepath.Join(tmpDir, ".agent", "skills")
+		require.NoError(t, os.MkdirAll(skillsPath, 0o700))
+
+		// Create a bundled skill directory
+		bundledDir := filepath.Join(skillsPath, "kira-work-item-elaboration")
+		require.NoError(t, os.MkdirAll(bundledDir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(bundledDir, "SKILL.md"), []byte("---\nname: work-item-elaboration\n---\n"), 0o600))
+
+		existing, err := listExistingKiraSkills(skillsPath)
+		require.NoError(t, err)
+		assert.Contains(t, existing, "kira-work-item-elaboration")
+	})
+}
+
+func TestListExistingKiraCommands(t *testing.T) {
+	t.Run("only detects bundled commands", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		commandsPath := filepath.Join(tmpDir, ".cursor", "commands")
+		require.NoError(t, os.MkdirAll(commandsPath, 0o700))
+
+		// Create an unrelated kira-*.md file that is not bundled
+		unrelatedFile := filepath.Join(commandsPath, "kira-user-custom-command.md")
+		require.NoError(t, os.WriteFile(unrelatedFile, []byte("# Custom Command"), 0o600))
+
+		existing, err := listExistingKiraCommands(commandsPath)
+		require.NoError(t, err)
+		// Should not include the unrelated file
+		assert.NotContains(t, existing, "kira-user-custom-command.md")
+	})
+
+	t.Run("detects bundled commands when present", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		commandsPath := filepath.Join(tmpDir, ".cursor", "commands")
+		require.NoError(t, os.MkdirAll(commandsPath, 0o700))
+
+		// Create a bundled command file
+		bundledFile := filepath.Join(commandsPath, "kira-elaborate-work-item.md")
+		require.NoError(t, os.WriteFile(bundledFile, []byte("# Elaborate Work Item"), 0o600))
+
+		existing, err := listExistingKiraCommands(commandsPath)
+		require.NoError(t, err)
+		assert.Contains(t, existing, "kira-elaborate-work-item.md")
+	})
+}
