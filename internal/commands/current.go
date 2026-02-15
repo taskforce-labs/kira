@@ -328,7 +328,13 @@ func runCurrentPRs(_ *cobra.Command, _ []string) error {
 		baseURL = cfg.Workspace.GitBaseURL
 	}
 
-	prs := discoverPRs(cfg, repoRoot, currentBranch, token, baseURL)
+	// Get trunk branch for filtering PRs
+	trunkBranch := ""
+	if cfg.Git != nil {
+		trunkBranch = cfg.Git.TrunkBranch
+	}
+
+	prs := discoverPRs(cfg, repoRoot, currentBranch, token, baseURL, trunkBranch)
 
 	// Output JSON array
 	jsonOutput, err := json.Marshal(prs)
@@ -375,11 +381,11 @@ func getGitHubToken() string {
 }
 
 // discoverPRs discovers all related PRs (main repo + project repos in polyrepo).
-func discoverPRs(cfg *config.Config, repoRoot, currentBranch, token, baseURL string) []PRInfo {
+func discoverPRs(cfg *config.Config, repoRoot, currentBranch, token, baseURL, trunkBranch string) []PRInfo {
 	var prs []PRInfo
 
 	// Always include main repo
-	mainPR := discoverMainRepoPR(cfg, repoRoot, currentBranch, token, baseURL)
+	mainPR := discoverMainRepoPR(cfg, repoRoot, currentBranch, token, baseURL, trunkBranch)
 	if mainPR != nil {
 		prs = append(prs, *mainPR)
 	}
@@ -388,7 +394,7 @@ func discoverPRs(cfg *config.Config, repoRoot, currentBranch, token, baseURL str
 	projects, err := resolvePolyrepoProjects(cfg, repoRoot)
 	if err == nil && len(projects) > 0 {
 		// Polyrepo workspace - include project repos
-		projectPRs := discoverProjectRepoPRs(projects, currentBranch, token, baseURL)
+		projectPRs := discoverProjectRepoPRs(projects, currentBranch, token, baseURL, trunkBranch)
 		prs = append(prs, projectPRs...)
 	}
 
@@ -396,7 +402,7 @@ func discoverPRs(cfg *config.Config, repoRoot, currentBranch, token, baseURL str
 }
 
 // discoverMainRepoPR discovers PR in the main repo.
-func discoverMainRepoPR(cfg *config.Config, repoRoot, currentBranch, token, baseURL string) *PRInfo {
+func discoverMainRepoPR(cfg *config.Config, repoRoot, currentBranch, token, baseURL, trunkBranch string) *PRInfo {
 	mainRemoteName := resolveRemoteName(cfg, nil)
 	mainRemoteURL, err := getRemoteURL(mainRemoteName, repoRoot)
 	if err != nil || !isGitHubRemote(mainRemoteURL, baseURL) {
@@ -408,11 +414,11 @@ func discoverMainRepoPR(cfg *config.Config, repoRoot, currentBranch, token, base
 		return nil
 	}
 
-	return findPRForRepo(owner, repo, currentBranch, token, baseURL)
+	return findPRForRepo(owner, repo, currentBranch, token, baseURL, trunkBranch)
 }
 
 // discoverProjectRepoPRs discovers PRs in all project repos.
-func discoverProjectRepoPRs(projects []PolyrepoProject, currentBranch, token, baseURL string) []PRInfo {
+func discoverProjectRepoPRs(projects []PolyrepoProject, currentBranch, token, baseURL, globalTrunkBranch string) []PRInfo {
 	var prs []PRInfo
 
 	for _, project := range projects {
@@ -430,7 +436,13 @@ func discoverProjectRepoPRs(projects []PolyrepoProject, currentBranch, token, ba
 			continue
 		}
 
-		pr := findPRForRepo(owner, repo, currentBranch, token, baseURL)
+		// Use project-specific trunk branch if set, otherwise use global
+		trunkBranch := project.TrunkBranch
+		if trunkBranch == "" {
+			trunkBranch = globalTrunkBranch
+		}
+
+		pr := findPRForRepo(owner, repo, currentBranch, token, baseURL, trunkBranch)
 		if pr != nil {
 			prs = append(prs, *pr)
 		}
@@ -439,8 +451,8 @@ func discoverProjectRepoPRs(projects []PolyrepoProject, currentBranch, token, ba
 	return prs
 }
 
-// findPRForRepo finds a PR for a specific repo and branch.
-func findPRForRepo(owner, repo, branch, token, baseURL string) *PRInfo {
+// findPRForRepo finds a PR for a specific repo and branch, filtering by trunk branch if provided.
+func findPRForRepo(owner, repo, branch, token, baseURL, trunkBranch string) *PRInfo {
 	prCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	client, err := git.NewClient(prCtx, token, baseURL)
 	cancel()
@@ -455,16 +467,29 @@ func findPRForRepo(owner, repo, branch, token, baseURL string) *PRInfo {
 		return nil
 	}
 
-	// Use the first matching PR
-	pr := githubPRs[0]
-	if pr.Number == nil {
-		return nil
+	// Filter PRs by trunk branch if specified
+	var matchingPR *PRInfo
+	for _, pr := range githubPRs {
+		if pr.Number == nil {
+			continue
+		}
+		
+		// If trunk branch is specified, filter by base branch
+		if trunkBranch != "" && pr.Base != nil && pr.Base.Ref != nil {
+			if *pr.Base.Ref != trunkBranch {
+				continue
+			}
+		}
+		
+		// Found a matching PR
+		matchingPR = &PRInfo{
+			Owner:    owner,
+			Repo:     repo,
+			PRNumber: *pr.Number,
+			Branch:   branch,
+		}
+		break
 	}
 
-	return &PRInfo{
-		Owner:    owner,
-		Repo:     repo,
-		PRNumber: *pr.Number,
-		Branch:   branch,
-	}
+	return matchingPR
 }

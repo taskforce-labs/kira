@@ -298,11 +298,6 @@ func getUpdatePRDetailsWorkflowTemplate() string {
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches:
-      # Common trunk branch names - actual trunk branch is read from kira.yml and verified in workflow
-      - master
-      - main
-      - develop
 
 jobs:
   update-pr-details:
