@@ -424,7 +424,10 @@ func getCursorInstallBase(cfg *Config) (string, error) {
 			return "", fmt.Errorf("cursor_install.base_path cannot contain null byte")
 		}
 		// If base is relative, resolve it relative to ConfigDir
-		if !filepath.IsAbs(base) && cfg.ConfigDir != "" {
+		if !filepath.IsAbs(base) {
+			if cfg.ConfigDir == "" {
+				return "", fmt.Errorf("cursor_install.base_path is relative (%q) but config directory is unknown; use an absolute path or run from the project root", base)
+			}
 			base = filepath.Join(cfg.ConfigDir, base)
 		}
 		abs, err := filepath.Abs(base)
