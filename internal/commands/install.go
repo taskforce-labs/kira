@@ -240,6 +240,10 @@ func ensureCommandsOverwriteDecision(commandsPath string, force bool) error {
 }
 
 func listExistingKiraCommands(commandsPath string) ([]string, error) {
+	bundledNames, err := cursorassets.ListCommands()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list bundled commands: %w", err)
+	}
 	entries, err := os.ReadDir(commandsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -247,9 +251,14 @@ func listExistingKiraCommands(commandsPath string) ([]string, error) {
 		}
 		return nil, fmt.Errorf("failed to read commands path: %w", err)
 	}
+	// Create a set of bundled command filenames for quick lookup
+	bundledFiles := make(map[string]bool)
+	for _, name := range bundledNames {
+		bundledFiles[name+".md"] = true
+	}
 	var kiraFiles []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), "kira-") && strings.HasSuffix(e.Name(), ".md") {
+		if !e.IsDir() && bundledFiles[e.Name()] {
 			kiraFiles = append(kiraFiles, e.Name())
 		}
 	}
@@ -291,6 +300,10 @@ func ensureSkillsOverwriteDecision(skillsPath string, force bool) error {
 }
 
 func listExistingKiraSkills(skillsPath string) ([]string, error) {
+	bundledNames, err := cursorassets.ListSkills()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list bundled skills: %w", err)
+	}
 	entries, err := os.ReadDir(skillsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -298,9 +311,14 @@ func listExistingKiraSkills(skillsPath string) ([]string, error) {
 		}
 		return nil, fmt.Errorf("failed to read skills path: %w", err)
 	}
+	// Create a set of bundled skill names for quick lookup
+	bundledDirs := make(map[string]bool)
+	for _, name := range bundledNames {
+		bundledDirs[name] = true
+	}
 	var kiraDirs []string
 	for _, e := range entries {
-		if e.IsDir() && strings.HasPrefix(e.Name(), "kira-") {
+		if e.IsDir() && bundledDirs[e.Name()] {
 			kiraDirs = append(kiraDirs, e.Name())
 		}
 	}
