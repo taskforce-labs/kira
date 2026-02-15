@@ -59,19 +59,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Build kira
-        run: make build
-
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
@@ -79,7 +66,7 @@ jobs:
         id: validate-branch
         continue-on-error: true
         run: |
-          BRANCH=$(./kira current --slug 2>&1)
+          BRANCH=$(./kdev current --slug 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
             echo "Branch name does not match kira format, skipping PR update"
@@ -95,7 +82,7 @@ jobs:
         id: pr-title
         continue-on-error: true
         run: |
-          TITLE=$(./kira current --title 2>&1)
+          TITLE=$(./kdev current --title 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
             echo "Work item not found or invalid branch name, skipping PR update"
@@ -115,7 +102,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: |
-          BODY=$(./kira current --body 2>&1)
+          BODY=$(./kdev current --body 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
             echo "Work item not found or invalid branch name, skipping PR update"
@@ -142,7 +129,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: |
-          PRS=$(./kira current prs 2>&1)
+          PRS=$(./kdev current prs 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ] || [ -z "$PRS" ] || [ "$PRS" = "[]" ]; then
             echo "No PRs found or error getting PR list, skipping PR update"
