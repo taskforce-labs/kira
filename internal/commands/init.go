@@ -379,7 +379,7 @@ jobs:
         id: validate-branch
         continue-on-error: true
         run: |
-          BRANCH=$(./bin/kira current --slug 2>&1)
+          BRANCH=$(./kira current --slug 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
             echo "Branch name does not match kira format, skipping PR update"
@@ -395,7 +395,7 @@ jobs:
         id: pr-title
         continue-on-error: true
         run: |
-          TITLE=$(./bin/kira current --title 2>&1)
+          TITLE=$(./kira current --title 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
             echo "Work item not found or invalid branch name, skipping PR update"
@@ -415,7 +415,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: |
-          BODY=$(./bin/kira current --body 2>&1)
+          BODY=$(./kira current --body 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
             echo "Work item not found or invalid branch name, skipping PR update"
@@ -442,7 +442,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: |
-          PRS=$(./bin/kira current prs 2>&1)
+          PRS=$(./kira current prs 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ] || [ -z "$PRS" ] || [ "$PRS" = "[]" ]; then
             echo "No PRs found or error getting PR list, skipping PR update"

@@ -84,7 +84,7 @@ jobs:
         id: validate-branch
         continue-on-error: true
         run: |
-          BRANCH=$(./bin/kira current --slug 2>&1)
+          BRANCH=$(./kdev current --slug 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
             echo "Branch name does not match kira format, skipping PR update"
@@ -100,7 +100,7 @@ jobs:
         id: pr-title
         continue-on-error: true
         run: |
-          TITLE=$(./bin/kira current --title 2>&1)
+          TITLE=$(./kdev current --title 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
             echo "Work item not found or invalid branch name, skipping PR update"
@@ -120,7 +120,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: |
-          BODY=$(./bin/kira current --body 2>&1)
+          BODY=$(./kdev current --body 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ]; then
             echo "Work item not found or invalid branch name, skipping PR update"
@@ -147,7 +147,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: |
-          PRS=$(./bin/kira current prs 2>&1)
+          PRS=$(./kdev current prs 2>&1)
           EXIT_CODE=$?
           if [ $EXIT_CODE -ne 0 ] || [ -z "$PRS" ] || [ "$PRS" = "[]" ]; then
             echo "No PRs found or error getting PR list, skipping PR update"
@@ -173,32 +173,32 @@ jobs:
           PRS='${{ steps.prs.outputs.prs }}'
           TITLE='${{ steps.pr-title.outputs.title }}'
           BODY='${{ steps.pr-body.outputs.body }}'
-          
+
           # Parse PRs JSON array
           PR_COUNT=$(echo "$PRS" | jq '. | length')
-          
+
           MAIN_REPO_UPDATED=false
-          
+
           for i in $(seq 0 $((PR_COUNT - 1))); do
             OWNER=$(echo "$PRS" | jq -r ".[$i].owner")
             REPO=$(echo "$PRS" | jq -r ".[$i].repo")
             PR_NUMBER=$(echo "$PRS" | jq -r ".[$i].pr_number")
             BRANCH=$(echo "$PRS" | jq -r ".[$i].branch")
-            
+
             # Check if this is the main repo (where workflow runs)
             IS_MAIN_REPO=false
             if [ "$OWNER/$REPO" = "${{ github.repository }}" ]; then
               IS_MAIN_REPO=true
             fi
-            
+
             echo "Updating PR #$PR_NUMBER in $OWNER/$REPO..."
-            
+
             # Update PR with retry logic for rate limiting
             MAX_RETRIES=3
             RETRY_DELAY=2
             RETRY_COUNT=0
             SUCCESS=false
-            
+
             while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = "false" ]; do
               RESPONSE=$(curl -s -w "\n%{http_code}" \
                 -X PATCH \
@@ -207,10 +207,10 @@ jobs:
                 -H "Content-Type: application/json" \
                 -d "{\"title\":$(echo "$TITLE" | jq -Rs .),\"body\":$(echo "$BODY" | jq -Rs .)}" \
                 "https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER")
-              
+
               HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
               RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
-              
+
               if [ "$HTTP_CODE" = "200" ]; then
                 echo "Successfully updated PR #$PR_NUMBER in $OWNER/$REPO"
                 SUCCESS=true
@@ -259,7 +259,7 @@ jobs:
               fi
             done
           done
-          
+
           if [ "$MAIN_REPO_UPDATED" = "false" ]; then
             echo "Warning: Main repo PR was not updated. This may indicate an issue with the workflow configuration."
           fi
