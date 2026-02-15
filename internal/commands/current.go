@@ -41,7 +41,7 @@ var currentPRsCmd = &cobra.Command{
 
 func init() {
 	currentCmd.Flags().Bool("title", false, "Output PR title")
-	currentCmd.Flags().Bool("body", false, "Output work item file content")
+	currentCmd.Flags().Bool("body", false, "Output entire work item file content (including YAML front matter)")
 	currentCmd.Flags().Bool("slug", false, "Output slug (full branch name matching worktree and branch, e.g. '034-ci-update-pr-details')")
 	currentCmd.AddCommand(currentPRsCmd)
 }
@@ -144,13 +144,13 @@ func runCurrentBody(cfg *config.Config) error {
 		os.Exit(1)
 	}
 
-	// Output body only (strip YAML front matter), same as kira start
-	body, err := extractWorkItemBody(workItemPath, cfg)
+	// Output entire work item file content (including YAML front matter)
+	content, err := safeReadFile(workItemPath, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to read work item file: %w", err)
 	}
 
-	fmt.Print(body)
+	fmt.Print(string(content))
 	return nil
 }
 
