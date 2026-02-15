@@ -214,6 +214,60 @@ func TestEnsureCursorSkillsInstalled(t *testing.T) {
 		err = EnsureCursorSkillsInstalled(cfg)
 		require.NoError(t, err)
 	})
+	t.Run("repairs when SKILL.md is missing from a skill directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		// Do a valid install first
+		err := EnsureCursorSkillsInstalled(cfg)
+		require.NoError(t, err)
+		// Remove SKILL.md from one skill to simulate corruption
+		skillMDPath := filepath.Join(tmpDir, ".agent", "skills", "kira-work-item-elaboration", "SKILL.md")
+		require.NoError(t, os.Remove(skillMDPath))
+		// Ensure detects the corruption and repairs it
+		err = EnsureCursorSkillsInstalled(cfg)
+		require.NoError(t, err)
+		// Verify SKILL.md was restored
+		// #nosec G304 - path is built from test temp dir and fixed segments
+		data, err := os.ReadFile(skillMDPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "name: work-item-elaboration")
+	})
+	t.Run("repairs when SKILL.md is empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		// Do a valid install first
+		err := EnsureCursorSkillsInstalled(cfg)
+		require.NoError(t, err)
+		// Truncate SKILL.md to simulate corruption
+		skillMDPath := filepath.Join(tmpDir, ".agent", "skills", "kira-work-item-elaboration", "SKILL.md")
+		require.NoError(t, os.WriteFile(skillMDPath, []byte{}, 0o600))
+		// Ensure detects the corruption and repairs it
+		err = EnsureCursorSkillsInstalled(cfg)
+		require.NoError(t, err)
+		// Verify SKILL.md was restored with valid content
+		// #nosec G304 - path is built from test temp dir and fixed segments
+		data, err := os.ReadFile(skillMDPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "name: work-item-elaboration")
+	})
+	t.Run("repairs when SKILL.md has invalid frontmatter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		// Do a valid install first
+		err := EnsureCursorSkillsInstalled(cfg)
+		require.NoError(t, err)
+		// Overwrite SKILL.md with invalid frontmatter
+		skillMDPath := filepath.Join(tmpDir, ".agent", "skills", "kira-work-item-elaboration", "SKILL.md")
+		require.NoError(t, os.WriteFile(skillMDPath, []byte("# No frontmatter here\n"), 0o600))
+		// Ensure detects the corruption and repairs it
+		err = EnsureCursorSkillsInstalled(cfg)
+		require.NoError(t, err)
+		// Verify SKILL.md was restored with valid content
+		// #nosec G304 - path is built from test temp dir and fixed segments
+		data, err := os.ReadFile(skillMDPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "name: work-item-elaboration")
+	})
 }
 
 func TestEnsureCursorCommandsInstalled(t *testing.T) {
@@ -240,6 +294,42 @@ func TestEnsureCursorCommandsInstalled(t *testing.T) {
 		require.NoError(t, err)
 		err = EnsureCursorCommandsInstalled(cfg)
 		require.NoError(t, err)
+	})
+	t.Run("repairs when command file is empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		// Do a valid install first
+		err := EnsureCursorCommandsInstalled(cfg)
+		require.NoError(t, err)
+		// Truncate a command file to simulate corruption
+		cmdPath := filepath.Join(tmpDir, ".cursor", "commands", "kira-elaborate-work-item.md")
+		require.NoError(t, os.WriteFile(cmdPath, []byte{}, 0o600))
+		// Ensure detects the corruption and repairs it
+		err = EnsureCursorCommandsInstalled(cfg)
+		require.NoError(t, err)
+		// Verify command file was restored with valid content
+		// #nosec G304 - path is built from test temp dir and fixed segments
+		data, err := os.ReadFile(cmdPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "# Elaborate Work Item")
+	})
+	t.Run("repairs when command file is whitespace only", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		// Do a valid install first
+		err := EnsureCursorCommandsInstalled(cfg)
+		require.NoError(t, err)
+		// Write whitespace-only content to simulate corruption
+		cmdPath := filepath.Join(tmpDir, ".cursor", "commands", "kira-elaborate-work-item.md")
+		require.NoError(t, os.WriteFile(cmdPath, []byte("   \n\t  \n"), 0o600))
+		// Ensure detects the corruption and repairs it
+		err = EnsureCursorCommandsInstalled(cfg)
+		require.NoError(t, err)
+		// Verify command file was restored with valid content
+		// #nosec G304 - path is built from test temp dir and fixed segments
+		data, err := os.ReadFile(cmdPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "# Elaborate Work Item")
 	})
 }
 

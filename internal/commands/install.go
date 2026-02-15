@@ -168,10 +168,15 @@ func runInstallCursorCommandsWithOptionsAndSilent(
 	return nil
 }
 
-// EnsureCursorSkillsInstalled checks that all bundled skills exist at the configured path;
-// if any are missing, installs them automatically (no user confirmation).
+// EnsureCursorSkillsInstalled checks that all bundled skills exist at the configured path
+// with valid SKILL.md files; if any are missing or corrupted, installs them automatically
+// (no user confirmation).
 func EnsureCursorSkillsInstalled(cfg *config.Config) error {
 	skillsPath, err := config.GetCursorSkillsPath(cfg)
+	if err != nil {
+		return err
+	}
+	skillsPathAbs, err := filepath.Abs(skillsPath)
 	if err != nil {
 		return err
 	}
@@ -185,14 +190,32 @@ func EnsureCursorSkillsInstalled(cfg *config.Config) error {
 		if err != nil || !info.IsDir() {
 			return runInstallCursorSkillsWithOptionsAndSilent(cfg, true, true)
 		}
+		// Verify SKILL.md exists and has valid frontmatter
+		skillMDPath := filepath.Join(dirPath, "SKILL.md")
+		if err := validatePathUnder(skillsPathAbs, skillMDPath); err != nil {
+			return runInstallCursorSkillsWithOptionsAndSilent(cfg, true, true)
+		}
+		// #nosec G304 - path validated by validatePathUnder above; components are from config and bundled assets
+		content, err := os.ReadFile(skillMDPath)
+		if err != nil || len(content) == 0 {
+			return runInstallCursorSkillsWithOptionsAndSilent(cfg, true, true)
+		}
+		if err := validateSkillFrontmatter(name, content); err != nil {
+			return runInstallCursorSkillsWithOptionsAndSilent(cfg, true, true)
+		}
 	}
 	return nil
 }
 
-// EnsureCursorCommandsInstalled checks that all bundled commands exist at the configured path;
-// if any are missing, installs them automatically (no user confirmation).
+// EnsureCursorCommandsInstalled checks that all bundled commands exist at the configured path
+// with valid non-empty content; if any are missing or corrupted, installs them automatically
+// (no user confirmation).
 func EnsureCursorCommandsInstalled(cfg *config.Config) error {
 	commandsPath, err := config.GetCursorCommandsPath(cfg)
+	if err != nil {
+		return err
+	}
+	commandsPathAbs, err := filepath.Abs(commandsPath)
 	if err != nil {
 		return err
 	}
@@ -201,9 +224,21 @@ func EnsureCursorCommandsInstalled(cfg *config.Config) error {
 		return err
 	}
 	for _, name := range names {
-		filePath := filepath.Join(commandsPath, name+".md")
-		info, err := os.Stat(filePath)
+		cmdFilePath := filepath.Join(commandsPath, name+".md")
+		info, err := os.Stat(cmdFilePath)
 		if err != nil || info.IsDir() {
+			return runInstallCursorCommandsWithOptionsAndSilent(cfg, true, true)
+		}
+		// Verify command file has valid content
+		if err := validatePathUnder(commandsPathAbs, cmdFilePath); err != nil {
+			return runInstallCursorCommandsWithOptionsAndSilent(cfg, true, true)
+		}
+		// #nosec G304 - path validated by validatePathUnder above; components are from config and bundled assets
+		content, err := os.ReadFile(cmdFilePath)
+		if err != nil {
+			return runInstallCursorCommandsWithOptionsAndSilent(cfg, true, true)
+		}
+		if err := validateCommandMarkdown(content); err != nil {
 			return runInstallCursorCommandsWithOptionsAndSilent(cfg, true, true)
 		}
 	}
