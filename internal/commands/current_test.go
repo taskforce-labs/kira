@@ -221,6 +221,125 @@ This is the body content.
 	})
 }
 
+func TestRunCurrentSlug(t *testing.T) {
+	t.Run("outputs slug for valid branch", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "commit", "--allow-empty", "-m", "initial").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "001-test-feature").Run())
+
+		// Create work item
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.WriteFile(testTargetPath, []byte(testWorkItemContent), 0o600))
+
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		// Capture stdout
+		oldStdout := os.Stdout
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		os.Stdout = w
+
+		err = runCurrentSlug(cfg)
+
+		// Restore stdout and read captured output
+		require.NoError(t, w.Close())
+		os.Stdout = oldStdout
+		var buf strings.Builder
+		_, _ = io.Copy(&buf, r)
+		output := buf.String()
+
+		require.NoError(t, err)
+		assert.Equal(t, "001-test-feature", strings.TrimSpace(output))
+	})
+
+	t.Run("exits with non-zero for invalid branch name", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo with invalid branch name
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "commit", "--allow-empty", "-m", "initial").Run())
+		// Stay on default branch (main/master) which doesn't match kira format
+
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		// This should exit with non-zero, but we can't easily test os.Exit in unit tests
+		// So we'll test the underlying function instead
+		repoRoot, err := getRepoRoot()
+		require.NoError(t, err)
+		currentBranch, err := getCurrentBranch(repoRoot)
+		require.NoError(t, err)
+		_, err = parseWorkItemIDFromBranch(currentBranch, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match kira branch format")
+	})
+
+	t.Run("exits with non-zero when branch has no slug", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo with branch that has ID but no slug
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "commit", "--allow-empty", "-m", "initial").Run())
+		require.NoError(t, exec.Command("git", "checkout", "-b", "001").Run())
+
+		cfg, err := config.LoadConfig()
+		require.NoError(t, err)
+
+		// This should exit with non-zero because parseWorkItemIDFromBranch validates
+		// that branch name has format {id}-{kebab-title}, so "001" (without slug) fails
+		repoRoot, err := getRepoRoot()
+		require.NoError(t, err)
+		currentBranch, err := getCurrentBranch(repoRoot)
+		require.NoError(t, err)
+		_, err = parseWorkItemIDFromBranch(currentBranch, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match kira branch format")
+	})
+}
+
+func TestExtractSlugFromBranch(t *testing.T) {
+	t.Run("extracts slug from valid branch name", func(t *testing.T) {
+		slug := extractSlugFromBranch("034-ci-update-pr-details", "034")
+		assert.Equal(t, "ci-update-pr-details", slug)
+	})
+
+	t.Run("extracts slug with multiple hyphens", func(t *testing.T) {
+		slug := extractSlugFromBranch("001-test-feature-with-many-parts", "001")
+		assert.Equal(t, "test-feature-with-many-parts", slug)
+	})
+
+	t.Run("returns empty string when branch has no slug", func(t *testing.T) {
+		slug := extractSlugFromBranch("034", "034")
+		assert.Empty(t, slug)
+	})
+
+	t.Run("returns empty string when branch doesn't match ID prefix", func(t *testing.T) {
+		slug := extractSlugFromBranch("main", "034")
+		assert.Empty(t, slug)
+	})
+
+	t.Run("returns empty string when slug would be empty after prefix", func(t *testing.T) {
+		slug := extractSlugFromBranch("034-", "034")
+		assert.Empty(t, slug)
+	})
+}
+
 func TestRunCurrentPRs(t *testing.T) {
 	t.Run("outputs empty array when not a git repo", func(t *testing.T) {
 		tmpDir := t.TempDir()
