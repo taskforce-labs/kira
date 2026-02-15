@@ -473,14 +473,14 @@ func findPRForRepo(owner, repo, branch, token, baseURL, trunkBranch string) *PRI
 		if pr.Number == nil {
 			continue
 		}
-		
+
 		// If trunk branch is specified, filter by base branch
 		if trunkBranch != "" && pr.Base != nil && pr.Base.Ref != nil {
 			if *pr.Base.Ref != trunkBranch {
 				continue
 			}
 		}
-		
+
 		// Found a matching PR
 		matchingPR = &PRInfo{
 			Owner:    owner,
