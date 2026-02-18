@@ -350,11 +350,13 @@ jobs:
           exit 1
 
       - name: Set up Go
+        if: github.head_ref != steps.trunk-branch.outputs.trunk
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
       - name: Cache Go modules
+        if: github.head_ref != steps.trunk-branch.outputs.trunk
         uses: actions/cache@v4
         with:
           path: |
@@ -365,12 +367,15 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Build kira
+        if: github.head_ref != steps.trunk-branch.outputs.trunk
         run: make build
 
       - name: Install jq
+        if: github.head_ref != steps.trunk-branch.outputs.trunk
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Validate branch name format
+        if: github.head_ref != steps.trunk-branch.outputs.trunk
         id: validate-branch
         continue-on-error: true
         run: |
@@ -398,9 +403,10 @@ jobs:
             echo "skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
-          echo "title<<EOF" >> $GITHUB_OUTPUT
+          DELIMITER=$(openssl rand -hex 16)
+          echo "title<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$TITLE" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "$DELIMITER" >> $GITHUB_OUTPUT
           echo "skip=false" >> $GITHUB_OUTPUT
 
       - name: Get PR body
@@ -425,9 +431,10 @@ jobs:
             echo "Error: Work item file exceeds GitHub PR body size limit (~65KB). Please reduce the work item size or split it into multiple work items."
             exit 1
           fi
-          echo "body<<EOF" >> $GITHUB_OUTPUT
+          DELIMITER=$(openssl rand -hex 16)
+          echo "body<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$BODY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "$DELIMITER" >> $GITHUB_OUTPUT
           echo "skip=false" >> $GITHUB_OUTPUT
 
       - name: Get related PRs
@@ -450,9 +457,10 @@ jobs:
             echo "Error: Invalid JSON from kira current prs: $PRS"
             exit 1
           fi
-          echo "prs<<EOF" >> $GITHUB_OUTPUT
+          DELIMITER=$(openssl rand -hex 16)
+          echo "prs<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$PRS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "$DELIMITER" >> $GITHUB_OUTPUT
           echo "skip=false" >> $GITHUB_OUTPUT
 
       - name: Update PRs
