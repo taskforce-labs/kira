@@ -344,22 +344,3 @@ func DeleteRef(ctx context.Context, client *github.Client, owner, repo, ref stri
 	_, err := client.Git.DeleteRef(ctx, owner, repo, ref)
 	return err
 }
-
-// UpdatePR updates a pull request's title and body.
-// Returns the PR HTML URL.
-func UpdatePR(ctx context.Context, client *github.Client, owner, repo string, prNumber int, title, body string) (prURL string, err error) {
-	req := &github.PullRequest{
-		Title: github.String(title),
-		Body:  github.String(body),
-	}
-	pr, _, err := client.PullRequests.Edit(ctx, owner, repo, prNumber, req)
-	if err != nil {
-		return "", err
-	}
-	if pr.HTMLURL != nil {
-		prURL = *pr.HTMLURL
-	} else {
-		prURL = ""
-	}
-	return prURL, nil
-}

@@ -178,22 +178,6 @@ func runCurrentSlug(cfg *config.Config) error {
 	return nil
 }
 
-// extractSlugFromBranch extracts the slug (kebab-case title) from a branch name.
-// Branch format is "{id}-{slug}" (e.g., "034-ci-update-pr-details" -> "ci-update-pr-details").
-// This is kept for backward compatibility but runCurrentSlug now outputs the full branch name.
-func extractSlugFromBranch(branchName, workItemID string) string {
-	// Expected format: "{id}-{slug}"
-	prefix := workItemID + "-"
-	if !strings.HasPrefix(branchName, prefix) {
-		return ""
-	}
-	slug := strings.TrimPrefix(branchName, prefix)
-	if slug == "" {
-		return ""
-	}
-	return slug
-}
-
 // findWorkItemFileInAllStatusFolders searches for a work item file by ID across all status folders.
 // This is similar to findWorkItemFile but explicitly searches all configured status folders.
 func findWorkItemFileInAllStatusFolders(workItemID string, cfg *config.Config) (string, error) {
@@ -286,9 +270,25 @@ func isWorkItemFile(path string) bool {
 // hasWorkItemID checks if content contains the work item ID in front matter.
 func hasWorkItemID(content []byte, workItemID string) bool {
 	s := string(content)
-	return strings.Contains(s, fmt.Sprintf("id: %s", workItemID)) ||
-		strings.Contains(s, fmt.Sprintf("id: %q", workItemID)) ||
-		strings.Contains(s, fmt.Sprintf("id: '%s'", workItemID))
+	// Check for exact match with word boundaries to avoid partial ID matches (e.g., "01" matching "010")
+	// Match patterns: "id: <value>" or "id: "<value>"" or "id: '<value>'" followed by newline or end of string
+	patterns := []string{
+		fmt.Sprintf("id: %s\n", workItemID),
+		fmt.Sprintf("id: %s\r\n", workItemID),
+		fmt.Sprintf("id: %q\n", workItemID),
+		fmt.Sprintf("id: %q\r\n", workItemID),
+		fmt.Sprintf("id: '%s'\n", workItemID),
+		fmt.Sprintf("id: '%s'\r\n", workItemID),
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(s, pattern) {
+			return true
+		}
+	}
+	// Also check for end-of-file cases (no trailing newline)
+	return strings.HasSuffix(s, fmt.Sprintf("id: %s", workItemID)) ||
+		strings.HasSuffix(s, fmt.Sprintf("id: %q", workItemID)) ||
+		strings.HasSuffix(s, fmt.Sprintf("id: '%s'", workItemID))
 }
 
 // PRInfo represents information about a pull request
