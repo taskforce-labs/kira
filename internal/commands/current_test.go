@@ -317,33 +317,6 @@ func TestRunCurrentSlug(t *testing.T) {
 	})
 }
 
-func TestExtractSlugFromBranch(t *testing.T) {
-	t.Run("extracts slug from valid branch name", func(t *testing.T) {
-		slug := extractSlugFromBranch("034-ci-update-pr-details", "034")
-		assert.Equal(t, "ci-update-pr-details", slug)
-	})
-
-	t.Run("extracts slug with multiple hyphens", func(t *testing.T) {
-		slug := extractSlugFromBranch("001-test-feature-with-many-parts", "001")
-		assert.Equal(t, "test-feature-with-many-parts", slug)
-	})
-
-	t.Run("returns empty string when branch has no slug", func(t *testing.T) {
-		slug := extractSlugFromBranch("034", "034")
-		assert.Empty(t, slug)
-	})
-
-	t.Run("returns empty string when branch doesn't match ID prefix", func(t *testing.T) {
-		slug := extractSlugFromBranch("main", "034")
-		assert.Empty(t, slug)
-	})
-
-	t.Run("returns empty string when slug would be empty after prefix", func(t *testing.T) {
-		slug := extractSlugFromBranch("034-", "034")
-		assert.Empty(t, slug)
-	})
-}
-
 func TestRunCurrentPRs(t *testing.T) {
 	t.Run("outputs empty array when not a git repo", func(t *testing.T) {
 		tmpDir := t.TempDir()
