@@ -43,6 +43,7 @@ func init() {
 	rootCmd.AddCommand(checkCmd)
 	rootCmd.AddCommand(doneCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(currentCmd)
 }
 
 func checkWorkDir(cfg *config.Config) error {
