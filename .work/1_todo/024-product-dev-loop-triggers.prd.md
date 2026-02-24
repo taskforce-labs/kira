@@ -1,7 +1,7 @@
 ---
 id: 024
 title: product dev loop triggers
-status: backlog
+status: todo
 kind: prd
 assigned:
 estimate: 0
