@@ -1,7 +1,7 @@
 ---
 id: 037
 title: stash pop branch commands
-status: backlog
+status: todo
 kind: prd
 assigned:
 created: 2026-02-02
