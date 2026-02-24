@@ -363,6 +363,20 @@ func TestListExistingKiraSkills(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, existing, "kira-work-item-elaboration")
 	})
+
+	t.Run("detects bundled skill name even when path is a file instead of directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		skillsPath := filepath.Join(tmpDir, ".agent", "skills")
+		require.NoError(t, os.MkdirAll(skillsPath, 0o700))
+
+		// Create a file where a directory is expected (wrong type)
+		conflictingFile := filepath.Join(skillsPath, "kira-work-item-elaboration")
+		require.NoError(t, os.WriteFile(conflictingFile, []byte("wrong type"), 0o600))
+
+		existing, err := listExistingKiraSkills(skillsPath)
+		require.NoError(t, err)
+		assert.Contains(t, existing, "kira-work-item-elaboration")
+	})
 }
 
 func TestListExistingKiraCommands(t *testing.T) {
@@ -393,5 +407,70 @@ func TestListExistingKiraCommands(t *testing.T) {
 		existing, err := listExistingKiraCommands(commandsPath)
 		require.NoError(t, err)
 		assert.Contains(t, existing, "kira-elaborate-work-item.md")
+	})
+
+	t.Run("detects bundled command name even when path is a directory instead of file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		commandsPath := filepath.Join(tmpDir, ".cursor", "commands")
+		require.NoError(t, os.MkdirAll(commandsPath, 0o700))
+
+		// Create a directory where a file is expected (wrong type)
+		conflictingDir := filepath.Join(commandsPath, "kira-elaborate-work-item.md")
+		require.NoError(t, os.MkdirAll(conflictingDir, 0o700))
+
+		existing, err := listExistingKiraCommands(commandsPath)
+		require.NoError(t, err)
+		assert.Contains(t, existing, "kira-elaborate-work-item.md")
+	})
+}
+
+func TestEnsureCursorSkillsInstalled_WrongTypeRepair(t *testing.T) {
+	t.Run("repairs when skill path is a file instead of directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		skillsPath := filepath.Join(tmpDir, ".agent", "skills")
+		require.NoError(t, os.MkdirAll(skillsPath, 0o700))
+
+		// Create a file where the skill directory should be
+		conflictingFile := filepath.Join(skillsPath, "kira-work-item-elaboration")
+		require.NoError(t, os.WriteFile(conflictingFile, []byte("wrong type"), 0o600))
+
+		// EnsureCursorSkillsInstalled should detect the wrong type and repair it
+		err := EnsureCursorSkillsInstalled(cfg)
+		require.NoError(t, err)
+
+		// Verify the skill was installed correctly as a directory with SKILL.md
+		skillMDPath := filepath.Join(skillsPath, "kira-work-item-elaboration", "SKILL.md")
+		// #nosec G304 - path is built from test temp dir and fixed segments
+		data, err := os.ReadFile(skillMDPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "name: work-item-elaboration")
+	})
+}
+
+func TestEnsureCursorCommandsInstalled_WrongTypeRepair(t *testing.T) {
+	t.Run("repairs when command path is a directory instead of file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{CursorInstall: &config.CursorInstallConfig{BasePath: tmpDir}}
+		commandsPath := filepath.Join(tmpDir, ".cursor", "commands")
+		require.NoError(t, os.MkdirAll(commandsPath, 0o700))
+
+		// Create a directory where the command file should be
+		conflictingDir := filepath.Join(commandsPath, "kira-elaborate-work-item.md")
+		require.NoError(t, os.MkdirAll(conflictingDir, 0o700))
+
+		// EnsureCursorCommandsInstalled should detect the wrong type and repair it
+		err := EnsureCursorCommandsInstalled(cfg)
+		require.NoError(t, err)
+
+		// Verify the command was installed correctly as a file
+		cmdPath := filepath.Join(commandsPath, "kira-elaborate-work-item.md")
+		info, err := os.Stat(cmdPath)
+		require.NoError(t, err)
+		assert.False(t, info.IsDir(), "command path should be a file, not a directory")
+		// #nosec G304 - path is built from test temp dir and fixed segments
+		data, err := os.ReadFile(cmdPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "# Elaborate Work Item")
 	})
 }
