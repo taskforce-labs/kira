@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"kira/internal/config"
+	"kira/internal/shellutil"
 )
 
 // gitCommandTimeout is the default timeout for git commands
@@ -390,7 +391,10 @@ func executeCommandWithEnv(ctx context.Context, name string, args []string, dir 
 		return "", nil
 	}
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd, err := shellutil.Command(name, args...)
+	if err != nil {
+		return "", err
+	}
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -402,7 +406,7 @@ func executeCommandWithEnv(ctx context.Context, name string, args []string, dir 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = startAndWait(ctx, cmd)
 	if err != nil {
 		stderrStr := strings.TrimSpace(stderr.String())
 		if stderrStr != "" {
@@ -427,7 +431,10 @@ func executeCommandCombinedOutput(ctx context.Context, name string, args []strin
 		return "", nil
 	}
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd, err := shellutil.Command(name, args...)
+	if err != nil {
+		return "", err
+	}
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -435,16 +442,20 @@ func executeCommandCombinedOutput(ctx context.Context, name string, args []strin
 		cmd.Env = append(os.Environ(), env...)
 	}
 
-	output, err := cmd.CombinedOutput()
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	err = startAndWait(ctx, cmd)
 	if err != nil {
-		outputStr := strings.TrimSpace(string(output))
+		outputStr := strings.TrimSpace(buf.String())
 		if outputStr == "" {
 			outputStr = "(no output)"
 		}
 		return "", fmt.Errorf("%w: %s", err, outputStr)
 	}
 
-	return string(output), nil
+	return buf.String(), nil
 }
 
 // executeCommandCombinedOutputWithEnv executes a command with additional environment variables
@@ -461,7 +472,10 @@ func executeCommandCombinedOutputWithEnv(ctx context.Context, name string, args 
 		return "", nil
 	}
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd, err := shellutil.Command(name, args...)
+	if err != nil {
+		return "", err
+	}
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -469,14 +483,38 @@ func executeCommandCombinedOutputWithEnv(ctx context.Context, name string, args 
 		cmd.Env = append(os.Environ(), append(gitConfigEnv(), env...)...)
 	}
 
-	output, err := cmd.CombinedOutput()
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	err = startAndWait(ctx, cmd)
 	if err != nil {
-		outputStr := strings.TrimSpace(string(output))
+		outputStr := strings.TrimSpace(buf.String())
 		if outputStr == "" {
 			outputStr = "(no output)"
 		}
 		return "", fmt.Errorf("%w: %s", err, outputStr)
 	}
 
-	return string(output), nil
+	return buf.String(), nil
+}
+
+// startAndWait starts a command and waits for completion with context cancellation support.
+// If the context expires before the command finishes, the process is killed.
+func startAndWait(ctx context.Context, cmd *exec.Cmd) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+
+	select {
+	case <-ctx.Done():
+		_ = cmd.Process.Kill()
+		<-waitDone
+		return ctx.Err()
+	case err := <-waitDone:
+		return err
+	}
 }

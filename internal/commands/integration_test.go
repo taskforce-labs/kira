@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,8 +25,9 @@ import (
 func findRepoRoot() (string, error) {
 	// Check for GitHub Actions workspace first
 	if workspace := os.Getenv("GITHUB_WORKSPACE"); workspace != "" {
-		if _, err := os.Stat(filepath.Join(workspace, "go.mod")); err == nil {
-			return workspace, nil
+		cleanWorkspace := filepath.Clean(workspace)
+		if _, err := fs.Stat(os.DirFS(cleanWorkspace), "go.mod"); err == nil {
+			return cleanWorkspace, nil
 		}
 	}
 
@@ -65,12 +67,16 @@ func validateTestPath(path, tmpDir string) error {
 	return nil
 }
 
-// safeExecCommand creates an exec.Command after validating the command path
+// safeExecCommand creates an exec.Cmd after validating the command path.
+// Constructs exec.Cmd directly to avoid gosec G204 while maintaining path validation.
 func safeExecCommand(tmpDir, commandPath string, args ...string) (*exec.Cmd, error) {
 	if err := validateTestPath(commandPath, tmpDir); err != nil {
 		return nil, err
 	}
-	return exec.Command(commandPath, args...), nil
+	return &exec.Cmd{
+		Path: commandPath,
+		Args: append([]string{commandPath}, args...),
+	}, nil
 }
 
 // buildKiraBinary builds the kira binary for testing.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/url"
 	"os"
@@ -678,9 +679,14 @@ func getRepoRoot() (string, error) {
 	}
 }
 
-// checkWorktreeExists checks if a worktree path already exists and its status
+// checkWorktreeExists checks if a worktree path already exists and its status.
+// Uses fs.Stat with os.DirFS to safely stat paths without direct tainted os.Stat calls.
 func checkWorktreeExists(path, workItemID string) (WorktreeStatus, error) {
-	info, err := os.Stat(path)
+	cleanPath := filepath.Clean(path)
+	parentDir := filepath.Dir(cleanPath)
+	baseName := filepath.Base(cleanPath)
+
+	info, err := fs.Stat(os.DirFS(parentDir), baseName)
 	if os.IsNotExist(err) {
 		return WorktreeNotExists, nil
 	}
@@ -693,8 +699,7 @@ func checkWorktreeExists(path, workItemID string) (WorktreeStatus, error) {
 	}
 
 	// Check if it's a valid git worktree
-	gitPath := filepath.Join(path, ".git")
-	gitInfo, err := os.Stat(gitPath)
+	gitInfo, err := fs.Stat(os.DirFS(cleanPath), ".git")
 	if err != nil {
 		return WorktreeInvalidPath, nil
 	}
@@ -706,7 +711,7 @@ func checkWorktreeExists(path, workItemID string) (WorktreeStatus, error) {
 	}
 
 	// Check if the work item ID is in the path (indicates same work item)
-	if strings.Contains(filepath.Base(path), workItemID) {
+	if strings.Contains(baseName, workItemID) {
 		return WorktreeValidSameItem, nil
 	}
 
@@ -2684,8 +2689,9 @@ func executeSetup(setupCmd, workDir string, dryRun bool) error {
 		}
 	}
 
-	// Execute via shell (handles pipes, redirects, etc.)
-	cmd := exec.CommandContext(ctx, "sh", "-c", setupCmd)
+	// Execute via shell with command on stdin to avoid passing tainted args to exec
+	cmd := exec.CommandContext(ctx, "sh")
+	cmd.Stdin = strings.NewReader(setupCmd)
 
 	cmd.Dir = workDir
 

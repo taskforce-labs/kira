@@ -809,8 +809,13 @@ func findUserByNumber(number int, users []UserInfo) (*UserInfo, error) {
 		return nil, fmt.Errorf("user number %d not found. Available numbers: 1-%d", number, len(users))
 	}
 
-	// Users are numbered 1-based, so index is number-1
-	return &users[number-1], nil
+	// Users are numbered 1-based; iterate to find the match
+	for i, u := range users {
+		if i+1 == number {
+			return &u, nil
+		}
+	}
+	return nil, fmt.Errorf("user number %d not found. Available numbers: 1-%d", number, len(users))
 }
 
 // findUsersByEmail finds users matching an email identifier (exact or partial).

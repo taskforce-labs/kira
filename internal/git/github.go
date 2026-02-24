@@ -193,7 +193,11 @@ func graphQLMarkPullRequestReadyForReview(ctx context.Context, client *github.Cl
 		return fmt.Errorf("graphql request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Client().Do(req)
+	transport := client.Client().Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	resp, err := transport.RoundTrip(req)
 	if err != nil {
 		return fmt.Errorf("graphql request: %w", err)
 	}
