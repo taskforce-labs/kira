@@ -204,16 +204,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return printDryRunPreview(ctx)
 	}
 
-	// Ensure Cursor skills and commands are installed before starting workflow
-	// (skip in dry-run mode to avoid side effects)
-	if err := EnsureCursorSkillsInstalled(cfg); err != nil {
-		return fmt.Errorf("failed to ensure cursor skills installed: %w", err)
-	}
-	if err := EnsureCursorCommandsInstalled(cfg); err != nil {
-		return fmt.Errorf("failed to ensure cursor commands installed: %w", err)
-	}
-
-	// Execute git operations
+	// Execute git operations (ensure skills/commands run after pull to avoid dirtying tree before uncommitted check)
 	return executeGitOperations(ctx)
 }
 
@@ -242,6 +233,14 @@ func executeGitOperations(ctx *StartContext) error {
 	// Step 4: Check for uncommitted changes and pull latest
 	if err := validateAndPullLatest(ctx, repoRoot, trunkBranch, remoteName); err != nil {
 		return err
+	}
+
+	// Step 4b: Ensure Cursor skills and commands are installed (after pull so install does not dirty tree before uncommitted check)
+	if err := EnsureCursorSkillsInstalled(ctx.Config); err != nil {
+		return fmt.Errorf("failed to ensure cursor skills installed: %w", err)
+	}
+	if err := EnsureCursorCommandsInstalled(ctx.Config); err != nil {
+		return fmt.Errorf("failed to ensure cursor commands installed: %w", err)
 	}
 
 	// Step 5: Check work item status (after pull to ensure up-to-date status)
@@ -734,7 +733,7 @@ func checkWorkItemStatus(currentStatus, targetStatus string, skipCheck bool) err
 	}
 
 	if currentStatus == targetStatus {
-		return fmt.Errorf("work item status already matches target status '%s'", targetStatus)
+		return fmt.Errorf("work item is already in '%s' status; use --skip-status-check to start work anyway", targetStatus)
 	}
 
 	return nil

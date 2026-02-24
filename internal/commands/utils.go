@@ -409,7 +409,7 @@ func executeCommandWithEnv(ctx context.Context, name string, args []string, dir 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err = startAndWait(ctx, cmd)
+	err := startAndWait(ctx, cmd)
 	if err != nil {
 		stderrStr := strings.TrimSpace(stderr.String())
 		if stderrStr != "" {
@@ -446,7 +446,7 @@ func executeCommandCombinedOutput(ctx context.Context, name string, args []strin
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 
-	err = startAndWait(ctx, cmd)
+	err := startAndWait(ctx, cmd)
 	if err != nil {
 		outputStr := strings.TrimSpace(buf.String())
 		if outputStr == "" {
@@ -484,7 +484,7 @@ func executeCommandCombinedOutputWithEnv(ctx context.Context, name string, args 
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 
-	err = startAndWait(ctx, cmd)
+	err := startAndWait(ctx, cmd)
 	if err != nil {
 		outputStr := strings.TrimSpace(buf.String())
 		if outputStr == "" {
