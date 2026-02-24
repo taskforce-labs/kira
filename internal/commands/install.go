@@ -446,14 +446,23 @@ func validatePathUnder(baseAbs, target string) error {
 	}
 	targetResolved, err := filepath.EvalSymlinks(targetAbs)
 	if err != nil {
-		// If target doesn't exist yet, resolve parent and append basename
-		targetDir := filepath.Dir(targetAbs)
-		targetDirResolved, err := filepath.EvalSymlinks(targetDir)
-		if err != nil {
-			// Parent doesn't exist, use absolute path as-is
-			targetResolved = targetAbs
-		} else {
-			targetResolved = filepath.Join(targetDirResolved, filepath.Base(targetAbs))
+		// Target doesn't exist yet; walk up to the nearest existing ancestor,
+		// resolve its symlinks, then re-append the remaining path components.
+		remaining := filepath.Base(targetAbs)
+		ancestor := filepath.Dir(targetAbs)
+		for {
+			resolved, evalErr := filepath.EvalSymlinks(ancestor)
+			if evalErr == nil {
+				targetResolved = filepath.Join(resolved, remaining)
+				break
+			}
+			remaining = filepath.Join(filepath.Base(ancestor), remaining)
+			parent := filepath.Dir(ancestor)
+			if parent == ancestor {
+				targetResolved = targetAbs
+				break
+			}
+			ancestor = parent
 		}
 	}
 	baseWithSep := baseResolved + string(filepath.Separator)

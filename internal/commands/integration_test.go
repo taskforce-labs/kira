@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,14 +19,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// getCIWorkspace returns the cleaned CI workspace path from the GITHUB_WORKSPACE env var.
+func getCIWorkspace() (string, error) {
+	workspace := os.Getenv("GITHUB_WORKSPACE")
+	if workspace == "" {
+		return "", fmt.Errorf("GITHUB_WORKSPACE not set")
+	}
+	return validateAndCleanPath(workspace)
+}
+
 // findRepoRoot finds the repository root by walking up from the current file
 // until it finds go.mod. In GitHub Actions, uses GITHUB_WORKSPACE if available.
 func findRepoRoot() (string, error) {
 	// Check for GitHub Actions workspace first
-	if workspace := os.Getenv("GITHUB_WORKSPACE"); workspace != "" {
-		cleanWorkspace := filepath.Clean(workspace)
-		if _, err := fs.Stat(os.DirFS(cleanWorkspace), "go.mod"); err == nil {
-			return cleanWorkspace, nil
+	if cleanPath, err := getCIWorkspace(); err == nil {
+		goModPath := filepath.Join(cleanPath, "go.mod")
+		if _, err := os.Stat(goModPath); err == nil {
+			return cleanPath, nil
 		}
 	}
 
@@ -67,8 +75,8 @@ func validateTestPath(path, tmpDir string) error {
 	return nil
 }
 
-// safeExecCommand creates an exec.Cmd after validating the command path.
-// Constructs exec.Cmd directly to avoid gosec G204 while maintaining path validation.
+// safeExecCommand creates an exec.Command after validating the command path.
+// Uses direct Cmd struct construction to avoid G204 after path validation.
 func safeExecCommand(tmpDir, commandPath string, args ...string) (*exec.Cmd, error) {
 	if err := validateTestPath(commandPath, tmpDir); err != nil {
 		return nil, err

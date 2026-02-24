@@ -254,13 +254,11 @@ func TestCheckWorktreeExists(t *testing.T) {
 	})
 
 	t.Run("returns InvalidPath for file (not directory)", func(t *testing.T) {
-		tmpFile, err := os.CreateTemp("", "test")
-		require.NoError(t, err)
-		tmpPath := filepath.Clean(tmpFile.Name())
-		defer func() { _ = os.Remove(tmpPath) }()
-		_ = tmpFile.Close()
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "testfile")
+		require.NoError(t, os.WriteFile(filePath, []byte("test"), 0o600))
 
-		status, err := checkWorktreeExists(tmpFile.Name(), "001")
+		status, err := checkWorktreeExists(filePath, "001")
 		require.NoError(t, err)
 		assert.Equal(t, WorktreeInvalidPath, status)
 	})
