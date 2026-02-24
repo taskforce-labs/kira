@@ -178,6 +178,29 @@ However, `moveWorkItem` still needs an **idempotent check**:
    - Idempotent moves (file already at target)
    - Error cases that might occur in `done` context
 
+## Slices
+
+### Extend moveWorkItem with additionalFields
+Commit: Add optional additionalFields to moveWorkItem for completion metadata; update frontmatter and call sites
+- [ ] T001: Add optional parameter additionalFields map[string]interface{} to moveWorkItem and executeMoveWorkItem; update all call sites (move command, tests)
+- [ ] T002: When additionalFields is non-nil, update those frontmatter fields after moving file (and status) and before committing; reuse parse/write frontmatter logic (e.g. from updateWorkItemDoneMetadata)
+- [ ] T003: Add or adapt unit tests for moveWorkItem with additionalFields
+
+### Idempotent check in moveWorkItem
+Commit: If work item already at target path skip move and staging; only update frontmatter and commit if needed
+- [ ] T004: After findWorkItemFile, if workItemPath equals targetPath (already in target status folder), skip os.Rename and move staging; only update frontmatter (status + additionalFields) and if commitFlag commit metadata
+- [ ] T005: Add unit tests for idempotent case (file already at target)
+
+### Refactor done to use moveWorkItem
+Commit: Replace moveWorkItemWithoutCommit + metadata + commitWorkItemUpdate with single moveWorkItem call
+- [ ] T006: In updateWorkItemToDone build additionalFields from mergedAt mergeCommitSHA prNumber mergeStrategy and call moveWorkItem(cfg workItemID defaultReleaseStatus true false additionalFields); keep push and trunk resolution in done
+- [ ] T007: Remove or simplify redundant move/commit logic and ensure kira done e2e or manual flow passes
+
+### Tests and release notes
+Commit: E2e for done after pull; unit tests; release notes
+- [ ] T008: Add e2e or integration test for kira done when work item file already moved on trunk (or simulate post-pull)
+- [ ] T009: Update Release Notes in work item (and docs if needed) for reliable kira done after pull and idempotent behavior
+
 ## Release Notes
 
 When fixed, this will ensure `kira done` works reliably even when:
