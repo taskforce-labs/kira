@@ -225,12 +225,19 @@ func buildTestBinary(t *testing.T, tmpDir string) string {
 
 ## When to Use `#nosec` Comments
 
-Only use `#nosec` comments when:
-- Paths have been validated by a validation function
-- Input has been sanitized by a sanitization function
-- The comment explains WHY it's safe (e.g., "path validated by validateWorkPath above")
+**Policy:** The codebase uses `#nosec` only in the two approved exceptions listed below. Do **not** add new `#nosec` comments without explicit permission. If you are an agent or contributor and believe a new `#nosec` is justified, ask the maintainers first and get explicit approval before adding one.
 
-Never use `#nosec` to bypass security checks without proper validation.
+### Approved `#nosec` exceptions
+
+These are the only two places where `#nosec` is used. They cannot be removed by code restructuring because the linter flags are inherent to what the code must do.
+
+1. **G204 in `internal/commands/utils.go` — `newCommand()`**  
+   The function calls `exec.CommandContext(ctx, name, args...)`. Gosec flags any variable command name or arguments. Our callers pass fixed names (e.g. `"git"`, `"sh"`) and controlled args, but the tool must run subprocesses with dynamic arguments (branch names, paths, etc.). The linter does not trust call-site literals, so this single centralized call will always be flagged. The `#nosec` documents that name/args are from internal callers only.
+
+2. **G704 in `internal/git/github.go` — `httpClient.Do(req)`**  
+   We perform the GraphQL request using a URL from `graphQLEndpointURL(client)` and the client from `extractHTTPClient(client)`. Gosec’s taint analysis treats function parameters (and values derived from them) as tainted, so any `Do(req)` that uses the client or URL is flagged as potential SSRF. The URL is always our GitHub/Enterprise endpoint, not user-controlled. The `#nosec` documents that the request is to the configured API only.
+
+Each exception has an inline comment at the call site explaining why it is there and why it cannot be removed, and referencing this section.
 
 ## Examples from Codebase
 

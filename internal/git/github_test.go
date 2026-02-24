@@ -56,21 +56,21 @@ func TestGraphQLURL(t *testing.T) {
 		client := github.NewClient(nil)
 		// Client from NewClient(nil) may have BaseURL set; clear it for this test
 		client.BaseURL = nil
-		u, err := graphQLURL(client)
+		u, err := graphQLEndpointURL(client)
 		require.NoError(t, err)
 		assert.Equal(t, "https://api.github.com/graphql", u)
 	})
 	t.Run("api.github.com host returns github.com graphql", func(t *testing.T) {
 		client := github.NewClient(nil)
 		client.BaseURL, _ = url.Parse("https://api.github.com/")
-		u, err := graphQLURL(client)
+		u, err := graphQLEndpointURL(client)
 		require.NoError(t, err)
 		assert.Equal(t, "https://api.github.com/graphql", u)
 	})
 	t.Run("enterprise host returns host api/graphql", func(t *testing.T) {
 		client := github.NewClient(nil)
 		client.BaseURL, _ = url.Parse("https://ghe.example.com/api/v3/")
-		u, err := graphQLURL(client)
+		u, err := graphQLEndpointURL(client)
 		require.NoError(t, err)
 		assert.Equal(t, "https://ghe.example.com/api/graphql", u)
 	})

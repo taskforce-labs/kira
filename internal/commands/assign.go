@@ -809,10 +809,9 @@ func findUserByNumber(number int, users []UserInfo) (*UserInfo, error) {
 		return nil, fmt.Errorf("user number %d not found. Available numbers: 1-%d", number, len(users))
 	}
 
-	// Users are numbered 1-based; iterate to find the match
-	for i, u := range users {
-		if i+1 == number {
-			return &u, nil
+	for i := range users {
+		if i == number-1 {
+			return &users[i], nil
 		}
 	}
 	return nil, fmt.Errorf("user number %d not found. Available numbers: 1-%d", number, len(users))

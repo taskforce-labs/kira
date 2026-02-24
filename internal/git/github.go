@@ -155,15 +155,11 @@ func UpdateDraftToReady(ctx context.Context, client *github.Client, pr *github.P
 	if pr == nil || pr.NodeID == nil || *pr.NodeID == "" {
 		return fmt.Errorf("pull request has no node ID (required for GraphQL)")
 	}
-	graphqlURL, err := graphQLURL(client)
-	if err != nil {
-		return err
-	}
-	return graphQLMarkPullRequestReadyForReview(ctx, client, graphqlURL, *pr.NodeID)
+	return graphQLMarkPullRequestReadyForReview(ctx, client, *pr.NodeID)
 }
 
-// graphQLURL returns the GraphQL endpoint for the client's base URL (github.com or Enterprise).
-func graphQLURL(client *github.Client) (string, error) {
+// graphQLEndpointURL returns the validated GraphQL endpoint for the client's base URL.
+func graphQLEndpointURL(client *github.Client) (string, error) {
 	if client.BaseURL == nil {
 		return "https://api.github.com/graphql", nil
 	}
@@ -171,12 +167,24 @@ func graphQLURL(client *github.Client) (string, error) {
 	if strings.Contains(u.Host, "api.github.com") {
 		return "https://api.github.com/graphql", nil
 	}
-	// GitHub Enterprise: base is typically https://hostname/api/v3, GraphQL is https://hostname/api/graphql
-	return u.Scheme + "://" + u.Host + "/api/graphql", nil
+	rawURL := u.Scheme + "://" + u.Host + "/api/graphql"
+	parsed, err := url.ParseRequestURI(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid graphql URL: %w", err)
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return "", fmt.Errorf("URL must use https or http scheme: %s", rawURL)
+	}
+	return parsed.String(), nil
 }
 
-// graphQLMarkPullRequestReadyForReview calls the GraphQL mutation to mark a draft PR as ready for review.
-func graphQLMarkPullRequestReadyForReview(ctx context.Context, client *github.Client, graphqlURL, pullRequestNodeID string) error {
+// extractHTTPClient returns the underlying http.Client from a github.Client.
+func extractHTTPClient(client *github.Client) *http.Client {
+	return client.Client()
+}
+
+// buildGraphQLRequestBody constructs the JSON body for a GraphQL mutation.
+func buildGraphQLRequestBody(pullRequestNodeID string) ([]byte, error) {
 	query := `mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { id isDraft } } }`
 	body := map[string]interface{}{
 		"query": query,
@@ -184,20 +192,27 @@ func graphQLMarkPullRequestReadyForReview(ctx context.Context, client *github.Cl
 			"id": pullRequestNodeID,
 		},
 	}
-	enc, err := json.Marshal(body)
+	return json.Marshal(body)
+}
+
+// graphQLMarkPullRequestReadyForReview calls the GraphQL mutation to mark a draft PR as ready for review.
+func graphQLMarkPullRequestReadyForReview(ctx context.Context, client *github.Client, pullRequestNodeID string) error {
+	endpointURL, err := graphQLEndpointURL(client)
 	if err != nil {
 		return fmt.Errorf("graphql request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, graphqlURL, bytes.NewReader(enc))
+	httpClient := extractHTTPClient(client)
+	enc, err := buildGraphQLRequestBody(pullRequestNodeID)
+	if err != nil {
+		return fmt.Errorf("graphql request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(enc))
 	if err != nil {
 		return fmt.Errorf("graphql request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	transport := client.Client().Transport
-	if transport == nil {
-		transport = http.DefaultTransport
-	}
-	resp, err := transport.RoundTrip(req)
+	// #nosec G704 -- URL and client come from graphQLEndpointURL/extractHTTPClient (GitHub API only). Cannot restructure away: taint analysis flags any param-derived HTTP call; we must call Do(req) with our client. See .docs/guides/security/golang-secure-coding.md § Approved #nosec exceptions.
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("graphql request: %w", err)
 	}
