@@ -582,6 +582,24 @@ git init > /dev/null 2>&1
 git checkout -b main > /dev/null 2>&1
 git config user.email test@example.com
 git config user.name "Test User"
+
+# Install Cursor skills/commands outside the test repo (under ignored e2e-test/) so the repo is never modified
+E2E_CURSOR_INSTALL_DIR="$(cd "$ROOT_DIR/$BASE_DIR" && pwd)/e2e-cursor-install"
+mkdir -p "$E2E_CURSOR_INSTALL_DIR"
+# Patch cursor_install.base_path so installs go outside repo
+if grep -q "base_path: \"\"" kira.yml 2>/dev/null; then
+  TMP_KIRA=$(mktemp)
+  sed "s|base_path: \"\"|base_path: \"$E2E_CURSOR_INSTALL_DIR\"|" kira.yml > "$TMP_KIRA" && mv "$TMP_KIRA" kira.yml
+fi
+if ! grep -q "e2e-cursor-install" kira.yml 2>/dev/null; then
+  # Init wrote "cursor_install: {}"; remove it so we can append a single cursor_install block
+  if grep -q "cursor_install: {}" kira.yml 2>/dev/null; then
+    TMP_KIRA=$(mktemp)
+    sed '/^cursor_install: {}$/d' kira.yml > "$TMP_KIRA" && mv "$TMP_KIRA" kira.yml
+  fi
+  printf '\ncursor_install:\n  base_path: "%s"\n' "$E2E_CURSOR_INSTALL_DIR" >> kira.yml
+fi
+
 git add .
 git commit -m "init" > /dev/null 2>&1
 
@@ -851,6 +869,8 @@ start:
 workspace:
   setup: "echo 'E2E_SETUP_RAN' > /tmp/kira-e2e-setup-test.txt"
 EOF
+E2E_CURSOR_INSTALL_DIR="${E2E_CURSOR_INSTALL_DIR:-$(cd "$ROOT_DIR/$BASE_DIR" && pwd)/e2e-cursor-install}"
+printf '\ncursor_install:\n  base_path: "%s"\n' "$E2E_CURSOR_INSTALL_DIR" >> kira.yml
 
 # Create a fresh work item for setup tests
 cat > .work/0_backlog/006-setup-test.prd.md << 'EOF'
@@ -948,8 +968,17 @@ release:
   releases_file: RELEASES.md
   archive_date_format: "2006-01-02"
 EOF
-git add kira.yml
-git commit -m "Restore kira.yml after setup test" > /dev/null
+# Restore cursor_install so subsequent start tests still install outside repo
+E2E_CURSOR_INSTALL_DIR="${E2E_CURSOR_INSTALL_DIR:-$(cd "$ROOT_DIR/$BASE_DIR" && pwd)/e2e-cursor-install}"
+if ! grep -q "e2e-cursor-install" kira.yml 2>/dev/null; then
+  if grep -q "cursor_install: {}" kira.yml 2>/dev/null; then
+    TMP_KIRA=$(mktemp)
+    sed '/^cursor_install: {}$/d' kira.yml > "$TMP_KIRA" && mv "$TMP_KIRA" kira.yml
+  fi
+  printf '\ncursor_install:\n  base_path: "%s"\n' "$E2E_CURSOR_INSTALL_DIR" >> kira.yml
+  git add kira.yml
+  git commit -m "Restore kira.yml after setup test" > /dev/null 2>&1
+fi
 
 ###############################################
 # Test 22: Start command - override flag
@@ -972,8 +1001,8 @@ EOF
 git add .work/
 git commit -m "Add work item 007 for override test" > /dev/null
 
-# Start work on it first time
-FIRST_START_OUTPUT=$("$KIRA_BIN" start 007 --no-ide --status-action none 2>&1)
+# Start work on it first time (capture exit so we can print output on failure)
+FIRST_START_OUTPUT=$("$KIRA_BIN" start 007 --no-ide --status-action none 2>&1) || true
 if ! echo "$FIRST_START_OUTPUT" | grep -q "Successfully started work on 007"; then
   echo "❌ First start failed"
   echo "Output: $FIRST_START_OUTPUT"

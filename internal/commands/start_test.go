@@ -392,7 +392,7 @@ func TestCheckWorkItemStatus(t *testing.T) {
 	t.Run("returns error when status matches target", func(t *testing.T) {
 		err := checkWorkItemStatus("doing", "doing", false)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "status already matches target")
+		assert.Contains(t, err.Error(), "already in 'doing' status")
 	})
 }
 
