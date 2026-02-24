@@ -256,7 +256,8 @@ func TestCheckWorktreeExists(t *testing.T) {
 	t.Run("returns InvalidPath for file (not directory)", func(t *testing.T) {
 		tmpFile, err := os.CreateTemp("", "test")
 		require.NoError(t, err)
-		defer func() { _ = os.Remove(tmpFile.Name()) }()
+		tmpPath := filepath.Clean(tmpFile.Name())
+		defer func() { _ = os.Remove(tmpPath) }()
 		_ = tmpFile.Close()
 
 		status, err := checkWorktreeExists(tmpFile.Name(), "001")

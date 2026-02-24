@@ -857,7 +857,7 @@ func validateAllReposCleanOrDirtyForUpdate(aggregated AggregatedState) error {
 		msg.WriteString("cannot proceed with update: repositories have blocking states:\n")
 		for i, repo := range blockingRepos {
 			if i < len(blockingReasons) {
-				msg.WriteString(fmt.Sprintf("  - %s: %s\n", repo, blockingReasons[i%len(blockingReasons)]))
+				fmt.Fprintf(&msg, "  - %s: %s\n", repo, blockingReasons[i%len(blockingReasons)])
 			}
 		}
 		msg.WriteString("\nTo resolve:\n")
@@ -1188,13 +1188,13 @@ func parseConflictsFromRepository(repo RepositoryInfo, stateInfo RepositoryState
 func formatConflictForDisplay(conflict ConflictRegion, filePath string) string {
 	var buf strings.Builder
 
-	buf.WriteString(fmt.Sprintf("File: %s\n\n", filePath))
+	fmt.Fprintf(&buf, "File: %s\n\n", filePath)
 
 	// Context before
 	if len(conflict.ContextBefore) > 0 {
 		buf.WriteString("Context (3 lines before):\n")
 		for _, line := range conflict.ContextBefore {
-			buf.WriteString(fmt.Sprintf("  %s\n", line))
+			fmt.Fprintf(&buf, "  %s\n", line)
 		}
 		buf.WriteString("\n")
 	}
@@ -1225,7 +1225,7 @@ func formatConflictForDisplay(conflict ConflictRegion, filePath string) string {
 	if len(conflict.ContextAfter) > 0 {
 		buf.WriteString("\nContext (3 lines after):\n")
 		for _, line := range conflict.ContextAfter {
-			buf.WriteString(fmt.Sprintf("  %s\n", line))
+			fmt.Fprintf(&buf, "  %s\n", line)
 		}
 	}
 
@@ -1245,7 +1245,7 @@ func formatFileConflicts(fileConflict FileConflict) string {
 	}
 
 	var buf strings.Builder
-	buf.WriteString(fmt.Sprintf("File: %s\n\n", fileConflict.FilePath))
+	fmt.Fprintf(&buf, "File: %s\n\n", fileConflict.FilePath)
 
 	for i, region := range fileConflict.Regions {
 		if i > 0 {
@@ -1264,7 +1264,7 @@ func formatRepositoryConflicts(repoConflicts RepositoryConflicts) string {
 	}
 
 	var buf strings.Builder
-	buf.WriteString(fmt.Sprintf("Repository: %s\n", repoConflicts.Repo.Name))
+	fmt.Fprintf(&buf, "Repository: %s\n", repoConflicts.Repo.Name)
 	buf.WriteString("───────────────────────────────────────────────────────────────\n\n")
 
 	for i, fileConflict := range repoConflicts.Files {
