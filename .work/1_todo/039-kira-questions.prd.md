@@ -1,7 +1,7 @@
 ---
 id: 039
 title: kira questions
-status: backlog
+status: todo
 kind: prd
 assigned:
 created: 2026-02-02
