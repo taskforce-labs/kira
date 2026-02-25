@@ -198,8 +198,8 @@ Commit: Replace moveWorkItemWithoutCommit + metadata + commitWorkItemUpdate with
 
 ### Tests and release notes
 Commit: E2e for done after pull; unit tests; release notes
-- [ ] T008: Add e2e or integration test for kira done when work item file already moved on trunk (or simulate post-pull)
-- [ ] T009: Update Release Notes in work item (and docs if needed) for reliable kira done after pull and idempotent behavior
+- [x] T008: Add e2e or integration test for kira done when work item file already moved on trunk (or simulate post-pull)
+- [x] T009: Update Release Notes in work item (and docs if needed) for reliable kira done after pull and idempotent behavior
 
 ## Release Notes
 

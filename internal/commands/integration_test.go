@@ -2088,6 +2088,63 @@ func TestKiraDoneIntegration(t *testing.T) {
 		assert.Contains(t, string(output), "merge")
 	})
 
+	t.Run("dry-run when work item already in done folder succeeds", func(t *testing.T) {
+		// Simulates post-pull: file was already moved to done on trunk; kira done should not fail.
+		mergedAt := "2024-06-01T12:00:00Z"
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == pullsPath {
+				prs := []*github.PullRequest{
+					{
+						Number:         github.Int(42),
+						Head:           &github.PullRequestBranch{Ref: github.String("014-feature")},
+						MergedAt:       &github.Timestamp{Time: mustParseTime(mergedAt)},
+						MergeCommitSHA: github.String("abc123"),
+					},
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(prs)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		tmpDir := t.TempDir()
+		kiraPath := buildKiraBinary(t, tmpDir)
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/4_done", 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".work/4_done/014-test.prd.md"), []byte("---\nid: 014\ntitle: Test\nstatus: done\nkind: prd\ncreated: 2024-01-01\n---\n"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "init").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "remote", "add", "origin", "https://github.com/owner/repo.git").Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - command is fixed
+		require.NoError(t, exec.Command("git", "add", "f").Run())
+		// #nosec G204 - commit message is fixed
+		require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+		// #nosec G204 - branch name is fixed
+		_ = exec.Command("git", "branch", "-m", "main").Run()
+		kiraYml := fmt.Sprintf("version: \"1.0\"\ngit:\n  trunk_branch: main\nworkspace:\n  git_base_url: %s\n", server.URL)
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "kira.yml"), []byte(kiraYml), 0o600))
+
+		restore := setenv("KIRA_GITHUB_TOKEN", "test-token")
+		defer restore()
+
+		cmd, err := safeExecCommand(tmpDir, kiraPath, "done", "014", "--dry-run")
+		require.NoError(t, err)
+		cmd.Dir = tmpDir
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, "kira done --dry-run with work item already in done should succeed: %s", string(output))
+		assert.Contains(t, string(output), "idempotent")
+	})
+
 	// Full flow (merge, pull, update, cleanup) requires a real GitHub remote for git pull/push.
 	// When KIRA_GITHUB_TOKEN is set to a real token and the repo has a PR for the work item,
 	// run: go test ./internal/commands/ -run TestKiraDoneIntegration/full_done_flow -v
