@@ -366,6 +366,13 @@ func TestExecuteCommand(t *testing.T) {
 		_, err := executeCommand(ctx, "sleep", []string{"10"}, "", false)
 		require.Error(t, err)
 	})
+
+	t.Run("disallowed command returns allowlist error", func(t *testing.T) {
+		ctx := context.Background()
+		_, err := executeCommand(ctx, "curl", []string{"https://example.com"}, "", false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not in allowlist")
+	})
 }
 
 func TestExecuteCommandCombinedOutput(t *testing.T) {

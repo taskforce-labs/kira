@@ -231,8 +231,8 @@ func buildTestBinary(t *testing.T, tmpDir string) string {
 
 These are the only two places where `#nosec` is used. They cannot be removed by code restructuring because the linter flags are inherent to what the code must do.
 
-1. **G204 in `internal/commands/utils.go` — `newCommand()`**  
-   The function calls `exec.CommandContext(ctx, name, args...)`. Gosec flags any variable command name or arguments. Our callers pass fixed names (e.g. `"git"`, `"sh"`) and controlled args, but the tool must run subprocesses with dynamic arguments (branch names, paths, etc.). The linter does not trust call-site literals, so this single centralized call will always be flagged. The `#nosec` documents that name/args are from internal callers only.
+1. **G204 in `internal/shellutil/shellutil.go` — `CommandContext()`**  
+   The function calls `exec.CommandContext(ctx, name, args...)` after checking `name` against an allowlist (git, sh, echo, ls, sleep). Gosec flags any variable command name or arguments. The allowlist enforces which executables can run; only internal callers use this path, and they pass fixed names. The `#nosec` documents that the single centralized exec is guarded by the allowlist. See that package for the list; do not add to it without approval.
 
 2. **G704 in `internal/git/github.go` — `httpClient.Do(req)`**  
    We perform the GraphQL request using a URL from `graphQLEndpointURL(client)` and the client from `extractHTTPClient(client)`. Gosec’s taint analysis treats function parameters (and values derived from them) as tainted, so any `Do(req)` that uses the client or URL is flagged as potential SSRF. The URL is always our GitHub/Enterprise endpoint, not user-controlled. The `#nosec` documents that the request is to the configured API only.
