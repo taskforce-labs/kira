@@ -910,3 +910,58 @@ func TestDeleteLocalBranch(t *testing.T) {
 		require.NoError(t, err, "should return nil for non-existent branch (idempotent)")
 	})
 }
+
+// TestFindWorktreePathForWorkItemInDone verifies that findWorktreePathForWorkItem finds the work
+// item by ID across all status folders, so when the file has been moved to 4_done (e.g. after
+// kira done moves it), we still resolve the path and can compute the worktree for cleanup.
+func TestFindWorktreePathForWorkItemInDone(t *testing.T) {
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origDir) }()
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir(origDir) }()
+
+	// Git repo so getRepoRoot() and deriveWorktreeRoot() succeed
+	// #nosec G204 - tmpDir from t.TempDir(), command is fixed
+	require.NoError(t, exec.Command("git", "init").Run())
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+	// #nosec G204 - command is fixed
+	require.NoError(t, exec.Command("git", "add", "f").Run())
+	// #nosec G204 - commit message is fixed
+	require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+
+	// Work item in done folder (simulates state after kira done moved it from review)
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".work", "4_done"), 0o700))
+	donePath := filepath.Join(tmpDir, ".work", "4_done", "023-install-skills-command.md")
+	require.NoError(t, os.WriteFile(donePath, []byte(`---
+id: "023"
+title: install-skills-command
+status: done
+kind: prd
+created: "2024-01-01"
+---
+
+# Done
+`), 0o600))
+
+	// Use cwd as ConfigDir so validateWorkPath sees the same base path (avoids /var vs /private/var on macOS)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	cfg := &config.Config{ConfigDir: cwd}
+	// StatusFolders nil => getStatusFolders uses default list including 4_done
+
+	// Pass a stale path (e.g. old location in 3_review); should be ignored - we find by ID in 4_done
+	path, err := findWorktreePathForWorkItem(cfg, "023", ".work/3_review/023-old.md")
+	require.NoError(t, err)
+	// Path may be "" when no worktree exists (git worktree list doesn't contain it); the important
+	// part is we didn't get "work item with ID 023 not found" from a stale path.
+	if path != "" {
+		assert.Contains(t, path, "023-install-skills-command", "worktree path should contain branch name")
+	}
+}

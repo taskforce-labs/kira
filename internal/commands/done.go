@@ -271,10 +271,16 @@ func maybeCleanupWorktree(cfg *config.Config, ctx *doneContext, noCleanup bool, 
 }
 
 // findWorktreePathForWorkItem finds the worktree path for a work item by reconstructing the path
-// that would have been created by kira start.
-func findWorktreePathForWorkItem(cfg *config.Config, workItemID, workItemPath string) (string, error) {
+// that would have been created by kira start. It resolves the work item file by ID by searching
+// across all status folders (e.g. review, done) so the current path is used after the file may have been moved.
+func findWorktreePathForWorkItem(cfg *config.Config, workItemID, _ string) (string, error) {
+	// Look across all status folders so we find the file in its current location (e.g. 4_done after move)
+	currentPath, err := findWorkItemFileInAllStatusFolders(workItemID, cfg)
+	if err != nil {
+		return "", err
+	}
 	// Extract title from work item
-	_, _, title, _, _, err := extractWorkItemMetadata(workItemPath, cfg)
+	_, _, title, _, _, err := extractWorkItemMetadata(currentPath, cfg)
 	if err != nil {
 		return "", err
 	}
