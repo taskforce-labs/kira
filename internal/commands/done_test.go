@@ -23,6 +23,8 @@ import (
 	"kira/internal/config"
 )
 
+const testMergedAtTimestamp = "2024-06-01T12:00:00Z"
+
 // resetHelpFlag clears the help flag on cmd and its children so a previous test's --help doesn't affect the next Execute().
 func resetHelpFlag(cmd *cobra.Command) {
 	for c := cmd; c != nil; c = c.Parent() {
@@ -372,14 +374,13 @@ func TestDoneDryRunAlreadyMergedPR(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = os.Chdir(origDir) }()
 
-	mergedAt := "2024-06-01T12:00:00Z"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == testDonePullsPath {
 			prs := []*github.PullRequest{
 				{
 					Number:         github.Int(42),
 					Head:           &github.PullRequestBranch{Ref: github.String("014-feature")},
-					MergedAt:       &github.Timestamp{Time: mustParseTime(mergedAt)},
+					MergedAt:       &github.Timestamp{Time: mustParseTime(testMergedAtTimestamp)},
 					MergeCommitSHA: github.String("abc123"),
 				},
 			}
@@ -722,12 +723,12 @@ created: "2024-01-01"
 `
 	require.NoError(t, os.WriteFile(workPath, []byte(content), 0o600))
 
-	err := updateWorkItemDoneMetadata(workPath, "2024-06-01T12:00:00Z", "abc123", 42, "squash", cfg)
+	err := updateWorkItemDoneMetadata(workPath, testMergedAtTimestamp, "abc123", 42, "squash", cfg)
 	require.NoError(t, err)
 
 	frontMatter, _, parseErr := parseWorkItemFrontMatter(workPath, cfg)
 	require.NoError(t, parseErr)
-	assert.Equal(t, "2024-06-01T12:00:00Z", frontMatter["merged_at"])
+	assert.Equal(t, testMergedAtTimestamp, frontMatter["merged_at"])
 	assert.Equal(t, "abc123", frontMatter["merge_commit_sha"])
 	assert.Equal(t, 42, frontMatter["pr_number"])
 	assert.Equal(t, "squash", frontMatter["merge_strategy"])
