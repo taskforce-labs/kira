@@ -24,8 +24,9 @@ created: 2024-01-01
 
 # Test Feature
 `
-	testFilePath   = ".work/1_todo/001-test-feature.prd.md"
-	testTargetPath = ".work/2_doing/001-test-feature.prd.md"
+	testFilePath     = ".work/1_todo/001-test-feature.prd.md"
+	testTargetPath   = ".work/2_doing/001-test-feature.prd.md"
+	testDoneFilePath = ".work/4_done/001-test-feature.prd.md"
 )
 
 func TestExtractWorkItemMetadata(t *testing.T) {
@@ -254,7 +255,7 @@ func TestMoveWorkItem(t *testing.T) {
 
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
 
-		err := moveWorkItem(cfg, "001", "doing", false, false)
+		err := moveWorkItem(cfg, "001", "doing", false, false, nil)
 		require.NoError(t, err)
 
 		// Check file was moved
@@ -290,7 +291,7 @@ func TestMoveWorkItem(t *testing.T) {
 		require.NoError(t, exec.Command("git", "add", testFilePath).Run())
 		require.NoError(t, exec.Command("git", "commit", "-m", "Add work item").Run())
 
-		err := moveWorkItem(cfg, "001", "doing", true, false)
+		err := moveWorkItem(cfg, "001", "doing", true, false, nil)
 		require.NoError(t, err)
 
 		// Check file was moved
@@ -318,7 +319,7 @@ func TestMoveWorkItem(t *testing.T) {
 
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
 
-		err := moveWorkItem(cfg, "001", "doing", true, false)
+		err := moveWorkItem(cfg, "001", "doing", true, false, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to commit")
 
@@ -342,7 +343,7 @@ func TestMoveWorkItem(t *testing.T) {
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
 
 		// Run with dry-run flag
-		err := moveWorkItem(cfg, "001", "doing", false, true)
+		err := moveWorkItem(cfg, "001", "doing", false, true, nil)
 		require.NoError(t, err)
 
 		// Check file was NOT moved - should still be at original location
@@ -369,7 +370,7 @@ func TestMoveWorkItem(t *testing.T) {
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
 
 		// Run with both commit and dry-run flags
-		err := moveWorkItem(cfg, "001", "doing", true, true)
+		err := moveWorkItem(cfg, "001", "doing", true, true, nil)
 		require.NoError(t, err)
 
 		// Check file was NOT moved
@@ -390,9 +391,48 @@ func TestMoveWorkItem(t *testing.T) {
 		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
 
 		// Run with dry-run but no target status
-		err := moveWorkItem(cfg, "001", "", false, true)
+		err := moveWorkItem(cfg, "001", "", false, true, nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "target status must be provided when using --dry-run")
+	})
+
+	t.Run("moves work item to done with additionalFields in frontmatter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.MkdirAll(".work/4_done", 0o700))
+
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "add", ".work/").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+
+		additionalFields := map[string]interface{}{
+			"merged_at":        "2024-06-01T12:00:00Z",
+			"merge_commit_sha": "abc123",
+			"pr_number":        42,
+			"merge_strategy":   "squash",
+		}
+		err := moveWorkItem(cfg, "001", "done", true, false, additionalFields)
+		require.NoError(t, err)
+
+		_, err = os.Stat(testDoneFilePath)
+		require.NoError(t, err)
+
+		fm, _, err := parseWorkItemFrontMatter(testDoneFilePath, cfg)
+		require.NoError(t, err)
+		require.NotNil(t, fm)
+		assert.Equal(t, "2024-06-01T12:00:00Z", fm["merged_at"])
+		assert.Equal(t, "abc123", fm["merge_commit_sha"])
+		assert.Equal(t, 42, fm["pr_number"])
+		assert.Equal(t, "squash", fm["merge_strategy"])
+		assert.Equal(t, "done", fm["status"])
 	})
 }
 

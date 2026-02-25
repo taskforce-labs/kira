@@ -39,7 +39,7 @@ var moveCmd = &cobra.Command{
 
 		commitFlag, _ := cmd.Flags().GetBool("commit")
 		dryRunFlag, _ := cmd.Flags().GetBool("dry-run")
-		return moveWorkItem(cfg, workItemID, targetStatus, commitFlag, dryRunFlag)
+		return moveWorkItem(cfg, workItemID, targetStatus, commitFlag, dryRunFlag, nil)
 	},
 }
 
@@ -362,7 +362,7 @@ type workItemMetadata struct {
 	repos         []string // optional: work item repos override for polyrepo
 }
 
-func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFlag, dryRun bool) error {
+func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFlag, dryRun bool, additionalFields map[string]interface{}) error {
 	// Find the work item file
 	workItemPath, err := findWorkItemFile(workItemID, cfg)
 	if err != nil {
@@ -403,11 +403,11 @@ func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFla
 		return moveWorkItemDryRun(cfg, workItemPath, targetPath, targetStatus, commitFlag, metadata)
 	}
 
-	return executeMoveWorkItem(cfg, workItemID, workItemPath, targetPath, targetStatus, commitFlag, metadata)
+	return executeMoveWorkItem(cfg, workItemID, workItemPath, targetPath, targetStatus, commitFlag, metadata, additionalFields)
 }
 
 // executeMoveWorkItem performs the actual move operation
-func executeMoveWorkItem(cfg *config.Config, workItemID, workItemPath, targetPath, targetStatus string, commitFlag bool, metadata workItemMetadata) error {
+func executeMoveWorkItem(cfg *config.Config, workItemID, workItemPath, targetPath, targetStatus string, commitFlag bool, metadata workItemMetadata, additionalFields map[string]interface{}) error {
 	if err := os.Rename(workItemPath, targetPath); err != nil {
 		return fmt.Errorf("failed to move work item: %w", err)
 	}
@@ -415,6 +415,23 @@ func executeMoveWorkItem(cfg *config.Config, workItemID, workItemPath, targetPat
 	// Update the status in the file
 	if err := updateWorkItemStatus(targetPath, targetStatus, cfg); err != nil {
 		return fmt.Errorf("failed to update work item status: %w", err)
+	}
+
+	// Apply optional additional frontmatter fields (e.g. merged_at, merge_commit_sha for done)
+	if len(additionalFields) > 0 {
+		frontMatter, bodyLines, err := parseWorkItemFrontMatter(targetPath, cfg)
+		if err != nil {
+			return fmt.Errorf("failed to read front matter for additional fields: %w", err)
+		}
+		if frontMatter == nil {
+			frontMatter = make(map[string]interface{})
+		}
+		for k, v := range additionalFields {
+			frontMatter[k] = v
+		}
+		if err := writeWorkItemFrontMatter(targetPath, frontMatter, bodyLines); err != nil {
+			return fmt.Errorf("failed to write additional front matter fields: %w", err)
+		}
 	}
 
 	if !commitFlag {
