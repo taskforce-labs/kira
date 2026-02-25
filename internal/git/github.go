@@ -378,7 +378,7 @@ func CountUnresolvedReviewThreads(ctx context.Context, client *github.Client, pr
 	if pr == nil || pr.NodeID == nil || strings.TrimSpace(*pr.NodeID) == "" {
 		return 0, nil
 	}
-	graphqlURL, err := graphQLURL(client)
+	graphqlURL, err := graphQLEndpointURL(client)
 	if err != nil {
 		return 0, err
 	}
