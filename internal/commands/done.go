@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -630,19 +629,6 @@ func deleteBranch(ctx context.Context, client *github.Client, owner, repo, branc
 	return err
 }
 
-// commitWorkItemUpdate commits the work item update (move or metadata change).
-func commitWorkItemUpdate(ctx context.Context, status, workItemPath, targetPath, subject, body string, needsUpdate bool, repoRoot string) error {
-	if status != defaultReleaseStatus {
-		return commitMove(workItemPath, targetPath, subject, body, false)
-	}
-	// Work item already in done status - only commit if metadata was updated
-	if needsUpdate {
-		return commitMetadataUpdateIfChanged(ctx, targetPath, subject, repoRoot)
-	}
-	// Metadata didn't need updating, skip commit entirely (idempotent)
-	return nil
-}
-
 // commitMetadataUpdateIfChanged stages and commits the file only if there are changes (idempotent).
 func commitMetadataUpdateIfChanged(ctx context.Context, targetPath, subject, repoRoot string) error {
 	// Stage the file
@@ -668,59 +654,6 @@ func commitMetadataUpdateIfChanged(ctx context.Context, targetPath, subject, rep
 	return nil
 }
 
-// workItemMetadataNeedsUpdate checks if the work item's completion metadata needs updating.
-// Returns true if any field differs from the provided values.
-func workItemMetadataNeedsUpdate(filePath, mergedAt, mergeCommitSHA string, prNumber int, mergeStrategy string, cfg *config.Config) (bool, error) {
-	frontMatter, _, err := parseWorkItemFrontMatter(filePath, cfg)
-	if err != nil {
-		return false, err
-	}
-	if frontMatter == nil {
-		return true, nil // No front matter, needs update
-	}
-
-	// Compare each field
-	if getString(frontMatter, "merged_at") != mergedAt {
-		return true, nil
-	}
-	if getString(frontMatter, "merge_commit_sha") != mergeCommitSHA {
-		return true, nil
-	}
-	// pr_number might be stored as int or string
-	currentPRNum := 0
-	if v, ok := frontMatter["pr_number"]; ok {
-		switch val := v.(type) {
-		case int:
-			currentPRNum = val
-		case float64:
-			currentPRNum = int(val)
-		case string:
-			if parsed, err := strconv.Atoi(val); err == nil {
-				currentPRNum = parsed
-			}
-		}
-	}
-	if currentPRNum != prNumber {
-		return true, nil
-	}
-	if getString(frontMatter, "merge_strategy") != mergeStrategy {
-		return true, nil
-	}
-
-	return false, nil // All fields match, no update needed
-}
-
-// getString safely extracts a string value from front matter map.
-func getString(fm map[string]interface{}, key string) string {
-	if v, ok := fm[key]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-		return fmt.Sprintf("%v", v)
-	}
-	return ""
-}
-
 // updateWorkItemDoneMetadata sets completion metadata in the work item front matter.
 func updateWorkItemDoneMetadata(filePath, mergedAt, mergeCommitSHA string, prNumber int, mergeStrategy string, cfg *config.Config) error {
 	frontMatter, bodyLines, err := parseWorkItemFrontMatter(filePath, cfg)
@@ -738,59 +671,28 @@ func updateWorkItemDoneMetadata(filePath, mergedAt, mergeCommitSHA string, prNum
 }
 
 // updateWorkItemToDone moves the work item to done (if needed), sets status and completion metadata, then commits and pushes. Used from runDone when full flow is wired.
+// Path resolution happens inside moveWorkItem (by workItemID), so this works correctly after pull even when workItemPath is stale.
+//
+//revive:disable-next-line:unused-parameter workItemPath kept for API compatibility with callers that resolve path before pull
 func updateWorkItemToDone(cfg *config.Config, workItemPath, workItemID, mergedAt, mergeCommitSHA string, prNumber int, mergeStrategy, repoRoot, remoteName string) error {
-	status, err := statusFromWorkItemPath(workItemPath, cfg)
-	if err != nil {
-		return err
-	}
-
-	workFolder := config.GetWorkFolderPath(cfg)
-	doneFolder, ok := cfg.StatusFolders[defaultReleaseStatus]
-	if !ok {
+	if _, ok := cfg.StatusFolders[defaultReleaseStatus]; !ok {
 		return fmt.Errorf("status %q is not configured", defaultReleaseStatus)
 	}
-	targetPath := filepath.Join(workFolder, doneFolder, filepath.Base(workItemPath))
-	if status == defaultReleaseStatus {
-		targetPath = workItemPath
+	additionalFields := map[string]interface{}{
+		"merged_at":        mergedAt,
+		"merge_commit_sha": mergeCommitSHA,
+		"pr_number":        prNumber,
+		"merge_strategy":   mergeStrategy,
 	}
-
-	if status != defaultReleaseStatus {
-		if err := moveWorkItemWithoutCommit(cfg, workItemID, defaultReleaseStatus); err != nil {
-			return fmt.Errorf("failed to move work item to done: %w", err)
-		}
+	if err := moveWorkItem(cfg, workItemID, defaultReleaseStatus, true, false, additionalFields); err != nil {
+		return fmt.Errorf("failed to move work item to done: %w", err)
 	}
-
-	// Check if metadata needs updating before modifying the file (idempotent optimization)
-	needsUpdate, err := workItemMetadataNeedsUpdate(targetPath, mergedAt, mergeCommitSHA, prNumber, mergeStrategy, cfg)
-	if err != nil {
-		return fmt.Errorf("failed to check metadata: %w", err)
-	}
-	if needsUpdate {
-		if err := updateWorkItemDoneMetadata(targetPath, mergedAt, mergeCommitSHA, prNumber, mergeStrategy, cfg); err != nil {
-			return fmt.Errorf("failed to set completion metadata: %w", err)
-		}
-	}
-
-	workItemType, id, title, _, _, err := extractWorkItemMetadata(targetPath, cfg)
-	if err != nil {
-		return fmt.Errorf("failed to read work item metadata: %w", err)
-	}
-	subject, body, err := buildCommitMessage(cfg, workItemType, id, title, status, defaultReleaseStatus)
-	if err != nil {
-		return fmt.Errorf("failed to build commit message: %w", err)
-	}
-
-	commitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := commitWorkItemUpdate(commitCtx, status, workItemPath, targetPath, subject, body, needsUpdate, repoRoot); err != nil {
-		return err
-	}
-
 	trunkBranch, err := resolveTrunkBranchForLatest(cfg, nil, repoRoot)
 	if err != nil {
 		return err
 	}
+	commitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	_, err = executeCommand(commitCtx, "git", []string{"push", remoteName, trunkBranch}, repoRoot, false)
 	return err
 }

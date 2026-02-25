@@ -193,8 +193,8 @@ Commit: If work item already at target path skip move and staging; only update f
 
 ### Refactor done to use moveWorkItem
 Commit: Replace moveWorkItemWithoutCommit + metadata + commitWorkItemUpdate with single moveWorkItem call
-- [ ] T006: In updateWorkItemToDone build additionalFields from mergedAt mergeCommitSHA prNumber mergeStrategy and call moveWorkItem(cfg workItemID defaultReleaseStatus true false additionalFields); keep push and trunk resolution in done
-- [ ] T007: Remove or simplify redundant move/commit logic and ensure kira done e2e or manual flow passes
+- [x] T006: In updateWorkItemToDone build additionalFields from mergedAt mergeCommitSHA prNumber mergeStrategy and call moveWorkItem(cfg workItemID defaultReleaseStatus true false additionalFields); keep push and trunk resolution in done
+- [x] T007: Remove or simplify redundant move/commit logic and ensure kira done e2e or manual flow passes
 
 ### Tests and release notes
 Commit: E2e for done after pull; unit tests; release notes
