@@ -717,6 +717,53 @@ func gitConfigUser(t *testing.T, dir string) {
 	require.NoError(t, cmd.Run())
 }
 
+func TestCheckUncommittedChanges(t *testing.T) {
+	t.Run("returns false when repo is clean", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		gitConfigUser(t, tmpDir)
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		cmd = exec.Command("git", "add", "f")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+
+		hasUncommitted, err := checkUncommittedChanges(tmpDir, false)
+		require.NoError(t, err)
+		assert.False(t, hasUncommitted)
+	})
+
+	t.Run("returns true when repo has uncommitted changes", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		gitConfigUser(t, tmpDir)
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "dirty.txt"), []byte("x"), 0o600))
+
+		hasUncommitted, err := checkUncommittedChanges(tmpDir, false)
+		require.NoError(t, err)
+		assert.True(t, hasUncommitted)
+	})
+
+	t.Run("dryRun returns false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		gitConfigUser(t, tmpDir)
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "dirty.txt"), []byte("x"), 0o600))
+
+		hasUncommitted, err := checkUncommittedChanges(tmpDir, true)
+		require.NoError(t, err)
+		assert.False(t, hasUncommitted)
+	})
+}
+
 func TestBranchHasCommitsAheadOf(t *testing.T) {
 	t.Run("returns false when branch has no commits ahead of base", func(t *testing.T) {
 		tmpDir := t.TempDir()

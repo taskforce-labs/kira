@@ -235,14 +235,6 @@ func executeGitOperations(ctx *StartContext) error {
 		return err
 	}
 
-	// Step 4b: Ensure Cursor skills and commands are installed (after pull so install does not dirty tree before uncommitted check)
-	if err := EnsureCursorSkillsInstalled(ctx.Config); err != nil {
-		return fmt.Errorf("failed to ensure cursor skills installed: %w", err)
-	}
-	if err := EnsureCursorCommandsInstalled(ctx.Config); err != nil {
-		return fmt.Errorf("failed to ensure cursor commands installed: %w", err)
-	}
-
 	// Step 5: Check work item status (after pull to ensure up-to-date status)
 	if err := performStatusCheck(ctx); err != nil {
 		return err
