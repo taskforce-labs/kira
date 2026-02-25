@@ -182,14 +182,14 @@ However, `moveWorkItem` still needs an **idempotent check**:
 
 ### Extend moveWorkItem with additionalFields
 Commit: Add optional additionalFields to moveWorkItem for completion metadata; update frontmatter and call sites
-- [ ] T001: Add optional parameter additionalFields map[string]interface{} to moveWorkItem and executeMoveWorkItem; update all call sites (move command, tests)
-- [ ] T002: When additionalFields is non-nil, update those frontmatter fields after moving file (and status) and before committing; reuse parse/write frontmatter logic (e.g. from updateWorkItemDoneMetadata)
-- [ ] T003: Add or adapt unit tests for moveWorkItem with additionalFields
+- [x] T001: Add optional parameter additionalFields map[string]interface{} to moveWorkItem and executeMoveWorkItem; update all call sites (move command, tests)
+- [x] T002: When additionalFields is non-nil, update those frontmatter fields after moving file (and status) and before committing; reuse parse/write frontmatter logic (e.g. from updateWorkItemDoneMetadata)
+- [x] T003: Add or adapt unit tests for moveWorkItem with additionalFields
 
 ### Idempotent check in moveWorkItem
 Commit: If work item already at target path skip move and staging; only update frontmatter and commit if needed
-- [ ] T004: After findWorkItemFile, if workItemPath equals targetPath (already in target status folder), skip os.Rename and move staging; only update frontmatter (status + additionalFields) and if commitFlag commit metadata
-- [ ] T005: Add unit tests for idempotent case (file already at target)
+- [x] T004: After findWorkItemFile, if workItemPath equals targetPath (already in target status folder), skip os.Rename and move staging; only update frontmatter (status + additionalFields) and if commitFlag commit metadata
+- [x] T005: Add unit tests for idempotent case (file already at target)
 
 ### Refactor done to use moveWorkItem
 Commit: Replace moveWorkItemWithoutCommit + metadata + commitWorkItemUpdate with single moveWorkItem call
@@ -203,8 +203,10 @@ Commit: E2e for done after pull; unit tests; release notes
 
 ## Release Notes
 
-When fixed, this will ensure `kira done` works reliably even when:
-- The work item file was already moved in a previous commit
-- Trunk was pulled and contains commits that affect the work item file
-- The command is run multiple times (idempotent operation)
+Fixed. `kira done` now works reliably even when:
+- The work item file was already moved in a previous commit (e.g. on trunk after pull)
+- Trunk was pulled and contains commits that affect the work item file (path is resolved by ID after pull, so no stale path)
+- The command is run multiple times (idempotent: if file already at target, only frontmatter is updated and committed when changed)
+
+Implementation: `updateWorkItemToDone` now calls the shared `moveWorkItem` with completion metadata as `additionalFields`. Move path resolves the work item by ID (current location), handles already-at-target idempotently, and stages/commits using the same logic as `kira move`.
 
