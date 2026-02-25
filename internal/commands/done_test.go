@@ -438,6 +438,7 @@ func mustParseTime(s string) time.Time {
 const (
 	testDoneStatusPath    = "/api/v3/repos/owner/repo/commits/abc123/status"
 	testDoneCommentsPath  = "/api/v3/repos/owner/repo/pulls/42/comments"
+	testDoneGraphQLPath   = "/api/graphql"
 	testDoneDeleteRefPath = "/api/v3/repos/o/r/git/refs/heads/014-feature"
 	testOwner             = "owner"
 	testRepo              = "repo"
@@ -508,13 +509,18 @@ func TestRunPRChecks(t *testing.T) {
 	})
 
 	t.Run("unresolved comments returns error unless force", func(t *testing.T) {
+		prWithNodeID := &github.PullRequest{
+			Number: github.Int(prNum),
+			NodeID: github.String("PR_test"),
+			Head:   &github.PullRequestBranch{SHA: github.String(headSHA)},
+		}
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			switch r.URL.Path {
 			case testDoneStatusPath:
 				_, _ = w.Write([]byte(`{"state":"success","total_count":0}`))
-			case testDoneCommentsPath:
-				_, _ = w.Write([]byte(`[{"id":1,"body":"comment"}]`))
+			case testDoneGraphQLPath:
+				_, _ = w.Write([]byte(`{"data":{"node":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"isResolved":false}]}}}}`))
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -525,14 +531,42 @@ func TestRunPRChecks(t *testing.T) {
 		client := github.NewClient(server.Client())
 		client.BaseURL = baseURL
 
-		err := runPRChecks(ctx, client, owner, repo, pr, true, true, false)
+		err := runPRChecks(ctx, client, owner, repo, prWithNodeID, true, true, false)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "review comment")
+		assert.Contains(t, err.Error(), "unresolved")
 		assert.Contains(t, err.Error(), "42")
 		assert.Contains(t, err.Error(), "--force")
 
-		errForce := runPRChecks(ctx, client, owner, repo, pr, true, true, true)
+		errForce := runPRChecks(ctx, client, owner, repo, prWithNodeID, true, true, true)
 		require.NoError(t, errForce)
+	})
+
+	t.Run("resolved or no comments passes", func(t *testing.T) {
+		prWithNodeID := &github.PullRequest{
+			Number: github.Int(prNum),
+			NodeID: github.String("PR_test"),
+			Head:   &github.PullRequestBranch{SHA: github.String(headSHA)},
+		}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case testDoneStatusPath:
+				_, _ = w.Write([]byte(`{"state":"success","total_count":0}`))
+			case testDoneGraphQLPath:
+				// All threads resolved (or no threads)
+				_, _ = w.Write([]byte(`{"data":{"node":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"isResolved":true}]}}}}`))
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer server.Close()
+
+		baseURL, _ := url.Parse(server.URL + "/api/v3/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+
+		err := runPRChecks(ctx, client, owner, repo, prWithNodeID, true, true, false)
+		require.NoError(t, err)
 	})
 
 	t.Run("nil pr head SHA returns error", func(t *testing.T) {

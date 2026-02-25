@@ -358,6 +358,115 @@ func ListPullRequestReviewComments(ctx context.Context, client *github.Client, o
 	return comments, err
 }
 
+const reviewThreadsPageSize = 100
+
+var reviewThreadsQuery = `query($id: ID!, $after: String) {
+  node(id: $id) {
+    ... on PullRequest {
+      reviewThreads(first: ` + strconv.Itoa(reviewThreadsPageSize) + `, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { isResolved }
+      }
+    }
+  }
+}`
+
+// CountUnresolvedReviewThreads returns the number of unresolved review threads on the PR.
+// Uses the GraphQL API because the REST API does not expose thread resolution state.
+// If pr is nil or pr.NodeID is empty, returns 0, nil (skip check when node ID not available).
+func CountUnresolvedReviewThreads(ctx context.Context, client *github.Client, pr *github.PullRequest) (int, error) {
+	if pr == nil || pr.NodeID == nil || strings.TrimSpace(*pr.NodeID) == "" {
+		return 0, nil
+	}
+	graphqlURL, err := graphQLURL(client)
+	if err != nil {
+		return 0, err
+	}
+	nodeID := *pr.NodeID
+	var after *string
+	var total int
+	for {
+		page, err := fetchReviewThreadsPage(ctx, client, graphqlURL, nodeID, after)
+		if err != nil {
+			return 0, err
+		}
+		if page == nil {
+			break
+		}
+		for _, n := range page.Nodes {
+			if !n.IsResolved {
+				total++
+			}
+		}
+		if page.PageInfo == nil || !page.PageInfo.HasNextPage {
+			break
+		}
+		after = &page.PageInfo.EndCursor
+	}
+	return total, nil
+}
+
+// reviewThreadsPage holds one page of review thread nodes and pageInfo from GraphQL.
+type reviewThreadsPage struct {
+	Nodes    []struct{ IsResolved bool } `json:"nodes"`
+	PageInfo *struct {
+		HasNextPage bool   `json:"hasNextPage"`
+		EndCursor   string `json:"endCursor"`
+	} `json:"pageInfo"`
+}
+
+// fetchReviewThreadsPage runs one GraphQL request for reviewThreads and returns the page or an error.
+func fetchReviewThreadsPage(ctx context.Context, client *github.Client, graphqlURL, nodeID string, after *string) (*reviewThreadsPage, error) {
+	variables := map[string]interface{}{"id": nodeID}
+	if after != nil {
+		variables["after"] = *after
+	} else {
+		variables["after"] = nil
+	}
+	body := map[string]interface{}{"query": reviewThreadsQuery, "variables": variables}
+	enc, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("graphql request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, graphqlURL, bytes.NewReader(enc))
+	if err != nil {
+		return nil, fmt.Errorf("graphql request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	transport := client.Client().Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		return nil, fmt.Errorf("graphql request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("graphql returned status %d", resp.StatusCode)
+	}
+	var result struct {
+		Data *struct {
+			Node *struct {
+				ReviewThreads *reviewThreadsPage `json:"reviewThreads"`
+			} `json:"node"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("graphql decode: %w", err)
+	}
+	if len(result.Errors) > 0 {
+		return nil, fmt.Errorf("graphql: %s", result.Errors[0].Message)
+	}
+	if result.Data == nil || result.Data.Node == nil {
+		return nil, nil
+	}
+	return result.Data.Node.ReviewThreads, nil
+}
+
 // DeleteRef deletes a git reference (e.g. "heads/feature-branch").
 func DeleteRef(ctx context.Context, client *github.Client, owner, repo, ref string) error {
 	_, err := client.Git.DeleteRef(ctx, owner, repo, ref)

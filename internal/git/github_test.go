@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testGraphQLPath = "/api/graphql"
+
 func TestParseGitHubOwnerRepo(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -314,5 +316,162 @@ func TestWithRateLimitRetry(t *testing.T) {
 		})
 		assert.Same(t, rateErr, err)
 		assert.Equal(t, 3, calls) // initial + 2 retries
+	})
+}
+
+func TestCountUnresolvedReviewThreads(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil pr returns 0", func(t *testing.T) {
+		client := github.NewClient(nil)
+		count, err := CountUnresolvedReviewThreads(ctx, client, nil)
+		require.NoError(t, err)
+		assert.Equal(t, 0, count)
+	})
+	t.Run("pr with nil NodeID returns 0", func(t *testing.T) {
+		client := github.NewClient(nil)
+		pr := &github.PullRequest{Number: github.Int(1)}
+		count, err := CountUnresolvedReviewThreads(ctx, client, pr)
+		require.NoError(t, err)
+		assert.Equal(t, 0, count)
+	})
+	t.Run("pr with empty NodeID returns 0", func(t *testing.T) {
+		client := github.NewClient(nil)
+		pr := &github.PullRequest{Number: github.Int(1), NodeID: github.String("")}
+		count, err := CountUnresolvedReviewThreads(ctx, client, pr)
+		require.NoError(t, err)
+		assert.Equal(t, 0, count)
+	})
+	t.Run("GraphQL returns no threads", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != testGraphQLPath {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"node":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}}}}`))
+		}))
+		defer server.Close()
+		baseURL, _ := url.Parse(server.URL + "/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+		pr := &github.PullRequest{NodeID: github.String("PR_1")}
+		count, err := CountUnresolvedReviewThreads(ctx, client, pr)
+		require.NoError(t, err)
+		assert.Equal(t, 0, count)
+	})
+	t.Run("GraphQL returns all resolved", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != testGraphQLPath {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"node":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"isResolved":true},{"isResolved":true}]}}}}`))
+		}))
+		defer server.Close()
+		baseURL, _ := url.Parse(server.URL + "/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+		pr := &github.PullRequest{NodeID: github.String("PR_1")}
+		count, err := CountUnresolvedReviewThreads(ctx, client, pr)
+		require.NoError(t, err)
+		assert.Equal(t, 0, count)
+	})
+	t.Run("GraphQL returns one unresolved", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != testGraphQLPath {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"node":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"isResolved":false}]}}}}`))
+		}))
+		defer server.Close()
+		baseURL, _ := url.Parse(server.URL + "/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+		pr := &github.PullRequest{NodeID: github.String("PR_1")}
+		count, err := CountUnresolvedReviewThreads(ctx, client, pr)
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+	})
+	t.Run("GraphQL returns mixed resolved and unresolved", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != testGraphQLPath {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"node":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"isResolved":true},{"isResolved":false},{"isResolved":false}]}}}}`))
+		}))
+		defer server.Close()
+		baseURL, _ := url.Parse(server.URL + "/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+		pr := &github.PullRequest{NodeID: github.String("PR_1")}
+		count, err := CountUnresolvedReviewThreads(ctx, client, pr)
+		require.NoError(t, err)
+		assert.Equal(t, 2, count)
+	})
+	t.Run("GraphQL pagination counts unresolved across pages", func(t *testing.T) {
+		callCount := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != testGraphQLPath {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			callCount++
+			if callCount == 1 {
+				// First page: one resolved
+				_, _ = w.Write([]byte(`{"data":{"node":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":"Y3Vyc2lu"},"nodes":[{"isResolved":true}]}}}}`))
+				return
+			}
+			// Second page: one unresolved
+			_, _ = w.Write([]byte(`{"data":{"node":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[{"isResolved":false}]}}}}`))
+		}))
+		defer server.Close()
+		baseURL, _ := url.Parse(server.URL + "/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+		pr := &github.PullRequest{NodeID: github.String("PR_1")}
+		count, err := CountUnresolvedReviewThreads(ctx, client, pr)
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+		assert.Equal(t, 2, callCount)
+	})
+	t.Run("GraphQL error returns error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != testGraphQLPath {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"errors":[{"message":"Something went wrong"}]}`))
+		}))
+		defer server.Close()
+		baseURL, _ := url.Parse(server.URL + "/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+		pr := &github.PullRequest{NodeID: github.String("PR_1")}
+		count, err := CountUnresolvedReviewThreads(ctx, client, pr)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Something went wrong")
+		assert.Equal(t, 0, count)
+	})
+	t.Run("HTTP non-200 returns error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer server.Close()
+		baseURL, _ := url.Parse(server.URL + "/")
+		client := github.NewClient(server.Client())
+		client.BaseURL = baseURL
+		pr := &github.PullRequest{NodeID: github.String("PR_1")}
+		count, err := CountUnresolvedReviewThreads(ctx, client, pr)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "status 500")
+		assert.Equal(t, 0, count)
 	})
 }
