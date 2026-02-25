@@ -42,7 +42,5 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 33. [2026-01-23] show templates on err: when kira new fails it should list the available templates also
 34. [2026-01-27] Kira server: a light weight agent first, self hosted replacement for github that can be used to manage task centrally and kick off workflows possible even a matrix based chat
 35. [2026-01-27] Multi Kira Planning: an approach to planning work across multiple kira projects for enterprise usecases
-36. [2026-02-15] Start sets upstream: when kira start creates the branch and pushes it should set the upstream so it's as easy as git pull for changes to the branch
-37. [2026-02-15] kira latest branch: should check to see if there are changes on the remote branch first pull them in and merge then get all the changes from trunk as per usual
-38. [2026-02-21] kira say: using pandoc, say and some kira tools we could add a flag that can say sections e.g. kira question next --say
-39. [2026-02-21] kira discuss: using pandoc, say, kira question, agents, handy we could build a workflow that allows us to talk through questions to get clarity quicker
+36. [2026-02-15] kira latest branch: should check to see if there are changes on the remote branch first pull them in and merge then get all the changes from trunk as per usual
+37. [2026-02-21] kira discuss: using pandoc, say, kira question, agents, handy we could build a workflow that allows us to talk through questions to get clarity quicker
