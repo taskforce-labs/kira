@@ -509,7 +509,6 @@ func runPRChecks(ctx context.Context, client *github.Client, owner, repo string,
 	if pr == nil || pr.Head == nil || pr.Head.SHA == nil {
 		return fmt.Errorf("pull request has no head SHA")
 	}
-	prNum := pr.GetNumber()
 
 	if requireChecks && !force {
 		if err := checkPRStatusChecks(ctx, client, owner, repo, pr); err != nil {
@@ -518,7 +517,7 @@ func runPRChecks(ctx context.Context, client *github.Client, owner, repo string,
 	}
 
 	if requireCommentsResolved && !force {
-		if err := checkPRComments(ctx, client, owner, repo, prNum); err != nil {
+		if err := checkPRComments(ctx, client, owner, repo, pr); err != nil {
 			return err
 		}
 	}
@@ -575,13 +574,13 @@ func checkCombinedStatus(ctx context.Context, client *github.Client, owner, repo
 }
 
 // checkPRComments verifies that there are no unresolved review comments.
-func checkPRComments(ctx context.Context, client *github.Client, owner, repo string, prNum int) error {
-	comments, err := git.ListPullRequestReviewComments(ctx, client, owner, repo, prNum)
+func checkPRComments(ctx context.Context, client *github.Client, _, _ string, pr *github.PullRequest) error {
+	count, err := git.CountUnresolvedReviewThreads(ctx, client, pr)
 	if err != nil {
-		return fmt.Errorf("failed to list PR review comments: %w", err)
+		return fmt.Errorf("failed to check PR review threads: %w", err)
 	}
-	if len(comments) > 0 {
-		return fmt.Errorf("pull request #%d has %d review comment(s). Resolve all threads in the GitHub UI or use --force to merge anyway", prNum, len(comments))
+	if count > 0 {
+		return fmt.Errorf("pull request #%d has %d unresolved review comment thread(s). Resolve all threads in the GitHub UI or use --force to merge anyway", pr.GetNumber(), count)
 	}
 	return nil
 }
