@@ -434,6 +434,69 @@ func TestMoveWorkItem(t *testing.T) {
 		assert.Equal(t, "squash", fm["merge_strategy"])
 		assert.Equal(t, "done", fm["status"])
 	})
+
+	t.Run("idempotent when file already at target path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+		require.NoError(t, os.MkdirAll(".work/4_done", 0o700))
+		require.NoError(t, os.WriteFile(testDoneFilePath, []byte(testWorkItemContent), 0o600))
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "add", ".work/").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+
+		// Move to done with commit - file is already in done; should only update frontmatter and commit if changed
+		err := moveWorkItem(cfg, "001", "done", true, false, nil)
+		require.NoError(t, err)
+
+		// File still at same path
+		_, err = os.Stat(testDoneFilePath)
+		require.NoError(t, err)
+		// Status should be updated to done in frontmatter
+		fm, _, err := parseWorkItemFrontMatter(testDoneFilePath, cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "done", fm["status"])
+	})
+
+	t.Run("idempotent when already at target updates additionalFields and commits", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+		require.NoError(t, os.MkdirAll(".work/4_done", 0o700))
+		require.NoError(t, os.WriteFile(testDoneFilePath, []byte(testWorkItemContent), 0o600))
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "add", ".work/").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+
+		additionalFields := map[string]interface{}{
+			"merged_at":        "2024-06-01T12:00:00Z",
+			"merge_commit_sha": "abc123",
+			"pr_number":        42,
+			"merge_strategy":   "squash",
+		}
+		err := moveWorkItem(cfg, "001", "done", true, false, additionalFields)
+		require.NoError(t, err)
+
+		_, err = os.Stat(testDoneFilePath)
+		require.NoError(t, err)
+		fm, _, err := parseWorkItemFrontMatter(testDoneFilePath, cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "done", fm["status"])
+		assert.Equal(t, "2024-06-01T12:00:00Z", fm["merged_at"])
+		assert.Equal(t, "abc123", fm["merge_commit_sha"])
+		assert.Equal(t, 42, fm["pr_number"])
+		assert.Equal(t, "squash", fm["merge_strategy"])
+	})
 }
 
 // verifyStagedMove verifies that both deletion and addition are staged (Git may show as D/A or R for rename)

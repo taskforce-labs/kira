@@ -399,11 +399,52 @@ func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFla
 	filename := filepath.Base(workItemPath)
 	targetPath := filepath.Join(targetFolder, filename)
 
+	// Idempotent: already at target path (e.g. file was moved on trunk and we just pulled)
+	if filepath.Clean(workItemPath) == filepath.Clean(targetPath) {
+		return moveWorkItemAlreadyAtTarget(cfg, targetPath, targetStatus, commitFlag, metadata, additionalFields)
+	}
+
 	if dryRun {
 		return moveWorkItemDryRun(cfg, workItemPath, targetPath, targetStatus, commitFlag, metadata)
 	}
 
 	return executeMoveWorkItem(cfg, workItemID, workItemPath, targetPath, targetStatus, commitFlag, metadata, additionalFields)
+}
+
+// moveWorkItemAlreadyAtTarget updates frontmatter when the file is already at the target path (idempotent path).
+func moveWorkItemAlreadyAtTarget(cfg *config.Config, targetPath, targetStatus string, commitFlag bool, metadata workItemMetadata, additionalFields map[string]interface{}) error {
+	if err := updateWorkItemStatus(targetPath, targetStatus, cfg); err != nil {
+		return fmt.Errorf("failed to update work item status: %w", err)
+	}
+	if len(additionalFields) > 0 {
+		frontMatter, bodyLines, err := parseWorkItemFrontMatter(targetPath, cfg)
+		if err != nil {
+			return fmt.Errorf("failed to read front matter for additional fields: %w", err)
+		}
+		if frontMatter == nil {
+			frontMatter = make(map[string]interface{})
+		}
+		for k, v := range additionalFields {
+			frontMatter[k] = v
+		}
+		if err := writeWorkItemFrontMatter(targetPath, frontMatter, bodyLines); err != nil {
+			return fmt.Errorf("failed to write additional front matter fields: %w", err)
+		}
+	}
+	if !commitFlag {
+		return nil
+	}
+	subject, _, err := buildCommitMessage(cfg, metadata.workItemType, metadata.id, metadata.title, metadata.currentStatus, targetStatus)
+	if err != nil {
+		return fmt.Errorf("failed to build commit message: %w", err)
+	}
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		return fmt.Errorf("failed to get repo root: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return commitMetadataUpdateIfChanged(ctx, targetPath, subject, repoRoot)
 }
 
 // executeMoveWorkItem performs the actual move operation
