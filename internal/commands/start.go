@@ -2689,8 +2689,10 @@ func executeSetup(setupCmd, workDir string, dryRun bool) error {
 		}
 	}
 
-	cmd := newCommand(ctx, "sh", "-c", setupCmd)
-
+	cmd, err := newCommand(ctx, "sh", "-c", setupCmd)
+	if err != nil {
+		return err
+	}
 	cmd.Dir = workDir
 
 	// Capture output for error reporting

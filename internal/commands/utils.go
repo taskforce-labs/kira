@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"kira/internal/config"
+	"kira/internal/shellutil"
 )
 
 // gitCommandTimeout is the default timeout for git commands
@@ -379,10 +380,9 @@ func executeCommand(ctx context.Context, name string, args []string, dir string,
 }
 
 // newCommand creates an exec.Cmd with context cancellation support.
-// Centralizes subprocess creation so callers are not flagged by static analysis.
-func newCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
-	// #nosec G204 -- Centralized exec: name/args are from internal callers only (git/setup). Cannot restructure away: the tool must run subprocesses with dynamic args; gosec does not trust call-site literals. See .docs/guides/security/golang-secure-coding.md § Approved #nosec exceptions.
-	return exec.CommandContext(ctx, name, args...)
+// It delegates to shellutil.CommandContext so only allowlisted commands (git, sh, echo, ls, sleep) can run.
+func newCommand(ctx context.Context, name string, args ...string) (*exec.Cmd, error) {
+	return shellutil.CommandContext(ctx, name, args...)
 }
 
 // executeCommandWithEnv is like executeCommand but allows passing extra environment variables
@@ -397,7 +397,10 @@ func executeCommandWithEnv(ctx context.Context, name string, args []string, dir 
 		return "", nil
 	}
 
-	cmd := newCommand(ctx, name, args...)
+	cmd, err := newCommand(ctx, name, args...)
+	if err != nil {
+		return "", err
+	}
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -409,7 +412,7 @@ func executeCommandWithEnv(ctx context.Context, name string, args []string, dir 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := startAndWait(ctx, cmd)
+	err = startAndWait(ctx, cmd)
 	if err != nil {
 		stderrStr := strings.TrimSpace(stderr.String())
 		if stderrStr != "" {
@@ -434,7 +437,10 @@ func executeCommandCombinedOutput(ctx context.Context, name string, args []strin
 		return "", nil
 	}
 
-	cmd := newCommand(ctx, name, args...)
+	cmd, err := newCommand(ctx, name, args...)
+	if err != nil {
+		return "", err
+	}
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -446,7 +452,7 @@ func executeCommandCombinedOutput(ctx context.Context, name string, args []strin
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 
-	err := startAndWait(ctx, cmd)
+	err = startAndWait(ctx, cmd)
 	if err != nil {
 		outputStr := strings.TrimSpace(buf.String())
 		if outputStr == "" {
@@ -472,7 +478,10 @@ func executeCommandCombinedOutputWithEnv(ctx context.Context, name string, args 
 		return "", nil
 	}
 
-	cmd := newCommand(ctx, name, args...)
+	cmd, err := newCommand(ctx, name, args...)
+	if err != nil {
+		return "", err
+	}
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -484,7 +493,7 @@ func executeCommandCombinedOutputWithEnv(ctx context.Context, name string, args 
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 
-	err := startAndWait(ctx, cmd)
+	err = startAndWait(ctx, cmd)
 	if err != nil {
 		outputStr := strings.TrimSpace(buf.String())
 		if outputStr == "" {

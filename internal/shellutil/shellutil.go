@@ -1,41 +1,31 @@
 // Package shellutil provides validated command execution.
-// Commands are restricted to an allowlist of known executables.
-// The exec.Cmd is constructed directly (not via exec.Command) to satisfy
-// gosec G204 while maintaining the same security properties.
+// Commands are restricted to a minimum allowlist of known executables (git, sh, echo, ls, sleep).
+// CommandContext is the single entry point; it checks the allowlist then runs exec.CommandContext.
 package shellutil
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 )
 
+// allowedCommands is the minimum set of commands that may be run via CommandContext.
+// Only executables actually used by kira via executeCommand/newCommand are listed.
 var allowedCommands = map[string]bool{
 	"git":   true,
-	"go":    true,
-	"gh":    true,
 	"sh":    true,
 	"echo":  true,
 	"ls":    true,
 	"sleep": true,
 }
 
-// Command creates an exec.Cmd for an allowlisted command.
-// Callers must handle context cancellation (e.g. via StartWithContext).
-func Command(name string, args ...string) (*exec.Cmd, error) {
+// CommandContext creates an exec.Cmd for an allowlisted command with context cancellation support.
+// Returns an error if name is not in the allowlist. See .docs/guides/security/golang-secure-coding.md
+// for the approved G204 exception and allowlist policy.
+func CommandContext(ctx context.Context, name string, args ...string) (*exec.Cmd, error) {
 	if !allowedCommands[name] {
 		return nil, fmt.Errorf("command %q not in allowlist", name)
 	}
-
-	cmdPath := name
-	if filepath.Base(name) == name {
-		if resolved, err := exec.LookPath(name); err == nil {
-			cmdPath = resolved
-		}
-	}
-
-	return &exec.Cmd{
-		Path: cmdPath,
-		Args: append([]string{name}, args...),
-	}, nil
+	// #nosec G204 -- Centralized exec: name/args are from internal callers only; allowlist above restricts to git, sh, echo, ls, sleep. See .docs/guides/security/golang-secure-coding.md § Approved #nosec exceptions.
+	return exec.CommandContext(ctx, name, args...), nil
 }
