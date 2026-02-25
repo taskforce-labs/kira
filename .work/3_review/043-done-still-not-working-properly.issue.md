@@ -1,7 +1,7 @@
 ---
 id: 043
 title: done still not working properly
-status: doing
+status: review
 kind: issue
 assigned: 
 estimate: 0
