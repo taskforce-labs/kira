@@ -223,8 +223,8 @@ Commit: Use RunWithCleanTree in done flow and add --no-pop-stash flag; done work
 
 ### Release notes and docs
 Commit: Add release notes and document save/move future use of RunWithCleanTree.
-- [ ] T013: Add release notes for start, done, and "run with clean tree" per PRD Release Notes section
-- [ ] T014: Document that save/move can use RunWithCleanTree when pull/sync steps are added (release notes or docs)
+- [x] T013: Add release notes for start, done, and "run with clean tree" per PRD Release Notes section
+- [x] T014: Document that save/move can use RunWithCleanTree when pull/sync steps are added (release notes or docs)
 
 
 ## Release Notes
