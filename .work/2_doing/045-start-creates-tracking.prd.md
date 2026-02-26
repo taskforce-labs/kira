@@ -54,12 +54,13 @@ Commit: Wire polyrepo push paths to set upstream for main worktree and each push
 
 ### E2E and release notes
 Commit: E2E coverage and release notes for start tracking.
-- [ ] T007: Add or run e2e scenario for start with draft PR and assert tracking in worktree (if existing scenario fits); skip if not applicable
-- [ ] T008: Finalize release notes (already drafted in PRD) and any user-facing docs
+- [x] T007: Add or run e2e scenario for start with draft PR and assert tracking in worktree (if existing scenario fits); skip if not applicable
+- [x] T008: Finalize release notes (already drafted in PRD) and any user-facing docs
 
 - Change `pushBranch` to accept a `setUpstream bool`; when true, run `git push -u <remote> <branch>` instead of `git push <remote> <branch>`. Call from `pushBranchStandalone` and from `pushBranchesPolyrepo` / `pushProjectBranchIfNeeded` with `setUpstream: true` whenever a push is performed. Git sets upstream when push succeeds.
 - Use the same remote name already resolved for the push: `resolveRemoteName(ctx.Config, nil)` for standalone/main, and `p.Remote` for polyrepo projects. Branch name is `ctx.BranchName` everywhere.
 - Add unit tests for the new behavior (e.g. after start with draft PR, verify `git rev-parse --abbrev-ref --symbolic-full-name @{u}` in the worktree returns `<remote>/<branch>`). Consider e2e in `kira_e2e_tests.sh` if a scenario already runs start and push.
+- **T007 (E2E)**: Skipped as not applicable — no existing e2e runs start with draft PR and real push; adding one would require a real GitHub remote and token. Unit tests cover tracking after push with setUpstream.
 - Follow existing patterns: `executeCommand` with `gitCommandTimeout`, run from worktree directory for branch config; see `internal/commands/start.go` for similar git calls.
 
 ## Release Notes
