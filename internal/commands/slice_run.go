@@ -784,9 +784,9 @@ func workItemIDFromPath(path string, cfg *config.Config) string {
 	return id
 }
 
-// runSliceCommitNoSubcommand is run when "slice commit" is invoked without a valid subcommand (add, remove, generate). Returns error so exit code is non-zero.
+// runSliceCommitNoSubcommand is run when "slice commit" is invoked without a valid subcommand (add, remove, generate, current). Returns error so exit code is non-zero.
 func runSliceCommitNoSubcommand(_ *cobra.Command, _ []string) error {
-	return fmt.Errorf("subcommand required: use 'add', 'remove', or 'generate'")
+	return fmt.Errorf("subcommand required: use 'add', 'remove', 'generate', or 'current'")
 }
 
 // runSliceCommitAdd adds a task to a slice. Args: 2 = slice-name + task-desc (doing folder); 3+ = work-item-id, slice-name, task-desc.
@@ -875,6 +875,88 @@ func runSliceCommitGenerate(_ *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Print(out)
+	return nil
+}
+
+// runSliceCommitCurrent resolves work item from args or doing folder, validates the previous (to-be-committed) slice has no open tasks, then generates a commit message and runs git commit -F -.
+func runSliceCommitCurrent(_ *cobra.Command, args []string) error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if err := checkWorkDir(cfg); err != nil {
+		return err
+	}
+	workItemID := ""
+	if len(args) > 0 {
+		workItemID = args[0]
+	}
+	path, err := resolveSliceWorkItem(workItemID, cfg, "slice commit current")
+	if err != nil {
+		return err
+	}
+	id := workItemIDFromPath(path, cfg)
+	if id == "" {
+		id = workItemID
+	}
+	_, slices, err := loadSlicesFromFile(path, cfg)
+	if err != nil {
+		return err
+	}
+	if err := validatePreviousSliceNoOpenTasks(slices); err != nil {
+		return err
+	}
+	return runSliceCommitCurrentCommit(path, cfg, id)
+}
+
+func validatePreviousSliceNoOpenTasks(slices []Slice) error {
+	previousSlice, err := selectSliceBySelector(slices, "previous")
+	if err != nil {
+		return err
+	}
+	var openIDs []string
+	for _, t := range previousSlice.Tasks {
+		if !t.Done {
+			openIDs = append(openIDs, t.ID)
+		}
+	}
+	if len(openIDs) > 0 {
+		return fmt.Errorf("current slice has open tasks: %s. Complete or toggle them before committing", strings.Join(openIDs, ", "))
+	}
+	return nil
+}
+
+func runSliceCommitCurrentCommit(path string, cfg *config.Config, workItemID string) error {
+	if err := validateStagedChanges([]string{path}); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+	if _, err := executeCommand(ctx, "git", []string{"add", path}, "", false); err != nil {
+		return fmt.Errorf("failed to stage changes: %w", err)
+	}
+	msg, err := formatGeneratedCommitMessage(path, cfg, workItemID, "previous")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp("", "kira-commit-*.txt")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file for commit message: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if _, err := tmp.WriteString(msg); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to write commit message: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+	commitCtx, commitCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer commitCancel()
+	if _, err := executeCommand(commitCtx, "git", []string{"commit", "-F", tmpPath}, "", false); err != nil {
+		return fmt.Errorf("failed to commit: %w", err)
+	}
 	return nil
 }
 
