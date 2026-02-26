@@ -1,7 +1,7 @@
 ---
 id: 045
 title: start creates tracking
-status: todo
+status: doing
 kind: prd
 assigned:
 estimate: 0
