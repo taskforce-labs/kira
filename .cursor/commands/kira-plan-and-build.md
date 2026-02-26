@@ -13,4 +13,6 @@ For each **slice** (not each task):
    - Do **not** run `kira slice task toggle current` before this commit if it would create its own commit; either skip toggle and edit the work item by hand, or run toggle only when you intend to commit **only** the work item (e.g. no code this step).
 5. Move to the next slice and repeat.
 
-When all slices are done, run `kira check -t done`. Mark the work item complete when everything passes.
+When all slices are done, run `kira check -t done`.
+
+Do not mark the work item as done or in review leave in todo.
