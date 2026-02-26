@@ -1,7 +1,7 @@
 ---
 id: 046
 title: kira say
-status: backlog
+status: todo
 kind: prd
 assigned: 
 estimate: 0
