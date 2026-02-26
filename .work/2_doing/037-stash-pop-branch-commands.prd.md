@@ -199,9 +199,9 @@ So we’re not reordering or redefining what start or done do — we’re making
 
 ### Shared clean-tree helpers
 Commit: Add RunWithCleanTree and stash helpers (HasUncommitted, Stash, Pop) in a shared package; no command behavior change yet.
-- [ ] T001: Add internal package (e.g. internal/commands/stash.go or clean_tree.go) with HasUncommitted(dir, dryRun), Stash(dir, message), Pop(dir) and RunWithCleanTree(dir, opName, noPopStash, fn)
-- [ ] T002: Implement stash message format and restore-on-failure semantics inside RunWithCleanTree
-- [ ] T003: Add unit tests for HasUncommitted, Stash, Pop, and RunWithCleanTree
+- [x] T001: Add internal package (e.g. internal/commands/stash.go or clean_tree.go) with HasUncommitted(dir, dryRun), Stash(dir, message), Pop(dir) and RunWithCleanTree(dir, opName, noPopStash, fn)
+- [x] T002: Implement stash message format and restore-on-failure semantics inside RunWithCleanTree
+- [x] T003: Add unit tests for HasUncommitted, Stash, Pop, and RunWithCleanTree
 
 ### Latest uses RunWithCleanTree
 Commit: Refactor latest to use RunWithCleanTree per repo; preserve existing behavior, --no-pop-stash, and conflict/rebase handling.
@@ -232,5 +232,6 @@ Commit: Add release notes and document save/move future use of RunWithCleanTree.
 - **start**: When trunk has uncommitted changes, `kira start` now stashes them, pulls latest, creates the worktree and branch, then pops the stash (same workflow as `kira latest`). Use `--no-pop-stash` to leave changes stashed.
 - **done**: When trunk has uncommitted changes, `kira done` stashes them before pull+update, then pops after (or use `--no-pop-stash`). Flow unchanged; only the “clean tree” requirement is now automatic.
 - **Run with clean tree**: Branch commands that need a clean working tree (latest, start, done) share a single “run with clean tree” helper: they stash if needed, run the operation, then pop (or restore on failure). Behaviour is consistent and future commands (e.g. save/move with a pull step) can use the same helper.
+- **save/move**: When pull or sync steps are added to `kira save` or `kira move` in the future, they can use the same RunWithCleanTree helper; no change in this release.
 
 
