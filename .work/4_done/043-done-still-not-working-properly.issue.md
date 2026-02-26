@@ -1,11 +1,15 @@
 ---
 id: 043
 title: done still not working properly
-status: review
+status: done
 kind: issue
-assigned: 
+created: 2026-02-24T00:00:00Z
+assigned: null
 estimate: 0
-created: 2026-02-24
+merge_commit_sha: 9245a66b7b7a42e2542c0635a26859060ca7fb9c
+merge_strategy: rebase
+merged_at: "2026-02-26T01:29:34Z"
+pr_number: 23
 tags: []
 ---
 
