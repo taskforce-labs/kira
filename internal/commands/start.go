@@ -97,6 +97,7 @@ type StartFlags struct {
 	ReuseBranch     bool
 	NoIDE           bool
 	NoDraftPR       bool
+	NoPopStash      bool
 	IDECommand      string
 	TrunkBranch     string
 	StatusAction    string
@@ -150,6 +151,7 @@ func init() {
 	startCmd.Flags().Bool("reuse-branch", false, "Checkout existing branch in new worktree if branch exists")
 	startCmd.Flags().Bool("no-ide", false, "Skip IDE opening (useful for agents)")
 	startCmd.Flags().Bool("no-draft-pr", false, "Skip pushing branch and creating draft PR")
+	startCmd.Flags().Bool("no-pop-stash", false, "Stash uncommitted changes before pull but do not automatically pop them after")
 	startCmd.Flags().String("ide", "", "Override IDE command (e.g., --ide cursor)")
 	startCmd.Flags().String("trunk-branch", "", "Override trunk branch (e.g., --trunk-branch develop)")
 	startCmd.Flags().String("status-action", "", "Override status action (none|commit_only|commit_and_push|commit_only_branch)")
@@ -174,6 +176,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 	flags.ReuseBranch, _ = cmd.Flags().GetBool("reuse-branch")
 	flags.NoIDE, _ = cmd.Flags().GetBool("no-ide")
 	flags.NoDraftPR, _ = cmd.Flags().GetBool("no-draft-pr")
+	flags.NoPopStash, _ = cmd.Flags().GetBool("no-pop-stash")
 	flags.IDECommand, _ = cmd.Flags().GetString("ide")
 	flags.TrunkBranch, _ = cmd.Flags().GetString("trunk-branch")
 	flags.StatusAction, _ = cmd.Flags().GetString("status-action")
@@ -249,21 +252,25 @@ func executeGitOperations(ctx *StartContext) error {
 	return createWorktreesAndFinalize(ctx, trunkBranch)
 }
 
-// validateAndPullLatest checks for uncommitted changes and pulls latest from remote
+// validateAndPullLatest checks for uncommitted changes and pulls latest from remote.
+// When dry-run, pulls are no-ops; when not dry-run, uses RunWithCleanTree so uncommitted
+// changes are stashed before pull and popped after (unless --no-pop-stash).
 func validateAndPullLatest(ctx *StartContext, repoRoot, trunkBranch, remoteName string) error {
-	hasUncommitted, err := checkUncommittedChanges(repoRoot, ctx.Flags.DryRun)
-	if err != nil {
-		return err
-	}
-	if hasUncommitted {
-		return fmt.Errorf("trunk branch has uncommitted changes: cannot proceed with pull operation. Commit or stash changes before starting work")
+	if ctx.Flags.DryRun {
+		if ctx.Behavior == WorkspaceBehaviorPolyrepo {
+			return pullAllProjects(ctx, trunkBranch, remoteName)
+		}
+		return pullStandaloneOrMonorepo(ctx, repoRoot, trunkBranch, remoteName)
 	}
 
 	if ctx.Behavior == WorkspaceBehaviorPolyrepo {
 		return pullAllProjects(ctx, trunkBranch, remoteName)
 	}
 
-	return pullStandaloneOrMonorepo(ctx, repoRoot, trunkBranch, remoteName)
+	_, err := RunWithCleanTree(repoRoot, "start", trunkBranch, ctx.Flags.NoPopStash, func() error {
+		return pullStandaloneOrMonorepo(ctx, repoRoot, trunkBranch, remoteName)
+	})
+	return err
 }
 
 // pullStandaloneOrMonorepo pulls latest changes for standalone/monorepo workspaces
@@ -1885,28 +1892,56 @@ func createPolyrepoBranches(ctx *StartContext, projects []PolyrepoProject, creat
 }
 
 // pullAllProjects pulls latest changes for all projects in a polyrepo
+// pullMainRepoInPolyrepo pulls the main repo in a polyrepo setup, using RunWithCleanTree when not dry-run.
+func pullMainRepoInPolyrepo(ctx *StartContext, repoRoot, mainTrunkBranch, mainRemoteName string) error {
+	remoteExists, err := checkRemoteExists(mainRemoteName, repoRoot, ctx.Flags.DryRun)
+	if err != nil {
+		return err
+	}
+	if !remoteExists {
+		fmt.Printf("Warning: No remote '%s' configured for main project. Skipping pull step.\n", mainRemoteName)
+		return nil
+	}
+	fmt.Printf("Pulling latest changes for main project from %s/%s\n", mainRemoteName, mainTrunkBranch)
+	if ctx.Flags.DryRun {
+		return pullLatestChanges(mainRemoteName, mainTrunkBranch, repoRoot, true)
+	}
+	_, err = RunWithCleanTree(repoRoot, "start", mainTrunkBranch, ctx.Flags.NoPopStash, func() error {
+		return pullLatestChanges(mainRemoteName, mainTrunkBranch, repoRoot, false)
+	})
+	return err
+}
+
+// pullOneProjectInPolyrepo pulls one project in a polyrepo setup, using RunWithCleanTree when not dry-run.
+func pullOneProjectInPolyrepo(ctx *StartContext, p PolyrepoProject, projectTrunk string) error {
+	remoteExists, err := checkRemoteExists(p.Remote, p.Path, ctx.Flags.DryRun)
+	if err != nil {
+		return err
+	}
+	if !remoteExists {
+		fmt.Printf("Warning: No remote '%s' configured for project '%s'. Skipping pull step.\n", p.Remote, p.Name)
+		return nil
+	}
+	fmt.Printf("Pulling latest changes for %s from %s/%s\n", p.Name, p.Remote, projectTrunk)
+	if ctx.Flags.DryRun {
+		return pullLatestChanges(p.Remote, projectTrunk, p.Path, true)
+	}
+	_, err = RunWithCleanTree(p.Path, "start", p.Name, ctx.Flags.NoPopStash, func() error {
+		return pullLatestChanges(p.Remote, projectTrunk, p.Path, false)
+	})
+	return err
+}
+
 func pullAllProjects(ctx *StartContext, mainTrunkBranch, mainRemoteName string) error {
 	repoRoot, err := getRepoRoot()
 	if err != nil {
 		return err
 	}
 
-	// Pull main repo first
-	remoteExists, err := checkRemoteExists(mainRemoteName, repoRoot, ctx.Flags.DryRun)
-	if err != nil {
+	if err := pullMainRepoInPolyrepo(ctx, repoRoot, mainTrunkBranch, mainRemoteName); err != nil {
 		return err
 	}
 
-	if !remoteExists {
-		fmt.Printf("Warning: No remote '%s' configured for main project. Skipping pull step.\n", mainRemoteName)
-	} else {
-		fmt.Printf("Pulling latest changes for main project from %s/%s\n", mainRemoteName, mainTrunkBranch)
-		if err := pullLatestChanges(mainRemoteName, mainTrunkBranch, repoRoot, ctx.Flags.DryRun); err != nil {
-			return err
-		}
-	}
-
-	// Pull for each project
 	projects, err := resolvePolyrepoProjects(ctx.Config, repoRoot)
 	if err != nil {
 		return err
@@ -1916,19 +1951,6 @@ func pullAllProjects(ctx *StartContext, mainTrunkBranch, mainRemoteName string) 
 		if p.Path == "" {
 			continue
 		}
-
-		// Check remote exists
-		remoteExists, err := checkRemoteExists(p.Remote, p.Path, ctx.Flags.DryRun)
-		if err != nil {
-			return err
-		}
-
-		if !remoteExists {
-			fmt.Printf("Warning: No remote '%s' configured for project '%s'. Skipping pull step.\n", p.Remote, p.Name)
-			continue
-		}
-
-		// Determine trunk branch
 		projectTrunk := p.TrunkBranch
 		if projectTrunk == "" && !ctx.Flags.DryRun {
 			projectTrunk, err = autoDetectTrunkBranch(p.Path, false)
@@ -1939,10 +1961,8 @@ func pullAllProjects(ctx *StartContext, mainTrunkBranch, mainRemoteName string) 
 		if projectTrunk == "" {
 			projectTrunk = defaultTrunkBranch
 		}
-
-		fmt.Printf("Pulling latest changes for %s from %s/%s\n", p.Name, p.Remote, projectTrunk)
-		if err := pullLatestChanges(p.Remote, projectTrunk, p.Path, ctx.Flags.DryRun); err != nil {
-			return fmt.Errorf("failed to pull changes for project %s: %w", p.Name, err)
+		if err := pullOneProjectInPolyrepo(ctx, p, projectTrunk); err != nil {
+			return err
 		}
 	}
 

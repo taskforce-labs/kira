@@ -211,9 +211,9 @@ Commit: Refactor latest to use RunWithCleanTree per repo; preserve existing beha
 
 ### Start: stash/pop and --no-pop-stash
 Commit: Use RunWithCleanTree in start flow and add --no-pop-stash flag; start no longer fails on uncommitted trunk changes.
-- [ ] T007: In start flow (validateAndPullLatest or equivalent), call RunWithCleanTree(repoRoot, "start", noPopStash, pullCallback) for main repo; polyrepo: RunWithCleanTree per project before pull
-- [ ] T008: Add --no-pop-stash to start flags and wire through
-- [ ] T009: Add/update tests for start with uncommitted changes, start --no-pop-stash, and restore-on-failure when pull fails
+- [x] T007: In start flow (validateAndPullLatest or equivalent), call RunWithCleanTree(repoRoot, "start", noPopStash, pullCallback) for main repo; polyrepo: RunWithCleanTree per project before pull
+- [x] T008: Add --no-pop-stash to start flags and wire through
+- [x] T009: Add/update tests for start with uncommitted changes, start --no-pop-stash, and restore-on-failure when pull fails
 
 ### Done: stash/pop and --no-pop-stash
 Commit: Use RunWithCleanTree in done flow and add --no-pop-stash flag; done works with uncommitted trunk changes.
