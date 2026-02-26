@@ -37,7 +37,25 @@ when kira start runs and create the branch it should setup tracking so that you 
 
 ## Slices
 
-## Implementation Notes
+### PushBranch sets upstream when requested
+Commit: Add setUpstream parameter to pushBranch and use `git push -u` when true; add unit tests.
+- [ ] T001: Add setUpstream bool parameter to pushBranch; run `git push -u <remote> <branch>` when true (otherwise existing `git push` behavior)
+- [ ] T002: Add unit test(s) that after push with setUpstream true, branch has upstream set (e.g. `git rev-parse --abbrev-ref --symbolic-full-name @{u}` in worktree)
+
+### Standalone start sets tracking
+Commit: Wire pushBranchStandalone to set upstream when pushing.
+- [ ] T003: Pass setUpstream true from pushBranchStandalone when calling pushBranch (draft PR path)
+- [ ] T004: Add or extend unit test: standalone start with draft PR results in worktree branch tracking remote branch
+
+### Polyrepo start sets tracking
+Commit: Wire polyrepo push paths to set upstream for main worktree and each pushed project worktree.
+- [ ] T005: Pass setUpstream true from pushBranchesPolyrepo (main branch push) and pushProjectBranchIfNeeded (project branch push)
+- [ ] T006: Add or extend unit test: polyrepo start with draft PR results in main and pushed project worktrees having branch tracking correct remote
+
+### E2E and release notes
+Commit: E2E coverage and release notes for start tracking.
+- [ ] T007: Add or run e2e scenario for start with draft PR and assert tracking in worktree (if existing scenario fits); skip if not applicable
+- [ ] T008: Finalize release notes (already drafted in PRD) and any user-facing docs
 
 - Change `pushBranch` to accept a `setUpstream bool`; when true, run `git push -u <remote> <branch>` instead of `git push <remote> <branch>`. Call from `pushBranchStandalone` and from `pushBranchesPolyrepo` / `pushProjectBranchIfNeeded` with `setUpstream: true` whenever a push is performed. Git sets upstream when push succeeds.
 - Use the same remote name already resolved for the push: `resolveRemoteName(ctx.Config, nil)` for standalone/main, and `p.Remote` for polyrepo projects. Branch name is `ctx.BranchName` everywhere.
