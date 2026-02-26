@@ -2462,7 +2462,7 @@ func pushBranchesPolyrepo(ctx *StartContext, baseURL, trunkBranch string) error 
 		if err := ensureBranchHasCommitForDraftPR(mainWorktreePath, remoteName, trunkBranch, ctx.WorkItemID); err != nil {
 			return err
 		}
-		if err := pushBranch(remoteName, ctx.BranchName, mainWorktreePath, false, false); err != nil {
+		if err := pushBranch(remoteName, ctx.BranchName, mainWorktreePath, false, true); err != nil {
 			return err
 		}
 		fmt.Printf("Pushed branch %s to %s (main)\n", ctx.BranchName, remoteName)
@@ -2504,7 +2504,7 @@ func pushProjectBranchIfNeeded(ctx *StartContext, p PolyrepoProject, worktreePat
 	if err := ensureBranchHasCommitForDraftPR(wp, p.Remote, trunkBranch, ctx.WorkItemID); err != nil {
 		return err
 	}
-	if err := pushBranch(p.Remote, ctx.BranchName, wp, false, false); err != nil {
+	if err := pushBranch(p.Remote, ctx.BranchName, wp, false, true); err != nil {
 		return err
 	}
 	fmt.Printf("Pushed branch %s to %s (%s)\n", ctx.BranchName, p.Remote, p.Name)

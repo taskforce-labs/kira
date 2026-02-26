@@ -1135,6 +1135,80 @@ func TestPushBranchStandalone_setsUpstreamWhenDraftPRPushes(t *testing.T) {
 	assert.Equal(t, "origin/main", strings.TrimSpace(string(out)))
 }
 
+func TestPushProjectBranchIfNeeded_setsUpstreamWhenDraftPRPushes(t *testing.T) {
+	// Verify polyrepo project branch gets upstream set when push succeeds (using local bare repo + hook).
+	tmpDir := t.TempDir()
+	remoteDir := filepath.Join(tmpDir, "remote")
+	projectDir := filepath.Join(tmpDir, "project")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o700))
+	require.NoError(t, os.MkdirAll(projectDir, 0o700))
+
+	cmd := exec.Command("git", "init", "--bare")
+	cmd.Dir = remoteDir
+	require.NoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "init")
+	cmd.Dir = projectDir
+	require.NoError(t, cmd.Run())
+	gitConfigUser(t, projectDir)
+	cmd = exec.Command("git", "checkout", "-b", "main")
+	cmd.Dir = projectDir
+	require.NoError(t, cmd.Run())
+
+	// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+	cmd = exec.Command("git", "remote", "add", "origin", remoteDir)
+	cmd.Dir = projectDir
+	require.NoError(t, cmd.Run())
+
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "f"), []byte("x"), 0o600))
+	cmd = exec.Command("git", "add", "f")
+	cmd.Dir = projectDir
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "commit", "-m", "init")
+	cmd.Dir = projectDir
+	require.NoError(t, cmd.Run())
+
+	draftPRTrue := true
+	ctx := &StartContext{
+		Behavior:     WorkspaceBehaviorPolyrepo,
+		WorktreeRoot: tmpDir,
+		BranchName:   "main",
+		WorkItemID:   "001",
+		Config: &config.Config{
+			Workspace: &config.WorkspaceConfig{
+				DraftPR:  &draftPRTrue,
+				Projects: []config.ProjectConfig{{Name: "frontend", Path: "frontend", Mount: "frontend"}},
+			},
+		},
+		Metadata: workItemMetadata{id: "001", title: "Test"},
+		Flags:    StartFlags{NoDraftPR: false},
+	}
+	worktreePaths := map[string]string{"frontend": projectDir}
+	p := PolyrepoProject{Name: "frontend", Path: projectDir, Remote: "origin", Mount: "frontend"}
+
+	saved := os.Getenv("KIRA_GITHUB_TOKEN")
+	require.NoError(t, os.Setenv("KIRA_GITHUB_TOKEN", "dummy"))
+	defer func() {
+		if saved != "" {
+			_ = os.Setenv("KIRA_GITHUB_TOKEN", saved)
+		} else {
+			_ = os.Unsetenv("KIRA_GITHUB_TOKEN")
+		}
+	}()
+
+	isGitHubRemoteTestHook = func(_, _ string) bool { return true }
+	defer func() { isGitHubRemoteTestHook = nil }()
+
+	err := pushProjectBranchIfNeeded(ctx, p, worktreePaths, "", "main")
+	require.NoError(t, err)
+
+	cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	cmd.Dir = projectDir
+	out, err := cmd.Output()
+	require.NoError(t, err)
+	assert.Equal(t, "origin/main", strings.TrimSpace(string(out)))
+}
+
 func TestPushBranchesForDraftPR_returnsErrorWhenTokenUnset(t *testing.T) {
 	tmpDir := t.TempDir()
 	cmd := exec.Command("git", "init")

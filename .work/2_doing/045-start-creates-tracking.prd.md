@@ -49,8 +49,8 @@ Commit: Wire pushBranchStandalone to set upstream when pushing.
 
 ### Polyrepo start sets tracking
 Commit: Wire polyrepo push paths to set upstream for main worktree and each pushed project worktree.
-- [ ] T005: Pass setUpstream true from pushBranchesPolyrepo (main branch push) and pushProjectBranchIfNeeded (project branch push)
-- [ ] T006: Add or extend unit test: polyrepo start with draft PR results in main and pushed project worktrees having branch tracking correct remote
+- [x] T005: Pass setUpstream true from pushBranchesPolyrepo (main branch push) and pushProjectBranchIfNeeded (project branch push)
+- [x] T006: Add or extend unit test: polyrepo start with draft PR results in main and pushed project worktrees having branch tracking correct remote
 
 ### E2E and release notes
 Commit: E2E coverage and release notes for start tracking.
