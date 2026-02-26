@@ -61,7 +61,7 @@ Large work items (especially PRDs) often need to be broken down into smaller, ma
   - **Optional work item ID**: Slice workflow commands (`slice current`, `slice task current`, `slice task current toggle`, `slice commit`, and optionally other slice commands) may accept an optional `<work-item-id>`. When omitted, the work item is resolved from the configured doing folder (same semantics as the "current work item" used by e.g. `kira latest`). If the doing folder has zero or more than one work item file, the command fails with a clear message (e.g. "No work item in doing folder" or "Multiple work items in doing folder; specify work-item-id").
   - **Machine-readable output**: Commands that return the current slice or current task support `--output json` so the agent can parse `slice`, `task_id`, `description`, etc. without relying on human-readable prose. Lint already has `--output json`.
   - **Exit codes**: Slice commands use exit code 0 on success and non-zero on error (e.g. work item not found, no open tasks, lint failures), so scripts and agents can detect failure reliably.
-- **Recommended loop** while implementing: (1) Get context: `kira slice current [work-item-id]` and/or `kira slice task current [work-item-id]` (optionally with `--output json`). (2) Implement the task (code edits). (3) When the task is done: `kira slice task current [work-item-id] toggle`, then `kira slice commit [work-item-id]` (or with an explicit message). (4) If the agent edited the Slices section markdown directly, run `kira slice lint [work-item-id]` and fix any reported errors.
+- **Recommended loop** while implementing: (1) Get context: `kira slice current [work-item-id]` and/or `kira slice task current [work-item-id]` (optionally with `--output json`). (2) Implement the task (code edits). (3) When the task is done: `kira slice task current [work-item-id] toggle` (toggle does **not** commit by default; use `--commit`/`-c` to commit the work-item change in the same step). Then commit slice changes via `kira slice commit generate | git commit -F -` or `kira slice commit current` (validates the slice to commit has no open tasks, then generates and commits). (4) If the agent edited the Slices section markdown directly, run `kira slice lint [work-item-id]` and fix any reported errors.
 
 ## Requirements
 
@@ -116,7 +116,7 @@ Large work items (especially PRDs) often need to be broken down into smaller, ma
 
    **Workflow Helpers (work-item-id optional; when omitted, resolve from doing folder):**
    - `kira slice task current [<work-item-id>] [<slice-name>]` - Show the current task: with slice name, show first open task in that slice; without slice name, resolve current slice then show its first open task. Supports `--output json` (task_id, slice, description, notes).
-   - `kira slice task current [<work-item-id>] toggle` - Toggle the current task (resolve current slice and first open task, then toggle state); fails with clear message if no open tasks.
+   - `kira slice task current [<work-item-id>] toggle` - Toggle the current task (resolve current slice and first open task, then toggle state); fails with clear message if no open tasks. Toggle does **not** create a git commit by default; use `--commit`/`-c` to commit the work-item change. To commit slice changes after toggling, use `kira slice commit generate | git commit -F -` or `kira slice commit current` (validates the completed slice has no open tasks, then generates and commits).
    - `kira slice commit [<work-item-id>] [commit-message]` - Commit slice/task changes:
      - With message: Commit changes with provided message
      - Without message: Generate commit message from task state changes; if none detected, fall back to the name of the current slice (first with open tasks), or the work item title, or "Update slices for &lt;work-item-id&gt;"
@@ -573,7 +573,7 @@ kira slice commit 001
 1. Resolve current slice (first in order with open tasks) and current task (first open in that slice).
 2. If none, exit with clear error (e.g. "No open tasks in work item 001").
 3. Toggle that task's state (open ↔ done) in the work item markdown.
-4. Same behavior as `kira slice task toggle <work-item-id> <task-id>` for the resolved task; auto-commit per config.
+4. Same behavior as `kira slice task toggle <work-item-id> <task-id>` for the resolved task; no commit by default; use `--commit` to commit the work-item change (aligned with `kira move`).
 
 **`kira slice commit` Implementation:**
 1. **With message provided:**
@@ -650,7 +650,7 @@ kira slice commit 001
 **Agent implementation workflow (recommended loop):**
 1. **Get context**: `kira slice current` or `kira slice task current` (optionally with `--output json`). Omit work-item-id when the agent is working in a repo where one work item is in doing.
 2. **Implement**: Edit code to complete the current task (use task_id and description from step 1).
-3. **Mark task done**: `kira slice task current toggle` (then optionally `kira slice commit` with or without message to commit slice/task changes).
+3. **Mark task done**: `kira slice task current toggle` (toggle does not commit by default; use `--commit` to commit the work-item change). Then `kira slice commit generate | git commit -F -` or `kira slice commit current` to commit slice/task changes.
 4. **If the agent edited the Slices section markdown directly**: Run `kira slice lint` and fix any reported errors.
 5. Repeat from step 1 for the next task, or stop if no open tasks.
 - All slice commands that can fail (not found, no open tasks, lint errors) use non-zero exit codes so the agent can detect failure.

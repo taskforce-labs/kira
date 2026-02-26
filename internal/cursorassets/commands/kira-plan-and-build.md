@@ -14,7 +14,7 @@ Build the given work item by planning the approach and systematically implementi
    - Implement the task, add/update tests
    - Verify: `kira check -t commit` before committing
    - Learn: If checks fail, analyze root cause, adjust implementation, and document learnings. Only commit when checks pass.
-   - Commit: `kira slice task current toggle`, then `kira slice commit generate | git commit -F -`
+   - Commit: `kira slice task current toggle` (no commit by default), then `kira slice commit generate | git commit -F -` or `kira slice commit current` to commit. Use `kira slice task current toggle --commit` to commit the work-item change in the same step.
    - If editing Slices markdown directly, run `kira slice lint` and fix errors
 
 3. **Complete**
