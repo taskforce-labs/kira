@@ -969,7 +969,8 @@ func selectSliceBySelector(slices []Slice, selector string) (*Slice, error) {
 	case "current":
 		s := firstSliceWithOpenTasks(slices)
 		if s == nil {
-			return nil, fmt.Errorf("no slice with open tasks (all done)")
+			// All tasks done: use last slice so generate still works for the final commit
+			return &slices[len(slices)-1], nil
 		}
 		return s, nil
 	case "previous":
@@ -985,7 +986,11 @@ func selectSliceBySelector(slices []Slice, selector string) (*Slice, error) {
 				break
 			}
 		}
-		if curIdx <= 0 {
+		if curIdx < 0 {
+			// All tasks done: use last slice as "previous" (the one just completed)
+			return &slices[len(slices)-1], nil
+		}
+		if curIdx == 0 {
 			return nil, fmt.Errorf("no previous slice")
 		}
 		return &slices[curIdx-1], nil
