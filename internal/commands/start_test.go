@@ -1060,6 +1060,81 @@ func TestPushBranch(t *testing.T) {
 	})
 }
 
+func TestPushBranchStandalone_setsUpstreamWhenDraftPRPushes(t *testing.T) {
+	// Use a local bare repo as remote and a test hook so isGitHubRemote passes (otherwise we'd need a real GitHub URL).
+	tmpDir := t.TempDir()
+	remoteDir := filepath.Join(tmpDir, "remote")
+	localDir := filepath.Join(tmpDir, "local")
+	require.NoError(t, os.MkdirAll(remoteDir, 0o700))
+	require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+	cmd := exec.Command("git", "init", "--bare")
+	cmd.Dir = remoteDir
+	require.NoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "init")
+	cmd.Dir = localDir
+	require.NoError(t, cmd.Run())
+	gitConfigUser(t, localDir)
+	cmd = exec.Command("git", "checkout", "-b", "main")
+	cmd.Dir = localDir
+	require.NoError(t, cmd.Run())
+
+	// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+	cmd = exec.Command("git", "remote", "add", "origin", remoteDir)
+	cmd.Dir = localDir
+	require.NoError(t, cmd.Run())
+
+	require.NoError(t, os.WriteFile(filepath.Join(localDir, "f"), []byte("x"), 0o600))
+	cmd = exec.Command("git", "add", "f")
+	cmd.Dir = localDir
+	require.NoError(t, cmd.Run())
+	cmd = exec.Command("git", "commit", "-m", "init")
+	cmd.Dir = localDir
+	require.NoError(t, cmd.Run())
+
+	draftPRTrue := true
+	ctx := &StartContext{
+		Behavior:     WorkspaceBehaviorStandalone,
+		WorktreeRoot: tmpDir,
+		BranchName:   "main",
+		WorkItemID:   "001",
+		Config: &config.Config{
+			Workspace: &config.WorkspaceConfig{DraftPR: &draftPRTrue},
+		},
+		Metadata: workItemMetadata{id: "001", title: "Test"},
+		Flags:    StartFlags{NoDraftPR: false},
+	}
+	saved := os.Getenv("KIRA_GITHUB_TOKEN")
+	require.NoError(t, os.Setenv("KIRA_GITHUB_TOKEN", "dummy"))
+	defer func() {
+		if saved != "" {
+			_ = os.Setenv("KIRA_GITHUB_TOKEN", saved)
+		} else {
+			_ = os.Unsetenv("KIRA_GITHUB_TOKEN")
+		}
+	}()
+
+	isGitHubRemoteTestHook = func(_, _ string) bool { return true }
+	defer func() { isGitHubRemoteTestHook = nil }()
+
+	errPush := pushBranchStandalone(ctx, localDir, "", "main")
+	require.NoError(t, errPush)
+
+	// Verify upstream was set by the push -u in pushBranchStandalone.
+	cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	cmd.Dir = localDir
+	out, err := cmd.Output()
+	if err != nil {
+		cmd2 := exec.Command("git", "branch", "-vv")
+		cmd2.Dir = localDir
+		vv, _ := cmd2.Output()
+		t.Logf("git branch -vv: %s", vv)
+	}
+	require.NoError(t, err)
+	assert.Equal(t, "origin/main", strings.TrimSpace(string(out)))
+}
+
 func TestPushBranchesForDraftPR_returnsErrorWhenTokenUnset(t *testing.T) {
 	tmpDir := t.TempDir()
 	cmd := exec.Command("git", "init")
