@@ -205,9 +205,9 @@ Commit: Add RunWithCleanTree and stash helpers (HasUncommitted, Stash, Pop) in a
 
 ### Latest uses RunWithCleanTree
 Commit: Refactor latest to use RunWithCleanTree per repo; preserve existing behavior, --no-pop-stash, and conflict/rebase handling.
-- [ ] T004: Refactor latest.go so per-repo "do the operation" (fetch+rebase or pull) is a callback passed to RunWithCleanTree
-- [ ] T005: Preserve latest-specific behavior (e.g. rebase conflicts / keep stash) per Implementation Notes; document chosen approach
-- [ ] T006: Update or add tests for latest; ensure make check and e2e pass
+- [x] T004: Refactor latest.go so per-repo "do the operation" (fetch+rebase or pull) is a callback passed to RunWithCleanTree
+- [x] T005: Preserve latest-specific behavior (e.g. rebase conflicts / keep stash) per Implementation Notes; document chosen approach
+- [x] T006: Update or add tests for latest; ensure make check and e2e pass
 
 ### Start: stash/pop and --no-pop-stash
 Commit: Use RunWithCleanTree in start flow and add --no-pop-stash flag; start no longer fails on uncommitted trunk changes.

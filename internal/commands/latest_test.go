@@ -2636,7 +2636,7 @@ func TestCheckUncommittedChangesForLatest(t *testing.T) {
 		// Make uncommitted change
 		require.NoError(t, os.WriteFile("modified.txt", []byte("modified"), 0o600))
 
-		hasUncommitted, err := checkUncommittedChangesForLatest(tmpDir)
+		hasUncommitted, err := HasUncommitted(tmpDir, false)
 		require.NoError(t, err)
 		assert.True(t, hasUncommitted)
 	})
@@ -2656,7 +2656,7 @@ func TestCheckUncommittedChangesForLatest(t *testing.T) {
 		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
 		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
 
-		hasUncommitted, err := checkUncommittedChangesForLatest(tmpDir)
+		hasUncommitted, err := HasUncommitted(tmpDir, false)
 		require.NoError(t, err)
 		assert.False(t, hasUncommitted)
 	})
@@ -2686,11 +2686,11 @@ func TestStashChanges(t *testing.T) {
 			Path: tmpDir,
 		}
 
-		err := stashChanges(repo)
+		err := Stash(repo.Path, "kira latest: auto-stash before rebase on "+repo.Name)
 		require.NoError(t, err)
 
 		// Verify changes are stashed (no uncommitted changes)
-		hasUncommitted, err := checkUncommittedChangesForLatest(tmpDir)
+		hasUncommitted, err := HasUncommitted(tmpDir, false)
 		require.NoError(t, err)
 		assert.False(t, hasUncommitted)
 	})
@@ -2716,7 +2716,7 @@ func TestStashChanges(t *testing.T) {
 		}
 
 		// Should not error when nothing to stash
-		err := stashChanges(repo)
+		err := Stash(repo.Path, "kira latest: auto-stash before rebase on "+repo.Name)
 		assert.NoError(t, err)
 	})
 }
@@ -2747,11 +2747,11 @@ func TestPopStash(t *testing.T) {
 		}
 
 		// Pop stash
-		err := popStash(repo)
+		err := Pop(repo.Path)
 		require.NoError(t, err)
 
 		// Verify changes are restored
-		hasUncommitted, err := checkUncommittedChangesForLatest(tmpDir)
+		hasUncommitted, err := HasUncommitted(tmpDir, false)
 		require.NoError(t, err)
 		assert.True(t, hasUncommitted)
 	})
@@ -2777,83 +2777,8 @@ func TestPopStash(t *testing.T) {
 		}
 
 		// Should not error when no stash exists
-		err := popStash(repo)
+		err := Pop(repo.Path)
 		assert.NoError(t, err)
-	})
-}
-
-func TestRestoreStashIfNeeded(t *testing.T) {
-	t.Run("aborts rebase and restores stash", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		// Initialize git repo
-		require.NoError(t, exec.Command("git", "init").Run())
-		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
-		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
-
-		// Create initial commit
-		require.NoError(t, os.WriteFile("test.txt", []byte("test"), 0o600))
-		require.NoError(t, exec.Command("git", "add", "test.txt").Run())
-		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
-		// #nosec G204 - tmpDir is from t.TempDir(), safe for test use
-		_ = exec.Command("git", "branch", "-M", "main").Run() // Ignore error if already main
-
-		// Create feature branch
-		require.NoError(t, exec.Command("git", "checkout", "-b", "feature").Run())
-		require.NoError(t, os.WriteFile("feature.txt", []byte("feature"), 0o600))
-		require.NoError(t, exec.Command("git", "add", "feature.txt").Run())
-		require.NoError(t, exec.Command("git", "commit", "-m", "Feature commit").Run())
-
-		// Make uncommitted change and stash
-		require.NoError(t, os.WriteFile("modified.txt", []byte("modified"), 0o600))
-		require.NoError(t, exec.Command("git", "stash", "push", "-m", "test stash", "--include-untracked").Run())
-
-		// Create remote and push
-		remoteDir := t.TempDir()
-		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
-		require.NoError(t, exec.Command("git", "init", "--bare", remoteDir).Run())
-		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
-		require.NoError(t, exec.Command("git", "remote", "add", "origin", remoteDir).Run())
-		require.NoError(t, exec.Command("git", "checkout", "main").Run())
-		require.NoError(t, exec.Command("git", "push", "-u", "origin", "main").Run())
-
-		// Add another commit to main and push
-		require.NoError(t, os.WriteFile("main.txt", []byte("main"), 0o600))
-		require.NoError(t, exec.Command("git", "add", "main.txt").Run())
-		require.NoError(t, exec.Command("git", "commit", "-m", "Main commit").Run())
-		require.NoError(t, exec.Command("git", "push", "origin", "main").Run())
-
-		// Switch back to feature and start rebase
-		require.NoError(t, exec.Command("git", "checkout", "feature").Run())
-		require.NoError(t, exec.Command("git", "fetch", "origin", "main").Run())
-		// Start rebase (will succeed since no conflicts)
-		require.NoError(t, exec.Command("git", "rebase", "origin/main").Run())
-
-		repo := RepositoryInfo{
-			Name: "test-repo",
-			Path: tmpDir,
-		}
-
-		result := RepositoryOperationResult{
-			Repo:            repo,
-			HadStash:        true,
-			RebaseAttempted: true,
-		}
-
-		// Restore should abort rebase (or detect no rebase in progress) and pop stash
-		restoreStashIfNeeded(&result, repo, true, false)
-
-		// Verify rebase was aborted (no rebase in progress)
-		err := abortRebase(repo)
-		assert.NoError(t, err) // Should handle "no rebase" gracefully
-
-		// Verify stash was popped (uncommitted changes restored)
-		hasUncommitted, err := checkUncommittedChangesForLatest(tmpDir)
-		require.NoError(t, err)
-		assert.True(t, hasUncommitted)
-		assert.True(t, result.RebaseAborted)
 	})
 }
 
