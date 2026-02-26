@@ -66,10 +66,10 @@ Commit: Default to no commit for slice task toggle (both forms); add --commit/-c
 
 ### slice commit current (with validation)
 Commit: Add kira slice commit current: resolve work item from context, validate current slice has no open tasks, then generate and commit.
-- [ ] T004: Add subcommand `slice commit current [<work-item-id>]`; resolve work item from args or doing folder (same as other slice commit commands).
-- [ ] T005: Before committing: validate the slice to be committed (e.g. "previous" — the one just completed) has no open tasks; if any open tasks, fail with clear message listing task IDs.
-- [ ] T006: On success: run generate for that slice and execute `git commit -F -` (reuse sliceCommitWorkItem or equivalent); ensure git availability and single work-item staging checks consistent with move/generate.
-- [ ] T007: Add tests for `slice commit current`: success when current slice complete; failure when open tasks remain; work-item resolution from doing folder and explicit id.
+- [x] T004: Add subcommand `slice commit current [<work-item-id>]`; resolve work item from args or doing folder (same as other slice commit commands).
+- [x] T005: Before committing: validate the slice to be committed (e.g. "previous" — the one just completed) has no open tasks; if any open tasks, fail with clear message listing task IDs.
+- [x] T006: On success: run generate for that slice and execute `git commit -F -` (reuse sliceCommitWorkItem or equivalent); ensure git availability and single work-item staging checks consistent with move/generate.
+- [x] T007: Add tests for `slice commit current`: success when current slice complete; failure when open tasks remain; work-item resolution from doing folder and explicit id.
 
 ### Documentation
 Commit: Update AGENTS.md, kira-plan-and-build, and any loop docs to describe toggle no-commit default and slice commit current.

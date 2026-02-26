@@ -560,6 +560,110 @@ kind: prd
 	})
 }
 
+func TestSliceCommitCurrent(t *testing.T) {
+	// Two slices: first all done, second has open. "previous" = first slice.
+	wiPreviousComplete := `---
+id: 047
+title: slice commit current
+status: doing
+kind: prd
+---
+# slice commit current
+## Slices
+### First
+- [x] T001: Done one
+- [x] T002: Done two
+### Second
+- [ ] T003: Open
+`
+	// One slice with open tasks: no "previous" slice.
+	wiNoPrevious := `---
+id: 048
+title: no previous
+status: doing
+kind: prd
+---
+# no previous
+## Slices
+### Only
+- [ ] T001: Open
+`
+	t.Run("success when previous slice complete", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		path := ".work/2_doing/047-slice-commit-current.prd.md"
+		require.NoError(t, os.WriteFile(path, []byte(wiPreviousComplete), 0o600))
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
+		require.NoError(t, exec.Command("git", "add", path).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+		// Modify work item so we have something to commit
+		require.NoError(t, os.WriteFile(path, []byte(strings.Replace(wiPreviousComplete, "Open", "Open task", 1)), 0o600))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "current", "047"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+
+		out, err := exec.Command("git", "log", "--oneline", "-1").Output()
+		require.NoError(t, err)
+		assert.Contains(t, string(out), "047")
+		// Full message should reference the committed slice (First)
+		fullMsg, _ := exec.Command("git", "log", "-1", "--format=%B").Output()
+		assert.Contains(t, string(fullMsg), "First:")
+	})
+	t.Run("failure when no previous slice", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		path := ".work/2_doing/048-no-previous.prd.md"
+		require.NoError(t, os.WriteFile(path, []byte(wiNoPrevious), 0o600))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "current", "048"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no previous slice")
+	})
+	t.Run("work-item resolution from doing folder when one work item", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		path := ".work/2_doing/047-slice-commit-current.prd.md"
+		require.NoError(t, os.WriteFile(path, []byte(wiPreviousComplete), 0o600))
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
+		require.NoError(t, exec.Command("git", "add", path).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+		require.NoError(t, os.WriteFile(path, []byte(strings.Replace(wiPreviousComplete, "Open", "Open task", 1)), 0o600))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "current"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+	})
+	t.Run("failure when zero work items in doing folder", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+
+		rootCmd.SetArgs([]string{"slice", "commit", "current"})
+		err := rootCmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no work item in doing folder")
+	})
+}
+
 func TestSliceTaskToggleCommitBehavior(t *testing.T) {
 	workItemToggle := `---
 id: 001

@@ -136,7 +136,7 @@ var sliceCommitCmd = &cobra.Command{
 	Use:   "commit",
 	Short: "Slice commit: add task, remove slice, or generate commit message",
 	Long: `Generate a structured commit message, or add a task to a slice, or remove a slice.
-Use: slice commit add, slice commit remove, slice commit generate.
+Use: slice commit add, slice commit remove, slice commit generate, slice commit current.
 Generate prints to stdout only; use 'git commit -F -' to commit with the message.`,
 	Args:         cobra.ArbitraryArgs,
 	RunE:         runSliceCommitNoSubcommand,
@@ -166,6 +166,14 @@ var sliceCommitGenerateCmd = &cobra.Command{
 	SilenceUsage: true,
 }
 
+var sliceCommitCurrentCmd = &cobra.Command{
+	Use:          "current [<work-item-id>]",
+	Short:        "Validate current slice is complete, then generate and commit",
+	Long:         `Resolves work item from args or doing folder. Validates the slice to be committed (previous — the one just completed) has no open tasks, then runs generate and git commit -F -.`,
+	RunE:         runSliceCommitCurrent,
+	SilenceUsage: true,
+}
+
 func init() {
 	sliceCmd.AddCommand(sliceAddCmd)
 	sliceCmd.AddCommand(sliceRemoveCmd)
@@ -179,6 +187,7 @@ func init() {
 	sliceCommitCmd.AddCommand(sliceCommitAddCmd)
 	sliceCommitCmd.AddCommand(sliceCommitRemoveCmd)
 	sliceCommitCmd.AddCommand(sliceCommitGenerateCmd)
+	sliceCommitCmd.AddCommand(sliceCommitCurrentCmd)
 	sliceCommitAddCmd.Flags().Bool("no-commit", false, "Do not commit changes")
 	sliceCommitRemoveCmd.Flags().Bool("no-commit", false, "Do not commit changes")
 	sliceCommitRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
