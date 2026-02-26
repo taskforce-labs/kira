@@ -217,9 +217,9 @@ Commit: Use RunWithCleanTree in start flow and add --no-pop-stash flag; start no
 
 ### Done: stash/pop and --no-pop-stash
 Commit: Use RunWithCleanTree in done flow and add --no-pop-stash flag; done works with uncommitted trunk changes.
-- [ ] T010: Wrap pull+update block in done with RunWithCleanTree(ctx.RepoRoot, "done", noPopStash, fn); add --no-pop-stash flag
-- [ ] T011: Add/update tests for done with uncommitted changes, done --no-pop-stash, and restore-on-failure
-- [ ] T012: Run make check and bash kira_e2e_tests.sh; fix any failures
+- [x] T010: Wrap pull+update block in done with RunWithCleanTree(ctx.RepoRoot, "done", noPopStash, fn); add --no-pop-stash flag
+- [x] T011: Add/update tests for done with uncommitted changes, done --no-pop-stash, and restore-on-failure
+- [x] T012: Run make check and bash kira_e2e_tests.sh; fix any failures
 
 ### Release notes and docs
 Commit: Add release notes and document save/move future use of RunWithCleanTree.

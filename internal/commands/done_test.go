@@ -740,6 +740,51 @@ func TestPullTrunk(t *testing.T) {
 	})
 }
 
+func TestPullTrunkAndUpdateWorkItemWithUncommitted(t *testing.T) {
+	cfg := &config.Config{
+		ConfigDir: "/nonexistent",
+		StatusFolders: map[string]string{
+			"done": "4_done",
+		},
+	}
+	t.Run("restore stash when pull fails", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		cmd = exec.Command("git", "config", "user.email", "test@example.com")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		cmd = exec.Command("git", "config", "user.name", "Test User")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		cmd = exec.Command("git", "add", "f")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "dirty.txt"), []byte("dirty"), 0o600))
+
+		doneCtx := &doneContext{Cfg: cfg, RepoRoot: tmpDir, WorkItemPath: "", WorkItemID: "037"}
+		doneCmd := &cobra.Command{}
+		doneCmd.Flags().Bool("no-pop-stash", false, "")
+		var buf bytes.Buffer
+		err := pullTrunkAndUpdateWorkItem(cfg, doneCtx, "origin", "main", "", "", 0, "merge", doneCmd, &buf)
+		require.Error(t, err)
+		// Stash should have been restored on failure
+		dirty, err := HasUncommitted(tmpDir, false)
+		require.NoError(t, err)
+		assert.True(t, dirty, "uncommitted changes should be restored after pull failure")
+	})
+}
+
 func TestUpdateWorkItemDoneMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &config.Config{ConfigDir: tmpDir, Workspace: &config.WorkspaceConfig{WorkFolder: "."}}

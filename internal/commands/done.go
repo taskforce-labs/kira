@@ -35,6 +35,7 @@ func init() {
 	doneCmd.Flags().Bool("no-cleanup", false, "Do not delete the feature branch after merge")
 	doneCmd.Flags().Bool("force", false, "Force merge even if PR has failing checks or unresolved comments")
 	doneCmd.Flags().Bool("dry-run", false, "Preview what would be done without executing")
+	doneCmd.Flags().Bool("no-pop-stash", false, "Stash uncommitted changes before pull/update but do not automatically pop them after")
 }
 
 // doneContext holds resolved work item and optional PR for the done command.
@@ -129,7 +130,7 @@ func executeDone(cmd *cobra.Command, ctx *doneContext) error {
 		return err
 	}
 
-	if err := pullTrunkAndUpdateWorkItem(cfg, ctx, remoteName, trunkBranch, mergedAt, mergeCommitSHA, prNum, mergeStrategy, out); err != nil {
+	if err := pullTrunkAndUpdateWorkItem(cfg, ctx, remoteName, trunkBranch, mergedAt, mergeCommitSHA, prNum, mergeStrategy, cmd, out); err != nil {
 		return err
 	}
 
@@ -161,26 +162,36 @@ func resolveDoneRemoteName(cfg *config.Config) string {
 	return defaultRemoteName
 }
 
-func pullTrunkAndUpdateWorkItem(cfg *config.Config, ctx *doneContext, remoteName, trunkBranch, mergedAt, mergeCommitSHA string, prNum int, mergeStrategy string, out io.Writer) error {
-	pullCtx, pullCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer pullCancel()
-	donePrintf(out, "  Pulling trunk (%s)...\n", trunkBranch)
-	if err := pullTrunk(pullCtx, ctx.RepoRoot, remoteName, trunkBranch); err != nil {
-		return fmt.Errorf("pull trunk failed: %w", err)
+func pullTrunkAndUpdateWorkItem(cfg *config.Config, ctx *doneContext, remoteName, trunkBranch, mergedAt, mergeCommitSHA string, prNum int, mergeStrategy string, cmd *cobra.Command, out io.Writer) error {
+	noPopStash := false
+	if cmd != nil {
+		noPopStash, _ = cmd.Flags().GetBool("no-pop-stash")
 	}
-	donePrintln(out, "  ✓ Trunk up to date")
-	if mergedAt == "" {
-		mergedAt = time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	op := func() error {
+		pullCtx, pullCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer pullCancel()
+		donePrintf(out, "  Pulling trunk (%s)...\n", trunkBranch)
+		if err := pullTrunk(pullCtx, ctx.RepoRoot, remoteName, trunkBranch); err != nil {
+			return fmt.Errorf("pull trunk failed: %w", err)
+		}
+		donePrintln(out, "  ✓ Trunk up to date")
+		mergedAtVal := mergedAt
+		if mergedAtVal == "" {
+			mergedAtVal = time.Now().UTC().Format("2006-01-02T15:04:05Z")
+		}
+		mergeCommitSHAVal := mergeCommitSHA
+		if mergeCommitSHAVal == "" {
+			mergeCommitSHAVal = unknownValue
+		}
+		donePrintln(out, "  Updating work item to done...")
+		if err := updateWorkItemToDone(cfg, ctx.WorkItemPath, ctx.WorkItemID, mergedAtVal, mergeCommitSHAVal, prNum, mergeStrategy, ctx.RepoRoot, remoteName); err != nil {
+			return fmt.Errorf("update work item to done: %w", err)
+		}
+		donePrintln(out, "  ✓ Work item marked done and pushed")
+		return nil
 	}
-	if mergeCommitSHA == "" {
-		mergeCommitSHA = unknownValue
-	}
-	donePrintln(out, "  Updating work item to done...")
-	if err := updateWorkItemToDone(cfg, ctx.WorkItemPath, ctx.WorkItemID, mergedAt, mergeCommitSHA, prNum, mergeStrategy, ctx.RepoRoot, remoteName); err != nil {
-		return fmt.Errorf("update work item to done: %w", err)
-	}
-	donePrintln(out, "  ✓ Work item marked done and pushed")
-	return nil
+	_, err := RunWithCleanTree(ctx.RepoRoot, "done", trunkBranch, noPopStash, op)
+	return err
 }
 
 func maybeCleanupBranch(ctx context.Context, client *github.Client, owner, repo string, cfg *config.Config, noCleanup bool, token string, pr *github.PullRequest, repoRoot string, out io.Writer) error {
