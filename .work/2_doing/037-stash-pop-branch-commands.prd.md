@@ -195,6 +195,38 @@ So we’re not reordering or redefining what start or done do — we’re making
 - **save** / **move**: When we add pull/sync steps to these commands, they can call `RunWithCleanTree` too; document that in release notes or docs.
 
 
+## Slices
+
+### Shared clean-tree helpers
+Commit: Add RunWithCleanTree and stash helpers (HasUncommitted, Stash, Pop) in a shared package; no command behavior change yet.
+- [ ] T001: Add internal package (e.g. internal/commands/stash.go or clean_tree.go) with HasUncommitted(dir, dryRun), Stash(dir, message), Pop(dir) and RunWithCleanTree(dir, opName, noPopStash, fn)
+- [ ] T002: Implement stash message format and restore-on-failure semantics inside RunWithCleanTree
+- [ ] T003: Add unit tests for HasUncommitted, Stash, Pop, and RunWithCleanTree
+
+### Latest uses RunWithCleanTree
+Commit: Refactor latest to use RunWithCleanTree per repo; preserve existing behavior, --no-pop-stash, and conflict/rebase handling.
+- [ ] T004: Refactor latest.go so per-repo "do the operation" (fetch+rebase or pull) is a callback passed to RunWithCleanTree
+- [ ] T005: Preserve latest-specific behavior (e.g. rebase conflicts / keep stash) per Implementation Notes; document chosen approach
+- [ ] T006: Update or add tests for latest; ensure make check and e2e pass
+
+### Start: stash/pop and --no-pop-stash
+Commit: Use RunWithCleanTree in start flow and add --no-pop-stash flag; start no longer fails on uncommitted trunk changes.
+- [ ] T007: In start flow (validateAndPullLatest or equivalent), call RunWithCleanTree(repoRoot, "start", noPopStash, pullCallback) for main repo; polyrepo: RunWithCleanTree per project before pull
+- [ ] T008: Add --no-pop-stash to start flags and wire through
+- [ ] T009: Add/update tests for start with uncommitted changes, start --no-pop-stash, and restore-on-failure when pull fails
+
+### Done: stash/pop and --no-pop-stash
+Commit: Use RunWithCleanTree in done flow and add --no-pop-stash flag; done works with uncommitted trunk changes.
+- [ ] T010: Wrap pull+update block in done with RunWithCleanTree(ctx.RepoRoot, "done", noPopStash, fn); add --no-pop-stash flag
+- [ ] T011: Add/update tests for done with uncommitted changes, done --no-pop-stash, and restore-on-failure
+- [ ] T012: Run make check and bash kira_e2e_tests.sh; fix any failures
+
+### Release notes and docs
+Commit: Add release notes and document save/move future use of RunWithCleanTree.
+- [ ] T013: Add release notes for start, done, and "run with clean tree" per PRD Release Notes section
+- [ ] T014: Document that save/move can use RunWithCleanTree when pull/sync steps are added (release notes or docs)
+
+
 ## Release Notes
 
 - **start**: When trunk has uncommitted changes, `kira start` now stashes them, pulls latest, creates the worktree and branch, then pops the stash (same workflow as `kira latest`). Use `--no-pop-stash` to leave changes stashed.
