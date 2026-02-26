@@ -73,7 +73,7 @@ Commit: Add kira slice commit current: resolve work item from context, validate 
 
 ### Documentation
 Commit: Update AGENTS.md, kira-plan-and-build, and any loop docs to describe toggle no-commit default and slice commit current.
-- [ ] T008: Update AGENTS.md: recommend loop with toggle (no commit by default), optional `kira slice commit generate | git commit -F -` or `kira slice commit current`; document `--commit`/`-c` for toggle.
-- [ ] T009: Update .cursor/commands/kira-plan-and-build.md and internal/cursorassets/commands/kira-plan-and-build.md: toggle then commit via generate or `slice commit current`.
-- [ ] T010: Update any PRD/spec that describes the slice workflow to mention default no-commit on toggle and `kira slice commit current`.
+- [x] T008: Update AGENTS.md: recommend loop with toggle (no commit by default), optional `kira slice commit generate | git commit -F -` or `kira slice commit current`; document `--commit`/`-c` for toggle.
+- [x] T009: Update .cursor/commands/kira-plan-and-build.md and internal/cursorassets/commands/kira-plan-and-build.md: toggle then commit via generate or `slice commit current`.
+- [x] T010: Update any PRD/spec that describes the slice workflow to mention default no-commit on toggle and `kira slice commit current`.
 
