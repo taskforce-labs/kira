@@ -44,8 +44,8 @@ Commit: Add setUpstream parameter to pushBranch and use `git push -u` when true;
 
 ### Standalone start sets tracking
 Commit: Wire pushBranchStandalone to set upstream when pushing.
-- [ ] T003: Pass setUpstream true from pushBranchStandalone when calling pushBranch (draft PR path)
-- [ ] T004: Add or extend unit test: standalone start with draft PR results in worktree branch tracking remote branch
+- [x] T003: Pass setUpstream true from pushBranchStandalone when calling pushBranch (draft PR path)
+- [x] T004: Add or extend unit test: standalone start with draft PR results in worktree branch tracking remote branch
 
 ### Polyrepo start sets tracking
 Commit: Wire polyrepo push paths to set upstream for main worktree and each pushed project worktree.

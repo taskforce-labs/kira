@@ -1119,9 +1119,16 @@ func getRemoteURL(remoteName, dir string) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
+// isGitHubRemoteTestHook, when set by tests, overrides isGitHubRemote so that standalone start
+// can be tested with a local bare repo (remote URL would not otherwise pass the GitHub check).
+var isGitHubRemoteTestHook func(remoteURL, baseURL string) bool
+
 // isGitHubRemote returns true if remoteURL is a GitHub or GitHub Enterprise URL.
 // baseURL is the optional workspace git_base_url (e.g. https://github.example.com); empty means github.com.
 func isGitHubRemote(remoteURL, baseURL string) bool {
+	if isGitHubRemoteTestHook != nil {
+		return isGitHubRemoteTestHook(remoteURL, baseURL)
+	}
 	if remoteURL == "" {
 		return false
 	}
@@ -2426,7 +2433,7 @@ func pushBranchStandalone(ctx *StartContext, worktreePath, baseURL, trunkBranch 
 	if err := ensureBranchHasCommitForDraftPR(worktreePath, remoteName, trunkBranch, ctx.WorkItemID); err != nil {
 		return err
 	}
-	if err := pushBranch(remoteName, ctx.BranchName, worktreePath, false, false); err != nil {
+	if err := pushBranch(remoteName, ctx.BranchName, worktreePath, false, true); err != nil {
 		return err
 	}
 	fmt.Printf("Pushed branch %s to %s\n", ctx.BranchName, remoteName)
