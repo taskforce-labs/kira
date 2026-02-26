@@ -56,3 +56,24 @@ Align with `kira move`: move uses `--commit` / `-c` (default false). Slice toggl
 - `kira slice task toggle` and `kira slice task toggle current` no longer create a git commit by default. Use `--commit` / `-c` to commit the work item change (aligned with `kira move`).
 - **New:** `kira slice commit current` — shorthand that uses context (doing folder / work tree) to resolve the work item so you don't have to pass the id. Generates a commit message, validates that the current slice has no open tasks, then runs the commit. Fails with a clear message if there are open tasks in the current slice.
 
+## Slices
+
+### Toggle default no-commit and --commit flag
+Commit: Default to no commit for slice task toggle (both forms); add --commit/-c opt-in aligned with kira move.
+- [ ] T001: Change default to no commit for `slice task toggle <work-item-id> <task-id>` and `slice task current [<work-item-id>] toggle` (update slice_run.go so commit only when flag set).
+- [ ] T002: Replace `--no-commit` with `--commit`/`-c` (default false) on sliceTaskToggleCmd and sliceTaskCurrentCmd; when set, stage work item file and commit with same message style (e.g. "Toggle task T001 to done").
+- [ ] T003: Add/update unit tests for toggle with and without --commit; ensure no commit by default, commit when --commit.
+
+### slice commit current (with validation)
+Commit: Add kira slice commit current: resolve work item from context, validate current slice has no open tasks, then generate and commit.
+- [ ] T004: Add subcommand `slice commit current [<work-item-id>]`; resolve work item from args or doing folder (same as other slice commit commands).
+- [ ] T005: Before committing: validate the slice to be committed (e.g. "previous" — the one just completed) has no open tasks; if any open tasks, fail with clear message listing task IDs.
+- [ ] T006: On success: run generate for that slice and execute `git commit -F -` (reuse sliceCommitWorkItem or equivalent); ensure git availability and single work-item staging checks consistent with move/generate.
+- [ ] T007: Add tests for `slice commit current`: success when current slice complete; failure when open tasks remain; work-item resolution from doing folder and explicit id.
+
+### Documentation
+Commit: Update AGENTS.md, kira-plan-and-build, and any loop docs to describe toggle no-commit default and slice commit current.
+- [ ] T008: Update AGENTS.md: recommend loop with toggle (no commit by default), optional `kira slice commit generate | git commit -F -` or `kira slice commit current`; document `--commit`/`-c` for toggle.
+- [ ] T009: Update .cursor/commands/kira-plan-and-build.md and internal/cursorassets/commands/kira-plan-and-build.md: toggle then commit via generate or `slice commit current`.
+- [ ] T010: Update any PRD/spec that describes the slice workflow to mention default no-commit on toggle and `kira slice commit current`.
+
