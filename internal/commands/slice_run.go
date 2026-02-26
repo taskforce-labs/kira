@@ -370,9 +370,13 @@ func runSliceTaskToggle(cmd *cobra.Command, args []string) error {
 		stateOut = successStyle(state)
 	}
 	fmt.Printf("Task %s set to %s in work item %s\n", taskIDStyle(taskID), stateOut, taskIDStyle(workItemID))
-	noCommit, _ := cmd.Flags().GetBool("no-commit")
-	if !noCommit {
-		msg := fmt.Sprintf("Toggle task %s in %s", taskID, workItemID)
+	doCommit, _ := cmd.Flags().GetBool("commit")
+	if doCommit {
+		state := taskStateOpen
+		if slices[si].Tasks[ti].Done {
+			state = defaultReleaseStatus
+		}
+		msg := fmt.Sprintf("Toggle task %s to %s", taskID, state)
 		if err := sliceCommitWorkItem(path, msg, cfg); err != nil {
 			return err
 		}
@@ -761,8 +765,8 @@ func runSliceTaskCurrentToggle(cmd *cobra.Command, cfg *config.Config, workItemI
 		stateOut = successStyle(state)
 	}
 	fmt.Printf("Task %s set to %s\n", taskIDStyle(t.ID), stateOut)
-	noCommit, _ := cmd.Flags().GetBool("no-commit")
-	if !noCommit {
+	doCommit, _ := cmd.Flags().GetBool("commit")
+	if doCommit {
 		msg := fmt.Sprintf("Toggle task %s to %s", t.ID, state)
 		if err := sliceCommitWorkItem(path, msg, cfg); err != nil {
 			return err

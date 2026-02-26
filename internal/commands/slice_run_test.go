@@ -2,6 +2,7 @@ package commands
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -556,6 +557,131 @@ kind: prd
 		err := rootCmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no work item in doing folder")
+	})
+}
+
+func TestSliceTaskToggleCommitBehavior(t *testing.T) {
+	workItemToggle := `---
+id: 001
+title: Toggle test
+status: doing
+kind: prd
+---
+# Toggle test
+## Slices
+### S1
+- [ ] T001: First
+- [ ] T002: Second
+`
+	t.Run("slice task toggle without --commit updates file but does not commit", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		path := ".work/2_doing/001-toggle-test.prd.md"
+		require.NoError(t, os.WriteFile(path, []byte(workItemToggle), 0o600))
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
+		require.NoError(t, exec.Command("git", "add", path).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+
+		rootCmd.SetArgs([]string{"slice", "task", "toggle", "001", "T001"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+
+		cfg, _ := config.LoadConfig()
+		_, slices, err := loadSlicesFromFile(path, cfg)
+		require.NoError(t, err)
+		require.True(t, slices[0].Tasks[0].Done, "T001 should be done")
+
+		out, err := exec.Command("git", "log", "--oneline", "-1").Output()
+		require.NoError(t, err)
+		assert.Contains(t, string(out), "Initial", "should not create new commit")
+	})
+
+	t.Run("slice task toggle with --commit updates file and commits", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		path := ".work/2_doing/001-toggle-commit.prd.md"
+		require.NoError(t, os.WriteFile(path, []byte(workItemToggle), 0o600))
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
+		require.NoError(t, exec.Command("git", "add", path).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+
+		rootCmd.SetArgs([]string{"slice", "task", "toggle", "001", "T001", "--commit"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+
+		cfg, _ := config.LoadConfig()
+		_, slices, err := loadSlicesFromFile(path, cfg)
+		require.NoError(t, err)
+		require.True(t, slices[0].Tasks[0].Done)
+
+		out, err := exec.Command("git", "log", "--oneline", "-1").Output()
+		require.NoError(t, err)
+		assert.Contains(t, string(out), "Toggle task T001 to done")
+	})
+
+	t.Run("slice task current toggle without --commit does not commit", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		path := ".work/2_doing/001-current-toggle.prd.md"
+		require.NoError(t, os.WriteFile(path, []byte(workItemToggle), 0o600))
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
+		require.NoError(t, exec.Command("git", "add", path).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+
+		rootCmd.SetArgs([]string{"slice", "task", "current", "001", "toggle"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+
+		cfg, _ := config.LoadConfig()
+		_, slices, err := loadSlicesFromFile(path, cfg)
+		require.NoError(t, err)
+		require.True(t, slices[0].Tasks[0].Done)
+
+		out, err := exec.Command("git", "log", "--oneline", "-1").Output()
+		require.NoError(t, err)
+		assert.Contains(t, string(out), "Initial")
+	})
+
+	t.Run("slice task current toggle with --commit commits", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		path := ".work/2_doing/001-current-commit.prd.md"
+		require.NoError(t, os.WriteFile(path, []byte(workItemToggle), 0o600))
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
+		require.NoError(t, exec.Command("git", "add", path).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+
+		rootCmd.SetArgs([]string{"slice", "task", "current", "001", "toggle", "--commit"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+
+		out, err := exec.Command("git", "log", "--oneline", "-1").Output()
+		require.NoError(t, err)
+		assert.Contains(t, string(out), "Toggle task T001 to done")
 	})
 }
 

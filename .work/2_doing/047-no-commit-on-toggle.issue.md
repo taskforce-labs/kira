@@ -60,9 +60,9 @@ Align with `kira move`: move uses `--commit` / `-c` (default false). Slice toggl
 
 ### Toggle default no-commit and --commit flag
 Commit: Default to no commit for slice task toggle (both forms); add --commit/-c opt-in aligned with kira move.
-- [ ] T001: Change default to no commit for `slice task toggle <work-item-id> <task-id>` and `slice task current [<work-item-id>] toggle` (update slice_run.go so commit only when flag set).
-- [ ] T002: Replace `--no-commit` with `--commit`/`-c` (default false) on sliceTaskToggleCmd and sliceTaskCurrentCmd; when set, stage work item file and commit with same message style (e.g. "Toggle task T001 to done").
-- [ ] T003: Add/update unit tests for toggle with and without --commit; ensure no commit by default, commit when --commit.
+- [x] T001: Change default to no commit for `slice task toggle <work-item-id> <task-id>` and `slice task current [<work-item-id>] toggle` (update slice_run.go so commit only when flag set).
+- [x] T002: Replace `--no-commit` with `--commit`/`-c` (default false) on sliceTaskToggleCmd and sliceTaskCurrentCmd; when set, stage work item file and commit with same message style (e.g. "Toggle task T001 to done").
+- [x] T003: Add/update unit tests for toggle with and without --commit; ensure no commit by default, commit when --commit.
 
 ### slice commit current (with validation)
 Commit: Add kira slice commit current: resolve work item from context, validate current slice has no open tasks, then generate and commit.
