@@ -959,7 +959,7 @@ func TestPushBranch(t *testing.T) {
 		cmd.Dir = tmpDir
 		require.NoError(t, cmd.Run())
 		// pushBranch with dryRun true should not fail (no actual push)
-		err := pushBranch("origin", "main", tmpDir, true)
+		err := pushBranch("origin", "main", tmpDir, true, false)
 		assert.NoError(t, err)
 	})
 
@@ -978,10 +978,85 @@ func TestPushBranch(t *testing.T) {
 		cmd.Dir = tmpDir
 		require.NoError(t, cmd.Run())
 
-		err := pushBranch("origin", "main", tmpDir, false)
+		err := pushBranch("origin", "main", tmpDir, false, false)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to push branch")
 		assert.Contains(t, err.Error(), "KIRA_GITHUB_TOKEN")
+	})
+
+	t.Run("setUpstream true sets branch upstream when push succeeds", func(t *testing.T) {
+		// Use a local bare repo as remote so push succeeds without network.
+		tmpDir := t.TempDir()
+		remoteDir := filepath.Join(tmpDir, "remote")
+		localDir := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.MkdirAll(remoteDir, 0o700))
+		require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+		cmd := exec.Command("git", "init", "--bare")
+		cmd.Dir = remoteDir
+		require.NoError(t, cmd.Run())
+
+		cmd = exec.Command("git", "init")
+		cmd.Dir = localDir
+		require.NoError(t, cmd.Run())
+		gitConfigUser(t, localDir)
+		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+		cmd = exec.Command("git", "remote", "add", "origin", remoteDir)
+		cmd.Dir = localDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(localDir, "f"), []byte("x"), 0o600))
+		cmd = exec.Command("git", "add", "f")
+		cmd.Dir = localDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = localDir
+		require.NoError(t, cmd.Run())
+
+		err := pushBranch("origin", "main", localDir, false, true)
+		require.NoError(t, err)
+
+		cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+		cmd.Dir = localDir
+		out, err := cmd.Output()
+		require.NoError(t, err)
+		assert.Equal(t, "origin/main", strings.TrimSpace(string(out)))
+	})
+
+	t.Run("dry run with setUpstream true does not set upstream", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		remoteDir := filepath.Join(tmpDir, "remote")
+		localDir := filepath.Join(tmpDir, "local")
+		require.NoError(t, os.MkdirAll(remoteDir, 0o700))
+		require.NoError(t, os.MkdirAll(localDir, 0o700))
+
+		cmd := exec.Command("git", "init", "--bare")
+		cmd.Dir = remoteDir
+		require.NoError(t, cmd.Run())
+
+		cmd = exec.Command("git", "init")
+		cmd.Dir = localDir
+		require.NoError(t, cmd.Run())
+		gitConfigUser(t, localDir)
+		// #nosec G204 - remoteDir is from t.TempDir(), safe for test use
+		cmd = exec.Command("git", "remote", "add", "origin", remoteDir)
+		cmd.Dir = localDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(localDir, "f"), []byte("x"), 0o600))
+		cmd = exec.Command("git", "add", "f")
+		cmd.Dir = localDir
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = localDir
+		require.NoError(t, cmd.Run())
+
+		err := pushBranch("origin", "main", localDir, true, true)
+		require.NoError(t, err)
+
+		// No push happened, so upstream should not be set.
+		cmd = exec.Command("git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+		cmd.Dir = localDir
+		_, err = cmd.Output()
+		require.Error(t, err)
 	})
 }
 

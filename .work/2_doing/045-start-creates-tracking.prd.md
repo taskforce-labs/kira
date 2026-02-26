@@ -39,8 +39,8 @@ when kira start runs and create the branch it should setup tracking so that you 
 
 ### PushBranch sets upstream when requested
 Commit: Add setUpstream parameter to pushBranch and use `git push -u` when true; add unit tests.
-- [ ] T001: Add setUpstream bool parameter to pushBranch; run `git push -u <remote> <branch>` when true (otherwise existing `git push` behavior)
-- [ ] T002: Add unit test(s) that after push with setUpstream true, branch has upstream set (e.g. `git rev-parse --abbrev-ref --symbolic-full-name @{u}` in worktree)
+- [x] T001: Add setUpstream bool parameter to pushBranch; run `git push -u <remote> <branch>` when true (otherwise existing `git push` behavior)
+- [x] T002: Add unit test(s) that after push with setUpstream true, branch has upstream set (e.g. `git rev-parse --abbrev-ref --symbolic-full-name @{u}` in worktree)
 
 ### Standalone start sets tracking
 Commit: Wire pushBranchStandalone to set upstream when pushing.

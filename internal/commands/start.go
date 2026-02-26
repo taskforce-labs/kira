@@ -2275,12 +2275,17 @@ func pushStatusChange(dir, remoteName, branchName string) error {
 }
 
 // pushBranch pushes the branch to the remote from the given directory.
+// When setUpstream is true and not dryRun, runs git push -u to set the branch's upstream.
 // On failure returns an error with a clear message suggesting network, remote access, or authentication.
-func pushBranch(remoteName, branchName, dir string, dryRun bool) error {
+func pushBranch(remoteName, branchName, dir string, dryRun, setUpstream bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
 	defer cancel()
 
-	_, err := executeCommand(ctx, "git", []string{"push", remoteName, branchName}, dir, dryRun)
+	args := []string{"push", remoteName, branchName}
+	if setUpstream && !dryRun {
+		args = []string{"push", "-u", remoteName, branchName}
+	}
+	_, err := executeCommand(ctx, "git", args, dir, dryRun)
 	if err != nil {
 		return fmt.Errorf("failed to push branch %s to %s: %w. Check network connectivity, remote repository access, or authentication (e.g. KIRA_GITHUB_TOKEN)", branchName, remoteName, err)
 	}
@@ -2421,7 +2426,7 @@ func pushBranchStandalone(ctx *StartContext, worktreePath, baseURL, trunkBranch 
 	if err := ensureBranchHasCommitForDraftPR(worktreePath, remoteName, trunkBranch, ctx.WorkItemID); err != nil {
 		return err
 	}
-	if err := pushBranch(remoteName, ctx.BranchName, worktreePath, false); err != nil {
+	if err := pushBranch(remoteName, ctx.BranchName, worktreePath, false, false); err != nil {
 		return err
 	}
 	fmt.Printf("Pushed branch %s to %s\n", ctx.BranchName, remoteName)
@@ -2450,7 +2455,7 @@ func pushBranchesPolyrepo(ctx *StartContext, baseURL, trunkBranch string) error 
 		if err := ensureBranchHasCommitForDraftPR(mainWorktreePath, remoteName, trunkBranch, ctx.WorkItemID); err != nil {
 			return err
 		}
-		if err := pushBranch(remoteName, ctx.BranchName, mainWorktreePath, false); err != nil {
+		if err := pushBranch(remoteName, ctx.BranchName, mainWorktreePath, false, false); err != nil {
 			return err
 		}
 		fmt.Printf("Pushed branch %s to %s (main)\n", ctx.BranchName, remoteName)
@@ -2492,7 +2497,7 @@ func pushProjectBranchIfNeeded(ctx *StartContext, p PolyrepoProject, worktreePat
 	if err := ensureBranchHasCommitForDraftPR(wp, p.Remote, trunkBranch, ctx.WorkItemID); err != nil {
 		return err
 	}
-	if err := pushBranch(p.Remote, ctx.BranchName, wp, false); err != nil {
+	if err := pushBranch(p.Remote, ctx.BranchName, wp, false, false); err != nil {
 		return err
 	}
 	fmt.Printf("Pushed branch %s to %s (%s)\n", ctx.BranchName, p.Remote, p.Name)
