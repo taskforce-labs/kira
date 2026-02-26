@@ -1,7 +1,7 @@
 ---
 id: 047
 title: no commit on toggle
-status: todo
+status: doing
 kind: issue
 assigned:
 estimate: 0
