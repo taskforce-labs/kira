@@ -764,6 +764,78 @@ func TestCheckUncommittedChanges(t *testing.T) {
 	})
 }
 
+func TestValidateAndPullLatestWithUncommitted(t *testing.T) {
+	cfg := &config.Config{
+		StatusFolders: map[string]string{
+			"backlog": "0_backlog",
+			"todo":    "1_todo",
+			"doing":   "2_doing",
+			"review":  "3_review",
+			"done":    "4_done",
+		},
+	}
+	t.Run("stash pull pop restores uncommitted changes", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		gitConfigUser(t, tmpDir)
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		cmd = exec.Command("git", "add", "f")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "dirty.txt"), []byte("dirty"), 0o600))
+
+		ctx := &StartContext{
+			Config:   cfg,
+			Flags:    StartFlags{DryRun: false, NoPopStash: false},
+			Behavior: WorkspaceBehaviorStandalone,
+		}
+		err := validateAndPullLatest(ctx, tmpDir, "main", "origin")
+		require.NoError(t, err)
+		hasUncommitted, err := HasUncommitted(tmpDir, false)
+		require.NoError(t, err)
+		assert.True(t, hasUncommitted, "uncommitted changes should be restored after stash/pull/pop")
+	})
+
+	t.Run("no-pop-stash leaves stash in place", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		cmd := exec.Command("git", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		gitConfigUser(t, tmpDir)
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "f"), []byte("x"), 0o600))
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		cmd = exec.Command("git", "add", "f")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = tmpDir
+		require.NoError(t, cmd.Run())
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "dirty.txt"), []byte("dirty"), 0o600))
+
+		ctx := &StartContext{
+			Config:   cfg,
+			Flags:    StartFlags{DryRun: false, NoPopStash: true},
+			Behavior: WorkspaceBehaviorStandalone,
+		}
+		err := validateAndPullLatest(ctx, tmpDir, "main", "origin")
+		require.NoError(t, err)
+		// #nosec G204 - tmpDir from t.TempDir(), safe for test
+		out, err := exec.Command("git", "-C", tmpDir, "stash", "list").Output()
+		require.NoError(t, err)
+		assert.Contains(t, string(out), "kira start")
+	})
+}
+
 func TestBranchHasCommitsAheadOf(t *testing.T) {
 	t.Run("returns false when branch has no commits ahead of base", func(t *testing.T) {
 		tmpDir := t.TempDir()
