@@ -1,10 +1,14 @@
 ---
 id: 037
 title: stash pop branch commands
-status: review
+status: done
 kind: prd
-assigned:
-created: 2026-02-02
+created: 2026-02-02T00:00:00Z
+assigned: null
+merge_commit_sha: 9cebf1e3d644c40ceb4be4665094487270830f32
+merge_strategy: rebase
+merged_at: "2026-02-26T04:16:21Z"
+pr_number: 24
 tags: []
 ---
 
