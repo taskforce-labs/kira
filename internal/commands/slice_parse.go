@@ -15,8 +15,8 @@ const (
 )
 
 var (
-	taskLineRegex    = regexp.MustCompile(`^-\s+\[([ xX])\]\s+(T\d+):\s*(.*)$`)
-	taskLineOpenDone = regexp.MustCompile(`^-\s+\[(open|done)\]\s+(T\d+):\s*(.*)$`)
+	taskLineRegex    = regexp.MustCompile(`^-\s+\[([ xX])\]\s+(T[0-9A-Za-z]+):\s*(.*)$`)
+	taskLineOpenDone = regexp.MustCompile(`^-\s+\[(open|done)\]\s+(T[0-9A-Za-z]+):\s*(.*)$`)
 	taskIDNumRegex   = regexp.MustCompile(`T(\d+)`)
 	commitLineRegex  = regexp.MustCompile(`^Commit:\s*(.*)$`)
 	notesLineRegex   = regexp.MustCompile(`^\s+-\s+Notes:\s*(.*)$`)

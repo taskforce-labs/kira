@@ -1017,10 +1017,15 @@ func formatGeneratedCommitMessage(path string, cfg *config.Config, workItemID, s
 	if err != nil {
 		return "", err
 	}
-	fullMsg := generateSliceCommitMessage(path, cfg, workItemID)
-	oneLine := fullMsg
-	if idx := strings.Index(fullMsg, "\n"); idx >= 0 {
-		oneLine = fullMsg[:idx]
+	var oneLine string
+	if chosen.CommitSummary != "" {
+		oneLine = chosen.CommitSummary
+	} else {
+		fullMsg := generateSliceCommitMessage(path, cfg, workItemID)
+		oneLine = fullMsg
+		if idx := strings.Index(fullMsg, "\n"); idx >= 0 {
+			oneLine = fullMsg[:idx]
+		}
 	}
 	_, _, title, _, _, _ := extractWorkItemMetadata(path, cfg)
 	slug := workItemID + "-" + kebabCase(title)
