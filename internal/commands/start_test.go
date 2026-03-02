@@ -1012,6 +1012,21 @@ func TestPushBranch(t *testing.T) {
 		cmd.Dir = localDir
 		require.NoError(t, cmd.Run())
 
+		// Diagnostics: confirm default branch after init (run with -v to see). CI often has older Git -> "master"; local often "main".
+		if vOut, err := exec.Command("git", "version").Output(); err == nil {
+			t.Logf("DIAG_GIT_VERSION=%s", strings.TrimSpace(string(vOut)))
+		}
+		cmd = exec.Command("git", "branch", "--show-current")
+		cmd.Dir = localDir
+		if bOut, err := cmd.Output(); err == nil {
+			t.Logf("DIAG_BRANCH_AFTER_INIT=%s", strings.TrimSpace(string(bOut)))
+		}
+
+		// Ensure branch is named "main" (CI may use older Git where default is "master")
+		cmd = exec.Command("git", "branch", "-M", "main")
+		cmd.Dir = localDir
+		require.NoError(t, cmd.Run())
+
 		err := pushBranch("origin", "main", localDir, false, true)
 		require.NoError(t, err)
 
@@ -1046,6 +1061,11 @@ func TestPushBranch(t *testing.T) {
 		cmd.Dir = localDir
 		require.NoError(t, cmd.Run())
 		cmd = exec.Command("git", "commit", "-m", "init")
+		cmd.Dir = localDir
+		require.NoError(t, cmd.Run())
+
+		// Ensure branch is named "main" (CI may use older Git where default is "master")
+		cmd = exec.Command("git", "branch", "-M", "main")
 		cmd.Dir = localDir
 		require.NoError(t, cmd.Run())
 
