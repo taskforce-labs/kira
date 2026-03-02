@@ -3361,7 +3361,14 @@ invalid: [unclosed bracket
 		// Verify first file was updated
 		updatedContent1, err := os.ReadFile(testFilePath1)
 		require.NoError(t, err)
-		assert.Contains(t, string(updatedContent1), "assigned: user@example.com")
+		updatedStr := string(updatedContent1)
+		t.Logf("DIAG_UPDATED_FILE_1_CONTAINS_ASSIGNED=%v DIAG_UPDATED_FILE_1_LEN=%d", strings.Contains(updatedStr, "assigned: user@example.com"), len(updatedStr))
+		if len(updatedStr) <= 200 {
+			t.Logf("DIAG_UPDATED_FILE_1_CONTENT=%q", updatedStr)
+		} else {
+			t.Logf("DIAG_UPDATED_FILE_1_PREVIEW=%q", updatedStr[:200])
+		}
+		assert.Contains(t, updatedStr, "assigned: user@example.com")
 	})
 
 	t.Run("validates all work items before processing in dry-run mode", func(t *testing.T) {
