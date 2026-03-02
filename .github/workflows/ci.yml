@@ -36,7 +36,7 @@ jobs:
         run: make install-tools
 
       - name: Run checks (includes linting, tests, gosec, and govulncheck)
-        run: make check
+        run: make check verbose
 
       - name: Run tests with coverage
         run: make test-coverage
