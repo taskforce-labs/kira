@@ -151,11 +151,15 @@ func findWorkItemFile(workItemID string, cfg *config.Config) (string, error) {
 }
 
 // resolveSliceWorkItem resolves the work item path for slice commands.
-// When workItemID is non-empty, finds the work item by ID via findWorkItemFile.
+// When workItemID is "current", resolves from branch (worktree) or doing folder via resolveSliceWorkItemFromContext.
+// When workItemID is another non-empty value, finds the work item by ID via findWorkItemFile.
 // When workItemID is empty, resolves from the doing folder with strict semantics.
 // Optional commandName (e.g. "slice lint") is used in error messages so users see which command failed.
 func resolveSliceWorkItem(workItemID string, cfg *config.Config, commandName ...string) (string, error) {
 	cmdPrefix := sliceWorkItemCmdPrefix(commandName)
+	if workItemID == "current" {
+		return resolveSliceWorkItemFromContext(cfg, commandName...)
+	}
 	if workItemID != "" {
 		return findWorkItemFile(workItemID, cfg)
 	}
@@ -180,6 +184,26 @@ func resolveSliceWorkItem(workItemID string, cfg *config.Config, commandName ...
 		return "", fmt.Errorf("%smultiple work items in doing folder; specify one: %s (e.g. %s)", cmdPrefix, cmdHint, strings.Join(ids, ", "))
 	}
 	return filepath.Join(doingPath, workItemFiles[0]), nil
+}
+
+// resolveSliceWorkItemFromContext resolves the work item path from branch or worktree, then doing folder.
+// Tries: (1) current git branch name in kira format (id-kebab-title) -> find work item by ID; (2) single work item in doing folder.
+// Used when the user passes "current" so they don't need to pass work-item-id when in a worktree or on a feature branch.
+func resolveSliceWorkItemFromContext(cfg *config.Config, commandName ...string) (string, error) {
+	repoRoot, err := getRepoRoot()
+	if err == nil {
+		branch, branchErr := getCurrentBranch(repoRoot)
+		if branchErr == nil {
+			id, parseErr := parseWorkItemIDFromBranch(branch, cfg)
+			if parseErr == nil {
+				path, findErr := findWorkItemFile(id, cfg)
+				if findErr == nil {
+					return path, nil
+				}
+			}
+		}
+	}
+	return resolveSliceWorkItem("", cfg, commandName...)
 }
 
 func sliceWorkItemCmdPrefix(commandName []string) string {
