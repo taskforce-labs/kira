@@ -1,12 +1,16 @@
 ---
 id: 045
 title: start creates tracking
-status: review
+status: done
 kind: prd
-assigned:
+created: 2026-02-25T00:00:00Z
+assigned: null
+due: 2026-02-25T00:00:00Z
 estimate: 0
-created: 2026-02-25
-due: 2026-02-25
+merge_commit_sha: d23c3a722c6c812362677d1c64704c9a5013197c
+merge_strategy: rebase
+merged_at: "2026-03-02T02:32:32Z"
+pr_number: 25
 tags: []
 ---
 
