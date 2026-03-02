@@ -11,9 +11,13 @@ build:
 	$(eval GIT_DIRTY := $(shell test -n "$(shell git status --porcelain 2>/dev/null)" && echo dirty || echo clean))
 	go build -ldflags "-X 'kira/internal/commands.Version=$(GIT_TAG)' -X 'kira/internal/commands.Commit=$(GIT_COMMIT)' -X 'kira/internal/commands.BuildDate=$(BUILD_DATE)' -X 'kira/internal/commands.Dirty=$(GIT_DIRTY)'" -o kira cmd/kira/main.go
 
-# Run tests verbose
+# Run tests (use "make check verbose" or "make test verbose" for verbose)
 test:
-	go test -v ./...
+	go test $(if $(filter verbose,$(MAKECMDGOALS)),-v,) ./...
+
+# Dummy target so "make check verbose" passes -v to go test
+verbose:
+	@true
 
 # Run tests with coverage
 test-coverage:
