@@ -1,7 +1,7 @@
 ---
 id: 016
 title: roadmap-planning
-status: todo
+status: doing
 kind: prd
 assigned:
 estimate: 0
