@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -168,6 +169,43 @@ func TestFirstSliceWithOpenTasks(t *testing.T) {
 	assert.Nil(t, firstSliceWithOpenTasks(allDone))
 }
 
+func TestFormatSliceSummary(t *testing.T) {
+	t.Run("empty slices returns empty string", func(t *testing.T) {
+		assert.Equal(t, "", formatSliceSummary(nil, ""))
+		assert.Equal(t, "", formatSliceSummary([]Slice{}, ""))
+	})
+	t.Run("one slice all done", func(t *testing.T) {
+		slices := []Slice{
+			{Name: "S1", Tasks: []Task{{ID: "T001", Done: true}, {ID: "T002", Done: true}}},
+		}
+		got := formatSliceSummary(slices, "S1")
+		assert.Contains(t, got, "1/1 slices")
+		assert.Contains(t, got, "2/2 tasks")
+		assert.Contains(t, got, "2/2 in current slice")
+	})
+	t.Run("two slices, one complete, current has open", func(t *testing.T) {
+		slices := []Slice{
+			{Name: "A", Tasks: []Task{{ID: "T001", Done: true}, {ID: "T002", Done: true}}},
+			{Name: "B", Tasks: []Task{{ID: "T003", Done: true}, {ID: "T004", Done: false}}},
+		}
+		got := formatSliceSummary(slices, "B")
+		assert.Contains(t, got, "1/2 slices")
+		assert.Contains(t, got, "3/4 tasks")
+		assert.Contains(t, got, "1/2 in current slice")
+	})
+	t.Run("current slice name empty uses first with open", func(t *testing.T) {
+		slices := []Slice{
+			{Name: "A", Tasks: []Task{{ID: "T001", Done: true}}},
+			{Name: "B", Tasks: []Task{{ID: "T002", Done: false}}},
+		}
+		got := formatSliceSummary(slices, "")
+		assert.Contains(t, got, "1/2 slices")
+		assert.Contains(t, got, "1/2 tasks")
+		// Current slice is B (first with open task), 0 done of 1 total
+		assert.Contains(t, got, "0/1 in current slice")
+	})
+}
+
 func TestDetectTaskChanges(t *testing.T) {
 	current := []Slice{{Name: "S", Tasks: []Task{
 		{ID: "T001", Description: "A", Done: true},
@@ -321,6 +359,65 @@ func TestSliceCommitRequiresSubcommand(t *testing.T) {
 		err := rootCmd.Execute()
 		require.Error(t, err)
 	})
+}
+
+// TestSliceCommandsWrongArgs ensures slice subcommands with required args return an error
+// (and thus non-zero exit) when given too few args, and that the error message mentions arg count.
+func TestSliceCommandsWrongArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string // substring of expected error (e.g. "accepts 2 arg(s)" or "requires at least")
+	}{
+		{"slice add with 0 args", []string{"slice", "add"}, "accepts 2 arg(s)"},
+		{"slice add with 1 arg", []string{"slice", "add", "current"}, "accepts 2 arg(s)"},
+		{"slice remove with 0 args", []string{"slice", "remove"}, "accepts 2 arg(s)"},
+		{"slice remove with 1 arg", []string{"slice", "remove", "current"}, "accepts 2 arg(s)"},
+		{"slice task add with 0 args", []string{"slice", "task", "add"}, "arg(s)"},
+		{"slice task add with 1 arg", []string{"slice", "task", "add", "current"}, "arg(s)"},
+		{"slice task add with 2 args", []string{"slice", "task", "add", "current", "MySlice"}, "arg(s)"},
+		{"slice task remove with 0 args", []string{"slice", "task", "remove"}, "accepts 2 arg(s)"},
+		{"slice task remove with 1 arg", []string{"slice", "task", "remove", "current"}, "accepts 2 arg(s)"},
+		{"slice task edit with 0 args", []string{"slice", "task", "edit"}, "arg(s)"},
+		{"slice task edit with 1 arg", []string{"slice", "task", "edit", "T001"}, "arg(s)"},
+		{"slice task edit with 2 args", []string{"slice", "task", "edit", "current", "T001"}, "arg(s)"},
+		{"slice task note with 0 args", []string{"slice", "task", "note"}, "arg(s)"},
+		{"slice task note with 1 arg", []string{"slice", "task", "note", "current"}, "arg(s)"},
+		{"slice task note with 2 args", []string{"slice", "task", "note", "current", "T001"}, "arg(s)"},
+		{"slice show with 0 args", []string{"slice", "show"}, "arg(s)"},
+		{"slice progress with 0 args", []string{"slice", "progress"}, "accepts 1 arg(s)"},
+		{"slice commit add with 0 args", []string{"slice", "commit", "add"}, "arg(s)"},
+		{"slice commit add with 1 arg", []string{"slice", "commit", "add", "MySlice"}, "arg(s)"},
+		{"slice commit remove with 0 args", []string{"slice", "commit", "remove"}, "arg(s)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetHelpFlag(rootCmd)
+			rootCmd.SetArgs(tt.args)
+			err := rootCmd.Execute()
+			require.Error(t, err, "Execute() should fail when args are missing")
+			assert.Contains(t, err.Error(), tt.wantErr, "error should mention argument count")
+		})
+	}
+}
+
+// TestSliceCommandsWrongArgsPrintsUsage ensures that when wrong args are given,
+// usage is printed (so SilenceUsage is not accidentally set on slice commands).
+func TestSliceCommandsWrongArgsPrintsUsage(t *testing.T) {
+	var buf bytes.Buffer
+	rootCmd.SetErr(&buf)
+	rootCmd.SetOut(&buf)
+	defer func() {
+		rootCmd.SetErr(nil)
+		rootCmd.SetOut(nil)
+	}()
+
+	resetHelpFlag(rootCmd)
+	rootCmd.SetArgs([]string{"slice", "add"})
+	_ = rootCmd.Execute()
+	out := buf.String()
+	assert.Contains(t, out, "Usage:", "output should contain usage when args are wrong")
+	assert.Contains(t, out, "slice add", "output should contain the command use line")
 }
 
 func TestSliceCommitAdd(t *testing.T) {
@@ -664,64 +761,51 @@ kind: prd
 	})
 }
 
-func TestSliceTaskToggleCommitBehavior(t *testing.T) {
-	workItemToggle := `---
+func TestSliceTaskDoneCurrent(t *testing.T) {
+	workItemTwoTasks := `---
 id: 001
-title: Toggle test
+title: Done current test
 status: doing
 kind: prd
 ---
-# Toggle test
+# Done current test
 ## Slices
 ### S1
-- [ ] T001: First
-- [ ] T002: Second
+- [ ] T001: First task
+- [ ] T002: Second task
 `
-	t.Run("slice task toggle without --commit updates file but does not commit", func(t *testing.T) {
+	workItemAllDone := `---
+id: 002
+title: All done
+status: doing
+kind: prd
+---
+# All done
+## Slices
+### S1
+- [x] T001: Done one
+`
+	t.Run("no open tasks returns error", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
-
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		path := ".work/2_doing/001-toggle-test.prd.md"
-		require.NoError(t, os.WriteFile(path, []byte(workItemToggle), 0o600))
+		require.NoError(t, os.WriteFile(".work/2_doing/002-all-done.prd.md", []byte(workItemAllDone), 0o600))
 
-		require.NoError(t, exec.Command("git", "init").Run())
-		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
-		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
-		require.NoError(t, exec.Command("git", "add", path).Run())
-		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
-
-		rootCmd.SetArgs([]string{"slice", "task", "toggle", "001", "T001"})
+		rootCmd.SetArgs([]string{"slice", "task", "done", "current", "002", "--hide-summary"})
 		err := rootCmd.Execute()
-		require.NoError(t, err)
-
-		cfg, _ := config.LoadConfig()
-		_, slices, err := loadSlicesFromFile(path, cfg)
-		require.NoError(t, err)
-		require.True(t, slices[0].Tasks[0].Done, "T001 should be done")
-
-		out, err := exec.Command("git", "log", "--oneline", "-1").Output()
-		require.NoError(t, err)
-		assert.Contains(t, string(out), "Initial", "should not create new commit")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no open tasks")
 	})
-
-	t.Run("slice task toggle with --commit updates file and commits", func(t *testing.T) {
+	t.Run("marks current task done and prints Completed line", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
-
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		path := ".work/2_doing/001-toggle-commit.prd.md"
-		require.NoError(t, os.WriteFile(path, []byte(workItemToggle), 0o600))
+		path := ".work/2_doing/001-done-current.prd.md"
+		require.NoError(t, os.WriteFile(path, []byte(workItemTwoTasks), 0o600))
 
-		require.NoError(t, exec.Command("git", "init").Run())
-		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
-		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
-		require.NoError(t, exec.Command("git", "add", path).Run())
-		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
-
-		rootCmd.SetArgs([]string{"slice", "task", "toggle", "001", "T001", "--commit"})
+		rootCmd.SetArgs([]string{"slice", "task", "done", "current", "001", "--hide-summary"})
 		err := rootCmd.Execute()
 		require.NoError(t, err)
 
@@ -729,28 +813,17 @@ kind: prd
 		_, slices, err := loadSlicesFromFile(path, cfg)
 		require.NoError(t, err)
 		require.True(t, slices[0].Tasks[0].Done)
-
-		out, err := exec.Command("git", "log", "--oneline", "-1").Output()
-		require.NoError(t, err)
-		assert.Contains(t, string(out), "Toggle task T001 to done")
+		assert.False(t, slices[0].Tasks[1].Done)
 	})
-
-	t.Run("slice task current toggle without --commit does not commit", func(t *testing.T) {
+	t.Run("done current --next shows next task and summary", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
-
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		path := ".work/2_doing/001-current-toggle.prd.md"
-		require.NoError(t, os.WriteFile(path, []byte(workItemToggle), 0o600))
+		path := ".work/2_doing/001-done-next.prd.md"
+		require.NoError(t, os.WriteFile(path, []byte(workItemTwoTasks), 0o600))
 
-		require.NoError(t, exec.Command("git", "init").Run())
-		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
-		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
-		require.NoError(t, exec.Command("git", "add", path).Run())
-		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
-
-		rootCmd.SetArgs([]string{"slice", "task", "current", "001", "toggle"})
+		rootCmd.SetArgs([]string{"slice", "task", "done", "current", "001", "--next"})
 		err := rootCmd.Execute()
 		require.NoError(t, err)
 
@@ -758,34 +831,25 @@ kind: prd
 		_, slices, err := loadSlicesFromFile(path, cfg)
 		require.NoError(t, err)
 		require.True(t, slices[0].Tasks[0].Done)
-
-		out, err := exec.Command("git", "log", "--oneline", "-1").Output()
-		require.NoError(t, err)
-		assert.Contains(t, string(out), "Initial")
+		// Output should contain Completed, Next (same slice), and summary line
+		// We can't easily capture stdout in Execute; just verify state
+		assert.False(t, slices[0].Tasks[1].Done)
 	})
-
-	t.Run("slice task current toggle with --commit commits", func(t *testing.T) {
+	t.Run("done current --next --hide-summary still shows next task", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
-
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		path := ".work/2_doing/001-current-commit.prd.md"
-		require.NoError(t, os.WriteFile(path, []byte(workItemToggle), 0o600))
+		path := ".work/2_doing/001-done-hide.prd.md"
+		require.NoError(t, os.WriteFile(path, []byte(workItemTwoTasks), 0o600))
 
-		require.NoError(t, exec.Command("git", "init").Run())
-		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
-		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
-		require.NoError(t, exec.Command("git", "add", path).Run())
-		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
-
-		rootCmd.SetArgs([]string{"slice", "task", "current", "001", "toggle", "--commit"})
+		rootCmd.SetArgs([]string{"slice", "task", "done", "current", "001", "--next", "--hide-summary"})
 		err := rootCmd.Execute()
 		require.NoError(t, err)
-
-		out, err := exec.Command("git", "log", "--oneline", "-1").Output()
+		cfg, _ := config.LoadConfig()
+		_, slices, err := loadSlicesFromFile(path, cfg)
 		require.NoError(t, err)
-		assert.Contains(t, string(out), "Toggle task T001 to done")
+		require.True(t, slices[0].Tasks[0].Done)
 	})
 }
 

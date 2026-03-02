@@ -30,7 +30,7 @@ Commit: <Summary of the slice and tasks>
    - Add tasks per slice; order by dependency; keep tasks actionable and testable.
 
 3. **Validate**
-   - Run `kira slice lint [work-item-id]` to check the format is correct. Fix any reported errors and re-run until clean.
+   - Run `kira slice lint [current | <work-item-id>]` to check the format is correct. Fix any reported errors and re-run until clean.
 
 ## Output
 
