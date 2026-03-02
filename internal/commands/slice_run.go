@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	sliceLintOutputJSON = "json"
-	taskStateOpen       = "open"
+	sliceLintOutputJSON  = "json"
+	taskStateOpen        = "open"
+	sliceSelectorCurrent = "current"
 )
 
 // PrintSliceSummaryIfPresent prints a one-line slice/task summary if the work item has a Slices section.
@@ -855,7 +856,7 @@ func runSliceCommitGenerate(_ *cobra.Command, args []string) error {
 		return err
 	}
 	workItemID := ""
-	selector := "current"
+	selector := sliceSelectorCurrent
 	if len(args) > 0 {
 		workItemID = args[0]
 	}
@@ -966,7 +967,7 @@ func selectSliceBySelector(slices []Slice, selector string) (*Slice, error) {
 		return nil, fmt.Errorf("no slices in work item")
 	}
 	switch strings.ToLower(selector) {
-	case "current":
+	case sliceSelectorCurrent:
 		s := firstSliceWithOpenTasks(slices)
 		if s == nil {
 			// All tasks done: use last slice so generate still works for the final commit

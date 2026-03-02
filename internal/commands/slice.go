@@ -160,8 +160,9 @@ var sliceCommitRemoveCmd = &cobra.Command{
 }
 
 var sliceCommitGenerateCmd = &cobra.Command{
-	Use:          "generate [<work-item-id>] [current|previous|<slice-name>]",
+	Use:          "generate [current|<work-item-id>] [current|previous|<slice-name>]",
 	Short:        "Print a structured commit message to stdout",
+	Long:         "When first argument is \"current\", work item is resolved from the current branch (worktree) or doing folder.",
 	RunE:         runSliceCommitGenerate,
 	SilenceUsage: true,
 }
