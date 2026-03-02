@@ -28,108 +28,114 @@ var sliceCmd = &cobra.Command{
 	Long: `Manage slices and tasks within work items. Slices group related tasks;
 tasks are individual actionable items with stable IDs (T001, T002, ...).
 Use slice show, progress, current, and task current to view; use slice add/remove
-and slice task add/remove/edit/toggle/note to modify.`,
-	SilenceUsage: true,
+and slice task add/remove/edit/note to modify.`,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceAddCmd = &cobra.Command{
-	Use:          "add <work-item-id> <slice-name>",
+	Use:          "add (current | <work-item-id>) <slice-name>",
 	Short:        "Add a new slice to a work item",
 	Args:         cobra.ExactArgs(2),
 	RunE:         runSliceAdd,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceRemoveCmd = &cobra.Command{
-	Use:          "remove <work-item-id> <slice-name>",
+	Use:          "remove (current | <work-item-id>) <slice-name>",
 	Short:        "Remove a slice and all its tasks",
 	Args:         cobra.ExactArgs(2),
 	RunE:         runSliceRemove,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceTaskCmd = &cobra.Command{
 	Use:          "task",
-	Short:        "Task operations (add, remove, edit, toggle, note, current)",
-	SilenceUsage: true,
+	Short:        "Task operations (add, remove, edit, note, current)",
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceTaskAddCmd = &cobra.Command{
-	Use:          "add <work-item-id> <slice-name> <task-description>",
+	Use:          "add (current | <work-item-id>) <slice-name> <task-description>",
 	Short:        "Add a task to a slice",
 	Args:         cobra.MinimumNArgs(3),
 	RunE:         runSliceTaskAdd,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceTaskRemoveCmd = &cobra.Command{
-	Use:          "remove <work-item-id> <task-id>",
+	Use:          "remove (current | <work-item-id>) <task-id>",
 	Short:        "Remove a task",
 	Args:         cobra.ExactArgs(2),
 	RunE:         runSliceTaskRemove,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceTaskEditCmd = &cobra.Command{
-	Use:          "edit <work-item-id> <task-id> <new-description>",
+	Use:          "edit (current | <work-item-id>) <task-id> <new-description>",
 	Short:        "Update a task's description",
 	Args:         cobra.MinimumNArgs(3),
 	RunE:         runSliceTaskEdit,
-	SilenceUsage: true,
-}
-
-var sliceTaskToggleCmd = &cobra.Command{
-	Use:          "toggle <work-item-id> <task-id>",
-	Short:        "Toggle task state (open ↔ done)",
-	Args:         cobra.ExactArgs(2),
-	RunE:         runSliceTaskToggle,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceTaskNoteCmd = &cobra.Command{
-	Use:          "note <work-item-id> <task-id> <note>",
+	Use:          "note (current | <work-item-id>) <task-id> <note>",
 	Short:        "Add or update task notes",
 	Args:         cobra.MinimumNArgs(3),
 	RunE:         runSliceTaskNote,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceTaskCurrentCmd = &cobra.Command{
-	Use:          "current [<work-item-id>] [<slice-name>|toggle]",
-	Short:        "Show or toggle the current task",
+	Use:          "current [current | <work-item-id>] [<slice-name>]",
+	Short:        "Show the current task",
 	RunE:         runSliceTaskCurrent,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
+}
+
+var sliceTaskDoneCmd = &cobra.Command{
+	Use:          "done",
+	Short:        "Mark current task done",
+	Long:         "Mark the current (first open) task as done. Use 'done current' to resolve from context.",
+	SilenceUsage: false, // show usage when args are wrong
+}
+
+var sliceTaskDoneCurrentCmd = &cobra.Command{
+	Use:          "current [current | <work-item-id>]",
+	Short:        "Mark the current task done and optionally show next",
+	RunE:         runSliceTaskDoneCurrent,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceShowCmd = &cobra.Command{
-	Use:          "show <work-item-id> [slice-name|task-id]",
+	Use:          "show (current | <work-item-id>) [slice-name|task-id]",
 	Short:        "Show slices and tasks",
 	Args:         cobra.MinimumNArgs(1),
 	RunE:         runSliceShow,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceProgressCmd = &cobra.Command{
-	Use:          "progress <work-item-id>",
+	Use:          "progress (current | <work-item-id>)",
 	Short:        "Show progress summary",
 	Args:         cobra.ExactArgs(1),
 	RunE:         runSliceProgress,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceCurrentCmd = &cobra.Command{
-	Use:          "current [<work-item-id>]",
+	Use:          "current [current | <work-item-id>]",
 	Short:        "Show the current slice (first with open tasks)",
 	RunE:         runSliceCurrent,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceLintCmd = &cobra.Command{
-	Use:           "lint [<work-item-id>]",
+	Use:           "lint [current | <work-item-id>]",
 	Short:         "Validate the Slices section",
 	RunE:          runSliceLint,
-	SilenceUsage:  true,
-	SilenceErrors: true, // main prints error once
+	SilenceUsage:  false, // show usage when args are wrong
+	SilenceErrors: true,  // main prints error once
 }
 
 var sliceCommitCmd = &cobra.Command{
@@ -140,39 +146,39 @@ Use: slice commit add, slice commit remove, slice commit generate, slice commit 
 Generate prints to stdout only; use 'git commit -F -' to commit with the message.`,
 	Args:         cobra.ArbitraryArgs,
 	RunE:         runSliceCommitNoSubcommand,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceCommitAddCmd = &cobra.Command{
-	Use:          "add [<work-item-id>] <slice-name> <task-description>",
+	Use:          "add [current | <work-item-id>] <slice-name> <task-description>",
 	Short:        "Add a task to a slice",
 	Args:         cobra.MinimumNArgs(2),
 	RunE:         runSliceCommitAdd,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceCommitRemoveCmd = &cobra.Command{
-	Use:          "remove [<work-item-id>] <slice-name>",
+	Use:          "remove [current | <work-item-id>] <slice-name>",
 	Args:         cobra.MinimumNArgs(1),
 	Short:        "Remove a slice and all its tasks",
 	RunE:         runSliceCommitRemove,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceCommitGenerateCmd = &cobra.Command{
-	Use:          "generate [current|<work-item-id>] [current|previous|<slice-name>]",
+	Use:          "generate [current | <work-item-id>] [current|previous|<slice-name>]",
 	Short:        "Print a structured commit message to stdout",
 	Long:         "When first argument is \"current\", work item is resolved from the current branch (worktree) or doing folder.",
 	RunE:         runSliceCommitGenerate,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 var sliceCommitCurrentCmd = &cobra.Command{
-	Use:          "current [<work-item-id>]",
+	Use:          "current [current | <work-item-id>]",
 	Short:        "Validate current slice is complete, then generate and commit",
 	Long:         `Resolves work item from args or doing folder. Validates the slice to be committed (previous — the one just completed) has no open tasks, then runs generate and git commit -F -.`,
 	RunE:         runSliceCommitCurrent,
-	SilenceUsage: true,
+	SilenceUsage: false, // show usage when args are wrong
 }
 
 func init() {
@@ -196,9 +202,12 @@ func init() {
 	sliceTaskCmd.AddCommand(sliceTaskAddCmd)
 	sliceTaskCmd.AddCommand(sliceTaskRemoveCmd)
 	sliceTaskCmd.AddCommand(sliceTaskEditCmd)
-	sliceTaskCmd.AddCommand(sliceTaskToggleCmd)
 	sliceTaskCmd.AddCommand(sliceTaskNoteCmd)
 	sliceTaskCmd.AddCommand(sliceTaskCurrentCmd)
+	sliceTaskCmd.AddCommand(sliceTaskDoneCmd)
+	sliceTaskDoneCmd.AddCommand(sliceTaskDoneCurrentCmd)
+
+	sliceCmd.PersistentFlags().Bool("hide-summary", false, "Do not print the one-line slice/task progress summary")
 
 	sliceAddCmd.Flags().Bool("no-commit", false, "Do not commit changes")
 	sliceRemoveCmd.Flags().Bool("no-commit", false, "Do not commit changes")
@@ -206,9 +215,9 @@ func init() {
 	sliceTaskAddCmd.Flags().Bool("no-commit", false, "Do not commit changes")
 	sliceTaskRemoveCmd.Flags().Bool("no-commit", false, "Do not commit changes")
 	sliceTaskRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
-	sliceTaskToggleCmd.Flags().BoolP("commit", "c", false, "Commit the work item change (default: no commit)")
 	sliceTaskNoteCmd.Flags().Bool("no-commit", false, "Do not commit changes")
-	sliceTaskCurrentCmd.Flags().BoolP("commit", "c", false, "Commit the work item change when used with toggle (default: no commit)")
+	sliceTaskDoneCurrentCmd.Flags().BoolP("commit", "c", false, "Commit the work item change (default: no commit)")
+	sliceTaskDoneCurrentCmd.Flags().Bool("next", false, "After marking done, show the next task and progress summary")
 	sliceLintCmd.Flags().String("output", "", "Output format: json")
 	sliceCurrentCmd.Flags().String("output", "", "Output format: json")
 	sliceTaskCurrentCmd.Flags().String("output", "", "Output format: json")
