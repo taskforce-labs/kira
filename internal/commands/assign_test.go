@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -3296,32 +3295,6 @@ invalid: [unclosed bracket
 		absPath2, err := filepath.Abs(testFilePath2)
 		require.NoError(t, err)
 
-		// Diagnostic logging to compare local vs CI (run with -v to see).
-		// Theory 1: Go version may change error formatting / yaml behavior.
-		t.Logf("DIAG_GO_VERSION=%s", runtime.Version())
-		// Theory 3: Temp dir and path canonicalization may differ (e.g. symlinks).
-		t.Logf("DIAG_TMPDIR=%s", tmpDir)
-		canonicalTmp, errCanon := filepath.EvalSymlinks(tmpDir)
-		if errCanon != nil {
-			t.Logf("DIAG_TMPDIR_CANONICAL=error:%v", errCanon)
-		} else {
-			t.Logf("DIAG_TMPDIR_CANONICAL=%s", canonicalTmp)
-		}
-		t.Logf("DIAG_ABS_PATH_1=%s", absPath1)
-		t.Logf("DIAG_ABS_PATH_2=%s", absPath2)
-		// Theory 2: File might not exist or be readable in CI (disk, permissions, sync).
-		info2, errStat := os.Stat(testFilePath2)
-		if errStat != nil {
-			t.Logf("DIAG_FILE_2_STAT=error:%v", errStat)
-		} else {
-			t.Logf("DIAG_FILE_2_EXISTS=true DIAG_FILE_2_SIZE=%d", info2.Size())
-			preview, _ := os.ReadFile(testFilePath2)
-			if len(preview) > 80 {
-				preview = preview[:80]
-			}
-			t.Logf("DIAG_FILE_2_PREVIEW=%q", string(preview))
-		}
-
 		user := &UserInfo{
 			Email:  "user@example.com",
 			Name:   "Test User",
@@ -3343,15 +3316,6 @@ invalid: [unclosed bracket
 		_, _ = io.Copy(io.Discard, r)
 
 		require.Len(t, results, 2)
-		// Theory 4: Results order could differ; log which result is which.
-		t.Logf("DIAG_RESULTS_0_WORK_ITEM_ID=%s DIAG_RESULTS_0_SUCCESS=%v", results[0].WorkItemID, results[0].Success)
-		t.Logf("DIAG_RESULTS_1_WORK_ITEM_ID=%s DIAG_RESULTS_1_SUCCESS=%v", results[1].WorkItemID, results[1].Success)
-		if results[1].Error != nil {
-			t.Logf("DIAG_RESULTS_1_ERROR=%s", results[1].Error.Error())
-			t.Logf("DIAG_ERROR_CONTAINS_002=%v DIAG_WORK_ITEM_ID_CONTAINS_002=%v",
-				strings.Contains(results[1].Error.Error(), "002"),
-				strings.Contains(results[1].WorkItemID, "002"))
-		}
 		assert.True(t, results[0].Success, "first work item should succeed")
 		assert.False(t, results[1].Success, "second work item should fail")
 		assert.NotNil(t, results[1].Error)
@@ -3362,12 +3326,6 @@ invalid: [unclosed bracket
 		updatedContent1, err := os.ReadFile(testFilePath1)
 		require.NoError(t, err)
 		updatedStr := string(updatedContent1)
-		t.Logf("DIAG_UPDATED_FILE_1_CONTAINS_ASSIGNED=%v DIAG_UPDATED_FILE_1_LEN=%d", strings.Contains(updatedStr, "assigned: user@example.com"), len(updatedStr))
-		if len(updatedStr) <= 200 {
-			t.Logf("DIAG_UPDATED_FILE_1_CONTENT=%q", updatedStr)
-		} else {
-			t.Logf("DIAG_UPDATED_FILE_1_PREVIEW=%q", updatedStr[:200])
-		}
 		assert.Contains(t, updatedStr, "assigned: user@example.com")
 	})
 
