@@ -111,6 +111,26 @@ Commit: Complete Foundation
 		assert.Equal(t, "T002", slices[0].Tasks[1].ID)
 		assert.True(t, slices[0].Tasks[1].Done)
 	})
+
+	t.Run("parses heading with optional number prefix", func(t *testing.T) {
+		content := []byte(`## Slices
+
+### 1. Auth
+- [ ] T001: Login
+
+### 2. API
+- [ ] T002: Endpoint
+`)
+		slices, err := ParseSlicesSection(content)
+		require.NoError(t, err)
+		require.Len(t, slices, 2)
+		assert.Equal(t, "Auth", slices[0].Name)
+		assert.Equal(t, "API", slices[1].Name)
+		require.Len(t, slices[0].Tasks, 1)
+		require.Len(t, slices[1].Tasks, 1)
+		assert.Equal(t, "T001", slices[0].Tasks[0].ID)
+		assert.Equal(t, "T002", slices[1].Tasks[0].ID)
+	})
 }
 
 func TestGenerateSlicesSection(t *testing.T) {
@@ -126,9 +146,21 @@ func TestGenerateSlicesSection(t *testing.T) {
 		}
 		out := GenerateSlicesSection(slices, "T%03d")
 		assert.Contains(t, string(out), "## Slices")
-		assert.Contains(t, string(out), "### Auth")
+		assert.Contains(t, string(out), "### 1. Auth")
 		assert.Contains(t, string(out), "- [ ] T001: Login")
 		assert.Contains(t, string(out), "- [x] T002: Logout")
+	})
+
+	t.Run("generates headings with 1-based number", func(t *testing.T) {
+		slices := []Slice{
+			{Name: "First", Tasks: []Task{}},
+			{Name: "Second", Tasks: []Task{}},
+			{Name: "Third", Tasks: []Task{}},
+		}
+		out := GenerateSlicesSection(slices, "T%03d")
+		assert.Contains(t, string(out), "### 1. First")
+		assert.Contains(t, string(out), "### 2. Second")
+		assert.Contains(t, string(out), "### 3. Third")
 	})
 
 	t.Run("includes Commit line when set", func(t *testing.T) {

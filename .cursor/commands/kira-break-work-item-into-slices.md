@@ -11,16 +11,16 @@ Break a work item into testable slices that can be committed to git, with clear 
 
 2. **Define Slices (preferred: direct markdown)**
    - Add a `## Slices` section to the work item by editing the markdown directly (preferred over using the CLI).
-   - Use this format:
+   - Use this format (numbered headings; the CLI can then reference slices by number, e.g. `slice show 1` or `slice task add 2 "desc"`):
 
 ```
 ## Slices
-### <Slice name 1>
+### 1. <Slice name 1>
 Commit: <Summary of the slice and tasks>
 - [ ] T001: task description
 - [ ] T002: task description
 
-### <Slice name 2>
+### 2. <Slice name 2>
 Commit: <Summary of the slice and tasks>
 - [ ] T003: task description
 - [ ] T004: task description

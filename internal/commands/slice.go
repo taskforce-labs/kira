@@ -41,7 +41,7 @@ var sliceAddCmd = &cobra.Command{
 }
 
 var sliceRemoveCmd = &cobra.Command{
-	Use:          "remove (current | <work-item-id>) <slice-name>",
+	Use:          "remove (current | <work-item-id>) (<slice-number> | <slice-name>)",
 	Short:        "Remove a slice and all its tasks",
 	Args:         cobra.ExactArgs(2),
 	RunE:         runSliceRemove,
@@ -55,7 +55,7 @@ var sliceTaskCmd = &cobra.Command{
 }
 
 var sliceTaskAddCmd = &cobra.Command{
-	Use:          "add (current | <work-item-id>) <slice-name> <task-description>",
+	Use:          "add (current | <work-item-id>) (<slice-number> | <slice-name>) <task-description>",
 	Short:        "Add a task to a slice",
 	Args:         cobra.MinimumNArgs(3),
 	RunE:         runSliceTaskAdd,
@@ -87,7 +87,7 @@ var sliceTaskNoteCmd = &cobra.Command{
 }
 
 var sliceTaskCurrentCmd = &cobra.Command{
-	Use:          "current [current | <work-item-id>] [<slice-name>]",
+	Use:          "current [current | <work-item-id>] [(<slice-number> | <slice-name)>]",
 	Short:        "Show the current task",
 	RunE:         runSliceTaskCurrent,
 	SilenceUsage: false, // show usage when args are wrong
@@ -108,8 +108,9 @@ var sliceTaskDoneCurrentCmd = &cobra.Command{
 }
 
 var sliceShowCmd = &cobra.Command{
-	Use:          "show (current | <work-item-id>) [slice-name|task-id]",
+	Use:          "show (current | <work-item-id>) [all|current|<slice-number>|<slice-name>|<task-id>]",
 	Short:        "Show slices and tasks",
+	Long:         "With one arg: show current slice if work item is 'current', otherwise all slices. With two args: use second as 'all' (all slices), 'current' (current slice), slice number/name, or task-id.",
 	Args:         cobra.MinimumNArgs(1),
 	RunE:         runSliceShow,
 	SilenceUsage: false, // show usage when args are wrong
@@ -150,7 +151,7 @@ Generate prints to stdout only; use 'git commit -F -' to commit with the message
 }
 
 var sliceCommitAddCmd = &cobra.Command{
-	Use:          "add [current | <work-item-id>] <slice-name> <task-description>",
+	Use:          "add [current | <work-item-id>] (<slice-number> | <slice-name>) <task-description>",
 	Short:        "Add a task to a slice",
 	Args:         cobra.MinimumNArgs(2),
 	RunE:         runSliceCommitAdd,
@@ -158,7 +159,7 @@ var sliceCommitAddCmd = &cobra.Command{
 }
 
 var sliceCommitRemoveCmd = &cobra.Command{
-	Use:          "remove [current | <work-item-id>] <slice-name>",
+	Use:          "remove [current | <work-item-id>] (<slice-number> | <slice-name>)",
 	Args:         cobra.MinimumNArgs(1),
 	Short:        "Remove a slice and all its tasks",
 	RunE:         runSliceCommitRemove,
@@ -166,7 +167,7 @@ var sliceCommitRemoveCmd = &cobra.Command{
 }
 
 var sliceCommitGenerateCmd = &cobra.Command{
-	Use:          "generate [current | <work-item-id>] [current|previous|<slice-name>]",
+	Use:          "generate [current | <work-item-id>] [current|previous|<slice-number>|<slice-name>]",
 	Short:        "Print a structured commit message to stdout",
 	Long:         "When first argument is \"current\", work item is resolved from the current branch (worktree) or doing folder.",
 	RunE:         runSliceCommitGenerate,

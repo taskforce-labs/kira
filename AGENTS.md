@@ -24,7 +24,7 @@ See [Go Secure Coding Practices](.docs/guides/security/golang-secure-coding.md) 
 DON'T RELAX THESE RULES FOR TEST FILES DO NOT CHANGE .golangci.yml TO RELAX RULES UNDER ANY CIRCUMSTANCES UNLESS I TELL YOU TO DO SO EXPLICITLY.
 
 ## Slices (work item breakdown)
-Work items can include a `## Slices` section with slices and tasks (e.g. `### SliceName`, `- [ ] T001: description`). Use `kira slice` to manage them.
+Work items can include a `## Slices` section with slices and tasks (e.g. `### 1. SliceName`, `- [ ] T001: description`). Use `kira slice` to manage them. Generated sections use numbered headings (`### 1. Name`, `### 2. Name`); the parser also accepts unnumbered headings (`### Name`). You can refer to a slice by **1-based number** or by name in commands (e.g. `kira slice show current 1`, `kira slice task add current 2 "desc"`).
 
 **Agent implementation loop (recommended):**
 1. Get context: `kira slice current` or `kira slice task current` (omit work-item when one work item is in doing, or pass `current` or `<work-item-id>`). Use `--output json` for machine-readable output.

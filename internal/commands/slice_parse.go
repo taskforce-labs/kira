@@ -15,11 +15,12 @@ const (
 )
 
 var (
-	taskLineRegex    = regexp.MustCompile(`^-\s+\[([ xX])\]\s+(T[0-9A-Za-z]+):\s*(.*)$`)
-	taskLineOpenDone = regexp.MustCompile(`^-\s+\[(open|done)\]\s+(T[0-9A-Za-z]+):\s*(.*)$`)
-	taskIDNumRegex   = regexp.MustCompile(`T(\d+)`)
-	commitLineRegex  = regexp.MustCompile(`^Commit:\s*(.*)$`)
-	notesLineRegex   = regexp.MustCompile(`^\s+-\s+Notes:\s*(.*)$`)
+	taskLineRegex         = regexp.MustCompile(`^-\s+\[([ xX])\]\s+(T[0-9A-Za-z]+):\s*(.*)$`)
+	taskLineOpenDone      = regexp.MustCompile(`^-\s+\[(open|done)\]\s+(T[0-9A-Za-z]+):\s*(.*)$`)
+	taskIDNumRegex        = regexp.MustCompile(`T(\d+)`)
+	commitLineRegex       = regexp.MustCompile(`^Commit:\s*(.*)$`)
+	notesLineRegex        = regexp.MustCompile(`^\s+-\s+Notes:\s*(.*)$`)
+	sliceHeadingNumPrefix = regexp.MustCompile(`^\d+\.\s+`)
 )
 
 // ParseSlicesSection parses the ## Slices section from work item markdown.
@@ -57,6 +58,10 @@ func ParseSlicesSection(content []byte) ([]Slice, error) {
 
 func parseSliceHeading(lines []string, i int, trimmed string) *Slice {
 	name := strings.TrimSpace(trimmed[4:])
+	// Accept optional leading "N. " (digits, dot, space) and strip to get display name
+	if sliceHeadingNumPrefix.MatchString(name) {
+		name = strings.TrimSpace(sliceHeadingNumPrefix.ReplaceAllString(name, ""))
+	}
 	s := &Slice{Name: name, Tasks: []Task{}}
 	if i+1 < len(lines) {
 		next := strings.TrimSpace(lines[i+1])
@@ -157,14 +162,16 @@ func trimSectionEnd(content []byte, start, end int) int {
 	return end
 }
 
-// GenerateSlicesSection formats slices as markdown (## Slices, ### Name, optional Commit:, task list).
+// GenerateSlicesSection formats slices as markdown (## Slices, ### N. Name, optional Commit:, task list).
+// Slice headings are written as "### 1. Name", "### 2. Name", etc. (1-based index).
 func GenerateSlicesSection(slices []Slice, taskIDFormat string) []byte {
 	_ = taskIDFormat // reserved for future use (e.g. custom ID format)
 	var b strings.Builder
 	b.WriteString(slicesHeading)
 	b.WriteString("\n\n")
-	for _, s := range slices {
+	for i, s := range slices {
 		b.WriteString("### ")
+		fmt.Fprintf(&b, "%d. ", i+1)
 		b.WriteString(s.Name)
 		b.WriteString("\n")
 		if s.CommitSummary != "" {
