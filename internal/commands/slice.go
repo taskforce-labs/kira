@@ -27,7 +27,7 @@ var sliceCmd = &cobra.Command{
 	Short: "Manage slices and tasks within work items",
 	Long: `Manage slices and tasks within work items. Slices group related tasks;
 tasks are individual actionable items with stable IDs (T001, T002, ...).
-Use slice show, progress, current, and task current to view; use slice add/remove
+Use slice show, progress, and task current to view; use slice add/remove
 and slice task add/remove/edit/note to modify.`,
 	SilenceUsage: false, // show usage when args are wrong
 }
@@ -124,13 +124,6 @@ var sliceProgressCmd = &cobra.Command{
 	SilenceUsage: false, // show usage when args are wrong
 }
 
-var sliceCurrentCmd = &cobra.Command{
-	Use:          "current [current | <work-item-id>]",
-	Short:        "Show the current slice (first with open tasks)",
-	RunE:         runSliceCurrent,
-	SilenceUsage: false, // show usage when args are wrong
-}
-
 var sliceLintCmd = &cobra.Command{
 	Use:           "lint [current | <work-item-id>]",
 	Short:         "Validate the Slices section",
@@ -188,7 +181,6 @@ func init() {
 	sliceCmd.AddCommand(sliceTaskCmd)
 	sliceCmd.AddCommand(sliceShowCmd)
 	sliceCmd.AddCommand(sliceProgressCmd)
-	sliceCmd.AddCommand(sliceCurrentCmd)
 	sliceCmd.AddCommand(sliceLintCmd)
 	sliceCmd.AddCommand(sliceCommitCmd)
 
@@ -220,6 +212,5 @@ func init() {
 	sliceTaskDoneCurrentCmd.Flags().BoolP("commit", "c", false, "Commit the work item change (default: no commit)")
 	sliceTaskDoneCurrentCmd.Flags().Bool("next", false, "After marking done, show the next task and progress summary")
 	sliceLintCmd.Flags().String("output", "", "Output format: json")
-	sliceCurrentCmd.Flags().String("output", "", "Output format: json")
 	sliceTaskCurrentCmd.Flags().String("output", "", "Output format: json")
 }

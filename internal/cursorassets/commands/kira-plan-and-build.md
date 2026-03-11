@@ -6,7 +6,7 @@ Build the given work item by planning the approach and systematically implementi
 
 1. **Read Work Item**
    - Read the work item and understand scope, acceptance criteria, and current state
-   - Use `kira slice current` to see slices and tasks (slices are shown as 1. Name, 2. Name; you can use the number or name in other slice commands)
+   - Use `kira slice show current` to see slices and tasks (slices are shown as 1. Name, 2. Name; you can use the number or name in other slice commands)
 
 2. **Implementation Loop**
    For each open task:

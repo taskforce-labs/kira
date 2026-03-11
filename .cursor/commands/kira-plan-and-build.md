@@ -2,7 +2,7 @@ Plan the included work item and then build using the following approach
 
 For each **slice** (not each task):
 
-1. **Get current slice/tasks:** `kira slice current` (no argument when work item is clear from context). To specify the work item, pass one argument: `current` or `<work-item-id>` — e.g. `kira slice current 047-foo`. Use `--output json` for machine-readable output (includes `slice_number`). You can refer to a slice by its 1-based number or name in other commands (e.g. `kira slice show 1`, `kira slice task add 2 "desc"`). Same for `kira slice task current`.
+1. **Get current slice/tasks:** `kira slice show current` (no argument when work item is clear from context). To specify the work item, pass one argument: `current` or `<work-item-id>` — e.g. `kira slice show current` or `kira slice show 047`. You can refer to a slice by its 1-based number or name in other commands (e.g. `kira slice show current 1`, `kira slice task add 2 "desc"`). Same for `kira slice task current`.
 2. **Implement** all tasks in that slice; add/update tests.
 3. **Verify:** `kira check -t commit` before committing. If checks fail, fix and re-run; only commit when they pass.
 4. **Commit (one commit per slice):**
