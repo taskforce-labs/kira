@@ -90,14 +90,14 @@ Commit: Update AGENTS.md, kira-plan-and-build, and any loop docs to describe tog
 
 ### slice task done current and --next (expanded scope)
 Commit: Add slice task done current; output completed task; --next shows next task and summary.
-- [ ] T011: Add `slice task done [current  | <work-item-id>]`: resolve work item, find current open task, mark done, write file, print "Completed: <id> - <description>". Flags: --commit/-c, --next, --hide-summary.
-- [ ] T012: With --next: after marking done, show next task and "same slice" vs "next slice: <name>"; print one-line summary (e.g. 2/4 slices · 10/20 tasks · 1/3 in current slice). Honor --hide-summary for the summary line. When all tasks done, print "All tasks complete" and full summary.
-- [ ] T013: Add helper formatSliceSummary(slices, currentSliceName) and printSliceSummaryIf(cmd, path, cfg, currentSliceName); unit tests for summary format and done/--next behavior.
+- [x] T011: Add `slice task done [current  | <work-item-id>]`: resolve work item, find current open task, mark done, write file, print "Completed: <id> - <description>". Flags: --commit/-c, --next, --hide-summary.
+- [x] T012: With --next: after marking done, show next task and "same slice" vs "next slice: <name>"; print one-line summary (e.g. 2/4 slices · 10/20 tasks · 1/3 in current slice). Honor --hide-summary for the summary line. When all tasks done, print "All tasks complete" and full summary.
+- [x] T013: Add helper formatSliceSummary(slices, currentSliceName) and printSliceSummaryIf(cmd, path, cfg, currentSliceName); unit tests for summary format and done/--next behavior.
 
 ### --hide-summary and summary on slice commands (expanded scope)
 Commit: Add --hide-summary to slice commands; print one-line summary by default where applicable.
-- [ ] T014: Add --hide-summary (e.g. persistent on sliceCmd or per-command) to slice add/remove, slice task add/remove/edit/toggle/note/current/done, slice show, slice current, slice progress, slice commit add/remove/current, slice lint. Do not add summary to slice commit generate when stdout is commit message.
-- [ ] T015: At end of each runSlice* that modifies or displays state, call printSliceSummaryIf unless --hide-summary. For --output json, do not print human summary.
+- [x] T014: Add --hide-summary (e.g. persistent on sliceCmd or per-command) to slice add/remove, slice task add/remove/edit/toggle/note/current/done, slice show, slice current, slice progress, slice commit add/remove/current, slice lint. Do not add summary to slice commit generate when stdout is commit message.
+- [x] T015: At end of each runSlice* that modifies or displays state, call printSliceSummaryIf unless --hide-summary. For --output json, do not print human summary.
 
 ### Toggle completion output (expanded scope)
 Commit: When slice task current ... toggle marks task done, print "Completed: <id> - <description>" for consistency.

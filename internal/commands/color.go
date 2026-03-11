@@ -16,6 +16,8 @@ const (
 	ansiGreen  = "\033[32m"
 	ansiYellow = "\033[33m"
 	ansiRed    = "\033[31m"
+	// ansiOrange is 256-color orange (xterm color 208).
+	ansiOrange = "\033[38;5;208m"
 )
 
 // sliceColorEnabled returns true when color output is allowed:
@@ -59,6 +61,14 @@ func taskBoxStyle(done bool) string {
 		return ansiDim + "[ ]" + ansiReset
 	}
 	return "[ ]"
+}
+
+// taskDescriptionStyle returns the task description with optional green styling when done (for slice show scanning).
+func taskDescriptionStyle(description string, done bool) string {
+	if done && sliceColorEnabled() {
+		return ansiGreen + description + ansiReset
+	}
+	return description
 }
 
 // labelStyle returns a label (e.g. "Slice:", "Task:") with optional dim styling.
@@ -131,4 +141,20 @@ func promptStyle(s string) string {
 		return s
 	}
 	return ansiDim + s + ansiReset
+}
+
+// summaryCompleteStyle returns the summary line with green styling (all tasks complete).
+func summaryCompleteStyle(s string) string {
+	if !sliceColorEnabled() {
+		return s
+	}
+	return ansiGreen + s + ansiReset
+}
+
+// summaryIncompleteStyle returns the summary line with orange styling (work remaining).
+func summaryIncompleteStyle(s string) string {
+	if !sliceColorEnabled() {
+		return s
+	}
+	return ansiOrange + s + ansiReset
 }

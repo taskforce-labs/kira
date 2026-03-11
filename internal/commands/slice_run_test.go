@@ -114,7 +114,7 @@ Req here
 		require.NoError(t, err)
 		assert.Contains(t, string(got), "## Requirements")
 		assert.Contains(t, string(got), "Req here")
-		assert.Contains(t, string(got), "### New")
+		assert.Contains(t, string(got), "### 1. New")
 		assert.Contains(t, string(got), "T001: New task")
 		assert.Contains(t, string(got), "## Release")
 		assert.NotContains(t, string(got), "### Old")
@@ -150,6 +150,105 @@ func TestFindSliceByName(t *testing.T) {
 	assert.Equal(t, "API", s.Name)
 	s = findSliceByName(slices, "None")
 	assert.Nil(t, s)
+}
+
+func TestResolveSliceSelector(t *testing.T) {
+	slices := []Slice{
+		{Name: "First", Tasks: []Task{{ID: "T001", Done: true}}},
+		{Name: "Second", Tasks: []Task{{ID: "T002", Done: false}}},
+		{Name: "Third", Tasks: []Task{{ID: "T003", Done: false}}},
+	}
+
+	t.Run("by index 1 returns first slice", func(t *testing.T) {
+		s, idx, err := resolveSliceSelector(slices, "1")
+		require.NoError(t, err)
+		require.NotNil(t, s)
+		assert.Equal(t, "First", s.Name)
+		assert.Equal(t, 1, idx)
+	})
+
+	t.Run("by index 2 returns second slice", func(t *testing.T) {
+		s, idx, err := resolveSliceSelector(slices, "2")
+		require.NoError(t, err)
+		require.NotNil(t, s)
+		assert.Equal(t, "Second", s.Name)
+		assert.Equal(t, 2, idx)
+	})
+
+	t.Run("by name returns slice and index", func(t *testing.T) {
+		s, idx, err := resolveSliceSelector(slices, "Third")
+		require.NoError(t, err)
+		require.NotNil(t, s)
+		assert.Equal(t, "Third", s.Name)
+		assert.Equal(t, 3, idx)
+	})
+
+	t.Run("current returns first slice with open tasks", func(t *testing.T) {
+		s, idx, err := resolveSliceSelector(slices, "current")
+		require.NoError(t, err)
+		require.NotNil(t, s)
+		assert.Equal(t, "Second", s.Name)
+		assert.Equal(t, 2, idx)
+	})
+
+	t.Run("previous returns slice before current", func(t *testing.T) {
+		s, idx, err := resolveSliceSelector(slices, "previous")
+		require.NoError(t, err)
+		require.NotNil(t, s)
+		assert.Equal(t, "First", s.Name)
+		assert.Equal(t, 1, idx)
+	})
+
+	t.Run("out of range index returns error", func(t *testing.T) {
+		_, _, err := resolveSliceSelector(slices, "10")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "out of range")
+	})
+
+	t.Run("zero index returns error", func(t *testing.T) {
+		_, _, err := resolveSliceSelector(slices, "0")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("unknown name returns error", func(t *testing.T) {
+		_, _, err := resolveSliceSelector(slices, "Nonexistent")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+}
+
+func TestSliceShowWithNumericSelector(t *testing.T) {
+	t.Run("slice show with slice number 1 succeeds and shows first slice", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		content := `---
+id: 001
+title: Num
+status: doing
+kind: prd
+---
+# Num
+## Requirements
+## Slices
+
+### Alpha
+- [ ] T001: First task
+
+### Beta
+- [ ] T002: Second task
+`
+		require.NoError(t, os.WriteFile(sliceTestWorkItemPath, []byte(content), 0o600))
+
+		rootCmd.SetArgs([]string{"slice", "show", "001", "1", "--hide-summary"})
+		err := rootCmd.Execute()
+		require.NoError(t, err)
+		// Command uses fmt.Print* so output goes to process stdout; we only verify no error.
+		// resolveSliceSelector(..., "1") is unit-tested in TestResolveSliceSelector.
+	})
 }
 
 func TestFirstSliceWithOpenTasks(t *testing.T) {

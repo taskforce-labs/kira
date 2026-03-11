@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -147,7 +148,7 @@ func runSliceRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	workItemID := args[0]
-	sliceName := args[1]
+	sliceSelector := args[1]
 	path, err := resolveSliceWorkItem(workItemID, cfg, "slice remove")
 	if err != nil {
 		return err
@@ -160,17 +161,16 @@ func runSliceRemove(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	var found bool
-	var newSlices []Slice
-	for _, s := range slices {
-		if strings.EqualFold(s.Name, sliceName) {
-			found = true
-			continue
-		}
-		newSlices = append(newSlices, s)
+	s, sliceIdx, err := resolveSliceSelector(slices, sliceSelector)
+	if err != nil {
+		return err
 	}
-	if !found {
-		return fmt.Errorf("slice named %q not found", sliceName)
+	sliceName := s.Name
+	var newSlices []Slice
+	for i := range slices {
+		if i+1 != sliceIdx {
+			newSlices = append(newSlices, slices[i])
+		}
 	}
 	yes, _ := cmd.Flags().GetBool("yes")
 	if !yes {
@@ -206,7 +206,7 @@ func runSliceTaskAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	workItemID := args[0]
-	sliceName := args[1]
+	sliceSelector := args[1]
 	description := strings.Join(args[2:], " ")
 	path, err := resolveSliceWorkItem(workItemID, cfg, "slice task add")
 	if err != nil {
@@ -220,27 +220,22 @@ func runSliceTaskAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	sliceIdx := -1
-	for i, s := range slices {
-		if strings.EqualFold(s.Name, sliceName) {
-			sliceIdx = i
-			break
-		}
+	s, sliceIdx, err := resolveSliceSelector(slices, sliceSelector)
+	if err != nil {
+		return err
 	}
-	if sliceIdx < 0 {
-		return fmt.Errorf("slice named %q not found", sliceName)
-	}
+	sliceIdx0 := sliceIdx - 1
 	nextID, err := NextTaskID(slices, getSlicesConfig(cfg).TaskIDFormat)
 	if err != nil {
 		return err
 	}
 	defaultState := getSlicesConfig(cfg).DefaultState
 	done := strings.EqualFold(defaultState, "done")
-	slices[sliceIdx].Tasks = append(slices[sliceIdx].Tasks, Task{ID: nextID, Description: description, Done: done})
+	slices[sliceIdx0].Tasks = append(slices[sliceIdx0].Tasks, Task{ID: nextID, Description: description, Done: done})
 	if err := writeSlicesToFile(path, content, slices, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("Added task %s to slice %q in work item %s\n", nextID, sliceName, id)
+	fmt.Printf("Added task %s to slice %q in work item %s\n", nextID, s.Name, id)
 	noCommit, _ := cmd.Flags().GetBool("no-commit")
 	if !noCommit {
 		msg := fmt.Sprintf("Add task %s to %s", nextID, id)
@@ -249,7 +244,7 @@ func runSliceTaskAdd(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println("Changes committed.")
 	}
-	printSliceSummaryIf(cmd, path, cfg, sliceName)
+	printSliceSummaryIf(cmd, path, cfg, s.Name)
 	return nil
 }
 
@@ -405,6 +400,21 @@ func runSliceTaskNote(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// printSliceTasks prints task lines for a slice. When spaceBetween is true, adds a blank line between each task.
+// When showNotes is true, prints "    Notes: ..." under a task when present.
+func printSliceTasks(tasks []Task, between, notes bool,
+) {
+	for i, t := range tasks {
+		fmt.Printf("  %s %s: %s\n", taskBoxStyle(t.Done), taskIDStyle(t.ID), taskDescriptionStyle(t.Description, t.Done))
+		if notes && t.Notes != "" {
+			fmt.Printf("    Notes: %s\n", t.Notes)
+		}
+		if between && i < len(tasks)-1 {
+			fmt.Println()
+		}
+	}
+}
+
 func runSliceShow(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -426,20 +436,53 @@ func runSliceShow(cmd *cobra.Command, args []string) error {
 		fmt.Println("No slices in this work item.")
 		return nil
 	}
+	outputFormat, _ := cmd.Flags().GetString("output")
+	if outputFormat != sliceLintOutputJSON {
+		var currentName string
+		if len(args) == 1 {
+			if workItemID == sliceSelectorCurrent {
+				if s, _, err := resolveSliceSelector(slices, sliceSelectorCurrent); err == nil {
+					currentName = s.Name
+				}
+			}
+		} else {
+			arg := args[1]
+			if strings.EqualFold(arg, "all") {
+				currentName = ""
+			} else if s, _, err := resolveSliceSelector(slices, arg); err == nil {
+				currentName = s.Name
+			} else if si, _ := findTaskByID(slices, arg); si >= 0 {
+				currentName = slices[si].Name
+			} else {
+				currentName = ""
+			}
+		}
+		printSliceProgressWorkItemLine(path, cfg, workItemID)
+		printSliceSummaryBlock(cmd, slices, currentName, sliceProgressPct(slices, currentName))
+	}
 	if len(args) == 1 {
+		if workItemID == sliceSelectorCurrent {
+			s, idx, err := resolveSliceSelector(slices, sliceSelectorCurrent)
+			if err != nil {
+				return err
+			}
+			printSliceDetail(*s, idx)
+			return nil
+		}
 		printAllSlices(slices)
-		printSliceSummaryIf(cmd, path, cfg, "")
 		return nil
 	}
 	arg := args[1]
-	if s := findSliceByName(slices, arg); s != nil {
-		printSliceDetail(*s)
-		printSliceSummaryIf(cmd, path, cfg, s.Name)
+	if strings.EqualFold(arg, "all") {
+		printAllSlices(slices)
+		return nil
+	}
+	if s, idx, err := resolveSliceSelector(slices, arg); err == nil {
+		printSliceDetail(*s, idx)
 		return nil
 	}
 	if si, ti := findTaskByID(slices, arg); si >= 0 {
 		printTaskDetail(slices[si].Tasks[ti], slices[si].Name)
-		printSliceSummaryIf(cmd, path, cfg, slices[si].Name)
 		return nil
 	}
 	return fmt.Errorf("slice or task %q not found", arg)
@@ -454,24 +497,103 @@ func findSliceByName(slices []Slice, name string) *Slice {
 	return nil
 }
 
-func printAllSlices(slices []Slice) {
-	for _, s := range slices {
-		fmt.Println(sliceNameStyle(s.Name))
-		for _, t := range s.Tasks {
-			fmt.Printf("  %s %s: %s\n", taskBoxStyle(t.Done), taskIDStyle(t.ID), t.Description)
-		}
-		fmt.Println()
+// resolveSliceSelector resolves a slice by selector string. Returns the slice, its 1-based index, and an error.
+// Selector can be: "current" (first with open tasks), "previous" (slice before current), a positive integer
+// string ("1", "2", ...) for 1-based index, or a slice name.
+func resolveSliceSelector(slices []Slice, selector string) (*Slice, int, error) {
+	if len(slices) == 0 {
+		return nil, 0, fmt.Errorf("no slices in work item")
+	}
+	sel := strings.TrimSpace(selector)
+	if n, err := strconv.Atoi(sel); err == nil && n >= 1 {
+		return resolveSliceByIndex(slices, n)
+	}
+	switch strings.ToLower(sel) {
+	case sliceSelectorCurrent:
+		return resolveSliceCurrent(slices)
+	case "previous":
+		return resolveSlicePrevious(slices)
+	default:
+		return resolveSliceByNameWithIndex(slices, selector)
 	}
 }
 
-func printSliceDetail(s Slice) {
-	fmt.Println(sliceNameStyle(s.Name))
-	for _, t := range s.Tasks {
-		fmt.Printf("  %s %s: %s\n", taskBoxStyle(t.Done), taskIDStyle(t.ID), t.Description)
-		if t.Notes != "" {
-			fmt.Printf("    Notes: %s\n", t.Notes)
+func resolveSliceByIndex(slices []Slice, n int) (*Slice, int, error) {
+	if n > len(slices) {
+		return nil, 0, fmt.Errorf("slice index %d out of range (have %d slice(s))", n, len(slices))
+	}
+	return &slices[n-1], n, nil
+}
+
+func resolveSliceCurrent(slices []Slice) (*Slice, int, error) {
+	s := firstSliceWithOpenTasks(slices)
+	if s == nil {
+		idx := len(slices)
+		return &slices[idx-1], idx, nil
+	}
+	for i := range slices {
+		if &slices[i] == s {
+			return s, i + 1, nil
 		}
 	}
+	return s, 1, nil
+}
+
+func resolveSlicePrevious(slices []Slice) (*Slice, int, error) {
+	curIdx := -1
+	for i := range slices {
+		for _, t := range slices[i].Tasks {
+			if !t.Done {
+				curIdx = i
+				break
+			}
+		}
+		if curIdx >= 0 {
+			break
+		}
+	}
+	if curIdx < 0 {
+		idx := len(slices)
+		return &slices[idx-1], idx, nil
+	}
+	if curIdx == 0 {
+		return nil, 0, fmt.Errorf("no previous slice")
+	}
+	return &slices[curIdx-1], curIdx, nil
+}
+
+func resolveSliceByNameWithIndex(slices []Slice, name string) (*Slice, int, error) {
+	s := findSliceByName(slices, name)
+	if s == nil {
+		return nil, 0, fmt.Errorf("slice %q not found", name)
+	}
+	for i := range slices {
+		if &slices[i] == s {
+			return s, i + 1, nil
+		}
+	}
+	return s, 1, nil
+}
+
+func printAllSlices(slices []Slice) {
+	fmt.Println(labelStyle("Slice:"))
+	for i, s := range slices {
+		fmt.Println(sliceNameStyle(fmt.Sprintf("%d. %s", i+1, s.Name)))
+		printSliceTasks(s.Tasks, true, false)
+		if i < len(slices)-1 {
+			fmt.Println()
+		}
+	}
+}
+
+func printSliceDetail(s Slice, sliceIndex int) {
+	heading := s.Name
+	if sliceIndex >= 1 {
+		heading = fmt.Sprintf("%d. %s", sliceIndex, s.Name)
+	}
+	fmt.Println(labelStyle("Slice:"))
+	fmt.Println(sliceNameStyle(heading))
+	printSliceTasks(s.Tasks, true, true)
 }
 
 func printTaskDetail(t Task, sliceName string) {
@@ -485,6 +607,55 @@ func printTaskDetail(t Task, sliceName string) {
 	fmt.Printf("%s %s\n", labelStyle("State:"), stateStr)
 	if t.Notes != "" {
 		fmt.Printf("%s %s\n", labelStyle("Notes:"), t.Notes)
+	}
+}
+
+// workItemTypeLabel returns a display label for the work item kind (e.g. "issue" -> "Issue", "prd" -> "Prd"). Uses "Work item" when kind is empty or unknown.
+func workItemTypeLabel(kind string) string {
+	if kind == "" || kind == unknownValue {
+		return "Work item"
+	}
+	return strings.ToUpper(kind[0:1]) + strings.ToLower(kind[1:])
+}
+
+// printSliceProgressWorkItemLine prints a leading blank line, then "<Type> <id>: <title>" (e.g. "Issue 047: No-commit on toggle") using metadata from path, then a blank line. Fallback id from workItemID if path has no id.
+func printSliceProgressWorkItemLine(path string, cfg *config.Config, workItemID string) {
+	fmt.Println()
+	kind, metaID, title, _, _, _ := extractWorkItemMetadata(path, cfg)
+	displayID := workItemIDFromPath(path, cfg)
+	if displayID == "" {
+		displayID = workItemID
+	}
+	if metaID != "" && metaID != unknownValue {
+		displayID = metaID
+	}
+	label := workItemTypeLabel(kind)
+	line := label + " " + taskIDStyle(displayID)
+	if title != "" && title != unknownValue {
+		line += ": " + title
+	}
+	fmt.Println(line)
+	fmt.Println()
+}
+
+// printSliceProgressBreakdown prints the "Slices" label and per-slice "tasks X/Y" lines with green/orange styling. Percentage is shown in the summary line above, not here.
+func printSliceProgressBreakdown(slices []Slice) {
+	fmt.Println(labelStyle("Slices"))
+	for i, s := range slices {
+		sd := 0
+		for _, t := range s.Tasks {
+			if t.Done {
+				sd++
+			}
+		}
+		totalInSlice := len(s.Tasks)
+		line := fmt.Sprintf("tasks %d/%d", sd, totalInSlice)
+		if totalInSlice > 0 && sd == totalInSlice {
+			line = summaryCompleteStyle(line)
+		} else {
+			line = summaryIncompleteStyle(line)
+		}
+		fmt.Printf("  %s: %s\n", sliceNameStyle(fmt.Sprintf("%d. %s", i+1, s.Name)), line)
 	}
 }
 
@@ -505,41 +676,13 @@ func runSliceProgress(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	id := workItemIDFromPath(path, cfg)
-	if id == "" {
-		id = workItemID
-	}
 	_, slices, err := loadSlicesFromFile(path, cfg)
 	if err != nil {
 		return err
 	}
-	var total, done int
-	for _, s := range slices {
-		for _, t := range s.Tasks {
-			total++
-			if t.Done {
-				done++
-			}
-		}
-	}
-	open := total - done
-	fmt.Printf("Work item %s: %d tasks (%d done, %d open)\n", taskIDStyle(id), total, done, open)
-	if total > 0 {
-		pct := 100 * done / total
-		fmt.Printf("Progress: %d%%\n", pct)
-	}
-	for _, s := range slices {
-		var sd, so int
-		for _, t := range s.Tasks {
-			if t.Done {
-				sd++
-			} else {
-				so++
-			}
-		}
-		fmt.Printf("  %s: %d done, %d open\n", sliceNameStyle(s.Name), sd, so)
-	}
-	printSliceSummaryIf(cmd, path, cfg, "")
+	printSliceProgressWorkItemLine(path, cfg, workItemID)
+	printSliceSummaryBlock(cmd, slices, "", sliceProgressPct(slices, ""))
+	printSliceProgressBreakdown(slices)
 	return nil
 }
 
@@ -566,14 +709,11 @@ func firstOpenTaskInSlice(s *Slice) *Task {
 	return nil
 }
 
-// formatSliceSummary returns a one-line progress summary: "completedSlices/totalSlices slices · doneTasks/totalTasks tasks · doneInCurrent/totalInCurrent in current slice".
-// currentSliceName is the name of the slice that contains the "current" (next open) task; if empty, the first slice with open tasks is used.
-func formatSliceSummary(slices []Slice, currentSliceName string) string {
+// sliceSummaryNumbers returns completedSlices, totalSlices, doneTasks, totalTasks, and the in-current-slice suffix (" · X/Y in current slice" or ""). Single source of truth for summary counts used by formatSliceSummary, formatSliceSummaryParts, and runSliceProgress.
+func sliceSummaryNumbers(slices []Slice, currentSliceName string) (completedSlices, totalSlices, doneTasks, totalTasks int, inCurrentStr string) {
 	if len(slices) == 0 {
-		return ""
+		return 0, 0, 0, 0, ""
 	}
-	var totalTasks, doneTasks int
-	completedSlices := 0
 	for _, s := range slices {
 		sDone, sTotal := 0, len(s.Tasks)
 		for _, t := range s.Tasks {
@@ -587,14 +727,13 @@ func formatSliceSummary(slices []Slice, currentSliceName string) string {
 			completedSlices++
 		}
 	}
-	totalSlices := len(slices)
+	totalSlices = len(slices)
 	curName := currentSliceName
 	if curName == "" {
 		if next := firstSliceWithOpenTasks(slices); next != nil {
 			curName = next.Name
 		}
 	}
-	var inCurrent string
 	if curName != "" {
 		for _, s := range slices {
 			if !strings.EqualFold(s.Name, curName) {
@@ -606,14 +745,113 @@ func formatSliceSummary(slices []Slice, currentSliceName string) string {
 					done++
 				}
 			}
-			inCurrent = fmt.Sprintf(" · %d/%d in current slice", done, total)
+			inCurrentStr = fmt.Sprintf(" · %d/%d in current slice", done, total)
 			break
 		}
+	}
+	return completedSlices, totalSlices, doneTasks, totalTasks, inCurrentStr
+}
+
+// formatSliceSummary returns a one-line progress summary: "completedSlices/totalSlices slices · doneTasks/totalTasks tasks · doneInCurrent/totalInCurrent in current slice".
+// currentSliceName is the name of the slice that contains the "current" (next open) task; if empty, the first slice with open tasks is used.
+func formatSliceSummary(slices []Slice, currentSliceName string) string {
+	completedSlices, totalSlices, doneTasks, totalTasks, inCurrent := sliceSummaryNumbers(slices, currentSliceName)
+	if totalSlices == 0 {
+		return ""
 	}
 	return fmt.Sprintf("%d/%d slices · %d/%d tasks%s", completedSlices, totalSlices, doneTasks, totalTasks, inCurrent)
 }
 
-// printSliceSummaryIf loads slices from path and prints the one-line summary unless the command has --hide-summary (or output is json).
+// formatSliceSummaryParts returns the main part ("4/7 slices · 11/17 tasks") and the in-current-slice part (" · 3/3 in current slice" or ""). Used so each part can be styled separately.
+func formatSliceSummaryParts(slices []Slice, currentSliceName string) (main, inCurrent string) {
+	completedSlices, totalSlices, doneTasks, totalTasks, inCurrentStr := sliceSummaryNumbers(slices, currentSliceName)
+	if totalSlices == 0 {
+		return "", ""
+	}
+	main = fmt.Sprintf("%d/%d slices · %d/%d tasks", completedSlices, totalSlices, doneTasks, totalTasks)
+	return main, inCurrentStr
+}
+
+// currentSliceAllDone returns true if the slice identified by currentSliceName (or first with open tasks when empty) has all tasks done. When there is no current slice (all work complete), returns true.
+func currentSliceAllDone(slices []Slice, currentSliceName string) bool {
+	curName := currentSliceName
+	if curName == "" {
+		if next := firstSliceWithOpenTasks(slices); next != nil {
+			curName = next.Name
+		}
+	}
+	if curName == "" {
+		return true
+	}
+	for _, s := range slices {
+		if !strings.EqualFold(s.Name, curName) {
+			continue
+		}
+		total := len(s.Tasks)
+		if total == 0 {
+			return true
+		}
+		done := 0
+		for _, t := range s.Tasks {
+			if t.Done {
+				done++
+			}
+		}
+		return done == total
+	}
+	return true
+}
+
+// sliceProgressPct returns task completion percentage (0-100) for use in the progress line, or -1 if total is 0. Used so all commands show the same "… tasks (N%)" format.
+func sliceProgressPct(slices []Slice, currentSliceName string) int {
+	_, _, done, total, _ := sliceSummaryNumbers(slices, currentSliceName)
+	if total <= 0 {
+		return -1
+	}
+	return 100 * done / total
+}
+
+// printSliceSummaryBlock prints a progress block: "Progress" and styled summary on same line, then blank line.
+// If percentagePct >= 0, embeds task completion percentage in the main part as "… tasks (N%)" so it reads with the task count, not the current-slice suffix. Main part (and percentage when present) use green when all tasks done, orange otherwise; " · X/Y in current slice" is styled separately.
+// Skips when cmd has --hide-summary or output is json.
+func printSliceSummaryBlock(cmd *cobra.Command, slices []Slice, currentSliceName string, percentagePct int) {
+	hide, _ := cmd.Flags().GetBool("hide-summary")
+	if hide {
+		return
+	}
+	if cmd != nil && cmd.Flags().Lookup("output") != nil {
+		if out, _ := cmd.Flags().GetString("output"); out == sliceLintOutputJSON {
+			return
+		}
+	}
+	if len(slices) == 0 {
+		return
+	}
+	mainPart, inCurrentPart := formatSliceSummaryParts(slices, currentSliceName)
+	if mainPart == "" {
+		return
+	}
+	if percentagePct >= 0 {
+		mainPart = fmt.Sprintf("%s (%d%%)", mainPart, percentagePct)
+	}
+	styledMain := summaryIncompleteStyle(mainPart)
+	var styledInCurrent string
+	if inCurrentPart != "" {
+		if currentSliceAllDone(slices, currentSliceName) {
+			styledInCurrent = summaryCompleteStyle(inCurrentPart)
+		} else {
+			styledInCurrent = summaryIncompleteStyle(inCurrentPart)
+		}
+	}
+	_, _, done, total, _ := sliceSummaryNumbers(slices, currentSliceName)
+	if percentagePct >= 0 && total > 0 && done == total {
+		styledMain = summaryCompleteStyle(mainPart)
+	}
+	fmt.Printf("%s %s%s\n", labelStyle("Progress"), styledMain, styledInCurrent)
+	fmt.Println()
+}
+
+// printSliceSummaryIf loads slices from path and prints the progress block (heading, blank, styled summary, blank) unless --hide-summary or json.
 func printSliceSummaryIf(cmd *cobra.Command, path string, cfg *config.Config, currentSliceName string) {
 	hide, _ := cmd.Flags().GetBool("hide-summary")
 	if hide {
@@ -630,16 +868,25 @@ func printSliceSummaryIf(cmd *cobra.Command, path string, cfg *config.Config, cu
 	if err != nil || len(slices) == 0 {
 		return
 	}
-	summary := formatSliceSummary(slices, currentSliceName)
-	if summary != "" {
-		fmt.Println(summary)
+	printSliceProgressWorkItemLine(path, cfg, "")
+	printSliceSummaryBlock(cmd, slices, currentSliceName, sliceProgressPct(slices, currentSliceName))
+}
+
+// sliceIndex1Based returns the 1-based index of s in slices, or 0 if not found.
+func sliceIndex1Based(slices []Slice, s *Slice) int {
+	for i := range slices {
+		if &slices[i] == s {
+			return i + 1
+		}
 	}
+	return 0
 }
 
 // SliceCurrentJSON is the JSON output for slice current --output json.
 type SliceCurrentJSON struct {
 	WorkItemID    string        `json:"work_item_id"`
 	Slice         string        `json:"slice"`
+	SliceNumber   int           `json:"slice_number,omitempty"`
 	OpenTaskCount int           `json:"open_task_count"`
 	OpenTasks     []TaskRefJSON `json:"open_tasks"`
 }
@@ -654,6 +901,7 @@ type TaskRefJSON struct {
 type TaskCurrentJSON struct {
 	WorkItemID  string `json:"work_item_id"`
 	Slice       string `json:"slice"`
+	SliceNumber int    `json:"slice_number,omitempty"`
 	TaskID      string `json:"task_id"`
 	Description string `json:"description"`
 	Notes       string `json:"notes"`
@@ -686,21 +934,25 @@ func runSliceCurrent(cmd *cobra.Command, args []string) error {
 	cur := firstSliceWithOpenTasks(slices)
 	outputFormat, _ := cmd.Flags().GetString("output")
 	if outputFormat == sliceLintOutputJSON {
-		return outputSliceCurrentJSON(id, cur)
+		sliceNum := sliceIndex1Based(slices, cur)
+		return outputSliceCurrentJSON(id, cur, sliceNum)
 	}
-	printSliceCurrentHuman(cur)
 	curName := ""
 	if cur != nil {
 		curName = cur.Name
 	}
-	printSliceSummaryIf(cmd, path, cfg, curName)
+	printSliceProgressWorkItemLine(path, cfg, workItemID)
+	printSliceSummaryBlock(cmd, slices, curName, sliceProgressPct(slices, curName))
+	sliceNum := sliceIndex1Based(slices, cur)
+	printSliceCurrentHuman(cur, sliceNum)
 	return nil
 }
 
-func outputSliceCurrentJSON(workItemID string, cur *Slice) error {
+func outputSliceCurrentJSON(workItemID string, cur *Slice, sliceNumber int) error {
 	out := SliceCurrentJSON{WorkItemID: workItemID}
 	if cur != nil {
 		out.Slice = cur.Name
+		out.SliceNumber = sliceNumber
 		for _, t := range cur.Tasks {
 			if !t.Done {
 				out.OpenTaskCount++
@@ -713,7 +965,7 @@ func outputSliceCurrentJSON(workItemID string, cur *Slice) error {
 	return enc.Encode(out)
 }
 
-func printSliceCurrentHuman(cur *Slice) {
+func printSliceCurrentHuman(cur *Slice, sliceNumber int) {
 	if cur == nil {
 		fmt.Println(labelStyle("Current slice:") + " (none - all tasks done)")
 		return
@@ -724,10 +976,12 @@ func printSliceCurrentHuman(cur *Slice) {
 			openCount++
 		}
 	}
-	fmt.Printf("%s %s (%d open tasks)\n", labelStyle("Current slice:"), sliceNameStyle(cur.Name), openCount)
-	for _, t := range cur.Tasks {
-		fmt.Printf("  %s %s: %s\n", taskBoxStyle(t.Done), taskIDStyle(t.ID), t.Description)
+	heading := cur.Name
+	if sliceNumber >= 1 {
+		heading = fmt.Sprintf("%d. %s", sliceNumber, cur.Name)
 	}
+	fmt.Printf("%s %s (%d open tasks)\n", labelStyle("Current slice:"), sliceNameStyle(heading), openCount)
+	printSliceTasks(cur.Tasks, true, false)
 }
 
 func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
@@ -739,12 +993,12 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	workItemID := ""
-	sliceName := ""
+	sliceSelector := ""
 	if len(args) > 0 {
 		workItemID = args[0]
 	}
 	if len(args) > 1 {
-		sliceName = args[1]
+		sliceSelector = args[1]
 	}
 	path, err := resolveSliceWorkItem(workItemID, cfg, "slice task current")
 	if err != nil {
@@ -759,10 +1013,11 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	var s *Slice
-	if sliceName != "" {
-		s = findSliceByName(slices, sliceName)
-		if s == nil {
-			return fmt.Errorf("slice %q not found", sliceName)
+	if sliceSelector != "" {
+		var resolveErr error
+		s, _, resolveErr = resolveSliceSelector(slices, sliceSelector)
+		if resolveErr != nil {
+			return resolveErr
 		}
 	} else {
 		s = firstSliceWithOpenTasks(slices)
@@ -779,6 +1034,7 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 		out := TaskCurrentJSON{
 			WorkItemID:  id,
 			Slice:       s.Name,
+			SliceNumber: sliceIndex1Based(slices, s),
 			TaskID:      t.ID,
 			Description: t.Description,
 			Notes:       t.Notes,
@@ -787,34 +1043,36 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	}
+	printSliceProgressWorkItemLine(path, cfg, workItemID)
+	printSliceSummaryBlock(cmd, slices, s.Name, sliceProgressPct(slices, s.Name))
 	fmt.Printf("%s %s - %s\n", labelStyle("Current task:"), taskIDStyle(t.ID), t.Description)
 	if t.Notes != "" {
 		fmt.Printf("  %s %s\n", labelStyle("Notes:"), t.Notes)
 	}
-	printSliceSummaryIf(cmd, path, cfg, s.Name)
 	return nil
 }
 
-// printDoneCurrentNext prints the next open task and optionally the summary line after marking a task done.
-func printDoneCurrentNext(cmd *cobra.Command, slices []Slice, completedSliceName string) {
+// printDoneCurrentNext prints the next open task and optionally the progress block after marking a task done.
+func printDoneCurrentNext(cmd *cobra.Command, path string, cfg *config.Config, workItemID string, slices []Slice, completedSliceName string) {
 	nextSlice := firstSliceWithOpenTasks(slices)
 	if nextSlice == nil {
-		fmt.Printf("All tasks complete. %s\n", formatSliceSummary(slices, ""))
+		fmt.Printf("All tasks complete. %s\n", summaryCompleteStyle(formatSliceSummary(slices, "")))
 		return
 	}
 	nextTask := firstOpenTaskInSlice(nextSlice)
 	if nextTask == nil {
-		fmt.Printf("All tasks complete. %s\n", formatSliceSummary(slices, ""))
+		fmt.Printf("All tasks complete. %s\n", summaryCompleteStyle(formatSliceSummary(slices, "")))
 		return
+	}
+	hideSummary, _ := cmd.Flags().GetBool("hide-summary")
+	if !hideSummary {
+		printSliceProgressWorkItemLine(path, cfg, workItemID)
+		printSliceSummaryBlock(cmd, slices, nextSlice.Name, sliceProgressPct(slices, nextSlice.Name))
 	}
 	if nextSlice.Name == completedSliceName {
 		fmt.Printf("Next (same slice): %s - %s\n", taskIDStyle(nextTask.ID), nextTask.Description)
 	} else {
 		fmt.Printf("Next slice: %s — %s - %s\n", sliceNameStyle(nextSlice.Name), taskIDStyle(nextTask.ID), nextTask.Description)
-	}
-	hideSummary, _ := cmd.Flags().GetBool("hide-summary")
-	if !hideSummary {
-		fmt.Println(formatSliceSummary(slices, nextSlice.Name))
 	}
 }
 
@@ -868,7 +1126,7 @@ func runSliceTaskDoneCurrent(cmd *cobra.Command, args []string) error {
 	}
 	showNext, _ := cmd.Flags().GetBool("next")
 	if showNext {
-		printDoneCurrentNext(cmd, slices, completedSliceName)
+		printDoneCurrentNext(cmd, path, cfg, workItemID, slices, completedSliceName)
 	}
 	return nil
 }
@@ -1061,47 +1319,10 @@ func runSliceCommitCurrentCommit(path string, cfg *config.Config, workItemID str
 	return nil
 }
 
-// selectSliceBySelector returns the slice for generate: current (first with open tasks), previous, or by name.
+// selectSliceBySelector returns the slice for generate: current (first with open tasks), previous, or by name or number.
 func selectSliceBySelector(slices []Slice, selector string) (*Slice, error) {
-	if len(slices) == 0 {
-		return nil, fmt.Errorf("no slices in work item")
-	}
-	switch strings.ToLower(selector) {
-	case sliceSelectorCurrent:
-		s := firstSliceWithOpenTasks(slices)
-		if s == nil {
-			// All tasks done: use last slice so generate still works for the final commit
-			return &slices[len(slices)-1], nil
-		}
-		return s, nil
-	case "previous":
-		curIdx := -1
-		for i := range slices {
-			for _, t := range slices[i].Tasks {
-				if !t.Done {
-					curIdx = i
-					break
-				}
-			}
-			if curIdx >= 0 {
-				break
-			}
-		}
-		if curIdx < 0 {
-			// All tasks done: use last slice as "previous" (the one just completed)
-			return &slices[len(slices)-1], nil
-		}
-		if curIdx == 0 {
-			return nil, fmt.Errorf("no previous slice")
-		}
-		return &slices[curIdx-1], nil
-	default:
-		s := findSliceByName(slices, selector)
-		if s == nil {
-			return nil, fmt.Errorf("slice %q not found", selector)
-		}
-		return s, nil
-	}
+	s, _, err := resolveSliceSelector(slices, selector)
+	return s, err
 }
 
 // formatGeneratedCommitMessage builds the exact PRD format: line1 id+message, line2 id-kebab-title, line3 slice name, then task lines.
