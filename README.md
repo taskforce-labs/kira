@@ -1,9 +1,16 @@
 # Kira
 Version: v0.1.0-alpha
 
-A cli to manage your work-items and specs in git as markdown files so you can use them with LLMs in your IDE or Agent Workflows. No need for JIRA.
+A cli tool to manage agent workflows, work-items and docs purely using git and markdown with support beyond a single repo. No need for JIRA, Confluence or over-complicated and opaque agent harnesses.
 
-Develop multiple features in parallel with kira workflows that create worktrees, branches and pull requests based on the specs and work-items you create.
+**Key Features:**
+* **Develop multiple features in parallel** with kira workflows to create worktrees, branches, env setup, pull requests and human/agent reviews based on the specs in your work-items.
+
+* Generate entire **phased roadmaps** from your docs (ADRs, user-journeys, etc) into fully elaborated work-items.
+
+* **Multi-phased loops** with your agents of choice executing discovery, phased roadmaps all the way down to individual work-items
+
+* Designed for various degrees of **human-in-the-loop** with the ability to pause loops and surface questions, seek guidance and action answers.
 
 > 🧪 **Experimental** 👨‍🔬
 >
@@ -11,8 +18,6 @@ Develop multiple features in parallel with kira workflows that create worktrees,
 
 
 ## Quick Start
-
-For detailed documentation see [.docs/README.md](.docs/README.md).
 
 0. Setup the project
 ```bash
@@ -28,6 +33,15 @@ kira init
 # │   ├── templates/
 # │   ├── z_archive/
 # │   └── IDEAS.md
+# ├── .docs/
+# │   ├── agents/
+# │   ├── architecture/
+# │   ├── product/
+# │   ├── reports/
+# │   ├── guides/
+# │   ├── api/
+# │   └── README.md
+# # When using GitHub, init may also create .github/workflows/ (e.g. update-pr-details.yml)
 ```
 
 1. Creates a new work-item
@@ -41,7 +55,7 @@ kira new prd todo "User Authentication" "Implement OIDC based user login system"
 kira start 001
 # 1. Sets the work-item to doing status
 # 2. Creates a new worktree
-# my-project_worktree/
+# my-project_worktrees/
 # └── 001-user-authentication
 # 3. Creates a new branch in the worktree
 # 001-user-authentication
@@ -64,9 +78,9 @@ kira review
 
 **Config:** In `kira.yml`, optional `review` section: `trunk_update`, `rebase` (default true), `commit_move` (default true; commit the move to review before push; set to false to skip). Use `KIRA_GITHUB_TOKEN` for PR create/update (same as `kira start`).
 
-4. Merges the pull request and marks the work-item as done
+4. Merges the pull request and marks the work-item as done (run from trunk branch)
 ```bash
-kira done
+kira done 001
 # 1. Rebases the branch onto the trunk branch
 # 2. Merges the pull request
 # 3. Marks the work-item as done
