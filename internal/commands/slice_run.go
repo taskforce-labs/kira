@@ -432,47 +432,54 @@ func runSliceShow(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	id := workItemIDFromPath(path, cfg)
+	if id == "" {
+		id = workItemID
+	}
+	outputFormat, _ := cmd.Flags().GetString("output")
 	if len(slices) == 0 {
+		if outputFormat == sliceLintOutputJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(&SliceShowJSON{WorkItemID: id, Slices: []SliceShowSliceJSON{}})
+		}
 		fmt.Println("No slices in this work item.")
 		return nil
 	}
-	outputFormat, _ := cmd.Flags().GetString("output")
-	if outputFormat != sliceLintOutputJSON {
-		var currentName string
-		if len(args) == 1 {
-			if workItemID == sliceSelectorCurrent {
-				if s, _, err := resolveSliceSelector(slices, sliceSelectorCurrent); err == nil {
-					currentName = s.Name
-				}
-			}
-		} else {
-			arg := args[1]
-			if strings.EqualFold(arg, "all") {
-				currentName = ""
-			} else if s, _, err := resolveSliceSelector(slices, arg); err == nil {
-				currentName = s.Name
-			} else if si, _ := findTaskByID(slices, arg); si >= 0 {
-				currentName = slices[si].Name
-			} else {
-				currentName = ""
-			}
+	if outputFormat == sliceLintOutputJSON {
+		out, err := buildSliceShowJSON(id, slices, args)
+		if err != nil {
+			return err
 		}
-		printSliceProgressWorkItemLine(path, cfg, workItemID)
-		printSliceSummaryBlock(cmd, slices, currentName, sliceProgressPct(slices, currentName))
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
 	}
+	return runSliceShowText(cmd, path, cfg, workItemID, slices, args)
+}
+
+// runSliceShowText performs the text-mode output for slice show.
+func runSliceShowText(cmd *cobra.Command, path string, cfg *config.Config, workItemID string, slices []Slice, args []string) error {
 	if len(args) == 1 {
 		if workItemID == sliceSelectorCurrent {
 			s, idx, err := resolveSliceSelector(slices, sliceSelectorCurrent)
 			if err != nil {
 				return err
 			}
+			printSliceProgressWorkItemLine(path, cfg, workItemID)
+			printSliceSummaryBlock(cmd, slices, s.Name, sliceProgressPct(slices, s.Name))
 			printSliceDetail(*s, idx)
 			return nil
 		}
+		printSliceProgressWorkItemLine(path, cfg, workItemID)
+		printSliceSummaryBlock(cmd, slices, "", sliceProgressPct(slices, ""))
 		printAllSlices(slices)
 		return nil
 	}
 	arg := args[1]
+	currentName := sliceShowCurrentNameForSummary(workItemID, slices, arg)
+	printSliceProgressWorkItemLine(path, cfg, workItemID)
+	printSliceSummaryBlock(cmd, slices, currentName, sliceProgressPct(slices, currentName))
 	if strings.EqualFold(arg, "all") {
 		printAllSlices(slices)
 		return nil
@@ -486,6 +493,93 @@ func runSliceShow(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return fmt.Errorf("slice or task %q not found", arg)
+}
+
+func sliceShowCurrentNameForSummary(_ string, slices []Slice, secondArg string) string {
+	if len(slices) == 0 {
+		return ""
+	}
+	if strings.EqualFold(secondArg, "all") {
+		return ""
+	}
+	if s, _, err := resolveSliceSelector(slices, secondArg); err == nil {
+		return s.Name
+	}
+	if si, _ := findTaskByID(slices, secondArg); si >= 0 {
+		return slices[si].Name
+	}
+	return ""
+}
+
+// buildSliceShowJSON builds the JSON for slice show --output json.
+func buildSliceShowJSON(workItemID string, slices []Slice, args []string) (*SliceShowJSON, error) {
+	out := &SliceShowJSON{WorkItemID: workItemID}
+	if len(args) == 1 {
+		if args[0] == sliceSelectorCurrent {
+			s, idx, err := resolveSliceSelector(slices, sliceSelectorCurrent)
+			if err != nil {
+				return nil, err
+			}
+			out.Slices = []SliceShowSliceJSON{sliceToShowJSON(s)}
+			out.SliceNumber = idx
+			return out, nil
+		}
+		out.Slices = slicesToShowJSON(slices)
+		return out, nil
+	}
+	arg := args[1]
+	if strings.EqualFold(arg, "all") {
+		out.Slices = slicesToShowJSON(slices)
+		return out, nil
+	}
+	if s, idx, err := resolveSliceSelector(slices, arg); err == nil {
+		out.Slices = []SliceShowSliceJSON{sliceToShowJSON(s)}
+		out.SliceNumber = idx
+		return out, nil
+	}
+	si, ti := findTaskByID(slices, arg)
+	if si >= 0 {
+		s := &slices[si]
+		t := &s.Tasks[ti]
+		out.Slices = []SliceShowSliceJSON{sliceToShowJSON(s)}
+		out.SliceNumber = sliceIndex1Based(slices, s)
+		out.Task = &SliceShowTaskDetailJSON{
+			Slice:       s.Name,
+			SliceNumber: sliceIndex1Based(slices, s),
+			ID:          t.ID,
+			Description: t.Description,
+			Done:        t.Done,
+			Notes:       t.Notes,
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("slice or task %q not found", arg)
+}
+
+func sliceToShowJSON(s *Slice) SliceShowSliceJSON {
+	tasks := make([]SliceShowTaskJSON, 0, len(s.Tasks))
+	for i := range s.Tasks {
+		tasks = append(tasks, SliceShowTaskJSON{
+			ID:          s.Tasks[i].ID,
+			Description: s.Tasks[i].Description,
+			Done:        s.Tasks[i].Done,
+			Notes:       s.Tasks[i].Notes,
+		})
+	}
+	return SliceShowSliceJSON{
+		Name:          s.Name,
+		Description:   s.Description,
+		CommitSummary: s.CommitSummary,
+		Tasks:         tasks,
+	}
+}
+
+func slicesToShowJSON(slices []Slice) []SliceShowSliceJSON {
+	out := make([]SliceShowSliceJSON, 0, len(slices))
+	for i := range slices {
+		out = append(out, sliceToShowJSON(&slices[i]))
+	}
+	return out
 }
 
 func findSliceByName(slices []Slice, name string) *Slice {
@@ -896,6 +990,40 @@ type TaskCurrentJSON struct {
 	TaskID      string `json:"task_id"`
 	Description string `json:"description"`
 	Notes       string `json:"notes"`
+}
+
+// SliceShowTaskJSON is a task in slice show JSON output.
+type SliceShowTaskJSON struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Done        bool   `json:"done"`
+	Notes       string `json:"notes,omitempty"`
+}
+
+// SliceShowSliceJSON is a slice in slice show JSON output.
+type SliceShowSliceJSON struct {
+	Name          string              `json:"name"`
+	Description   string              `json:"description,omitempty"`
+	CommitSummary string              `json:"commit_summary,omitempty"`
+	Tasks         []SliceShowTaskJSON `json:"tasks"`
+}
+
+// SliceShowJSON is the JSON output for slice show --output json.
+type SliceShowJSON struct {
+	WorkItemID  string                   `json:"work_item_id"`
+	Slices      []SliceShowSliceJSON     `json:"slices"`
+	SliceNumber int                      `json:"slice_number,omitempty"` // 1-based when showing single slice
+	Task        *SliceShowTaskDetailJSON `json:"task,omitempty"`         // set when showing single task
+}
+
+// SliceShowTaskDetailJSON is the task detail when slice show targets a task-id.
+type SliceShowTaskDetailJSON struct {
+	Slice       string `json:"slice"`
+	SliceNumber int    `json:"slice_number"`
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Done        bool   `json:"done"`
+	Notes       string `json:"notes,omitempty"`
 }
 
 func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
