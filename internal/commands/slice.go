@@ -213,4 +213,5 @@ func init() {
 	sliceTaskDoneCurrentCmd.Flags().Bool("next", false, "After marking done, show the next task and progress summary")
 	sliceLintCmd.Flags().String("output", "", "Output format: json")
 	sliceTaskCurrentCmd.Flags().String("output", "", "Output format: json")
+	sliceShowCmd.Flags().String("output", "", "Output format: json")
 }
