@@ -45,6 +45,7 @@ func init() {
 	rootCmd.AddCommand(doneCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(currentCmd)
+	rootCmd.AddCommand(roadmapCmd)
 }
 
 func checkWorkDir(cfg *config.Config) error {

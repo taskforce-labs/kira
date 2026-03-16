@@ -274,11 +274,11 @@ Slices are ordered; each slice is a committable unit of work. Tasks within a sli
 - [x] T004: Add unit tests for parse, round-trip, and validation (valid flat and hierarchical examples)
 
 ### Slice 2: Work item resolution and roadmap lint
-- [ ] T005: Integrate findWorkItemFile(cfg) to resolve work item IDs to paths; use existing Kira config
-- [ ] T006: Implement `kira roadmap lint` (or validate): validate refs (every id: has file), schema, optional stage allowlist
-- [ ] T007: Add optional dependency checks: warn on unknown depends_on IDs; optional cycle detection
-- [ ] T008: Add --check-adhoc flag (or report) to list ad-hoc items; document in help
-- [ ] T009: Add tests for lint: valid roadmap, broken refs, schema errors, ad-hoc report
+- [x] T005: Integrate findWorkItemFile(cfg) to resolve work item IDs to paths; use existing Kira config
+- [x] T006: Implement `kira roadmap lint` (or validate): validate refs (every id: has file), schema, optional stage allowlist
+- [x] T007: Add optional dependency checks: warn on unknown depends_on IDs; optional cycle detection
+- [x] T008: Add --check-adhoc flag (or report) to list ad-hoc items; document in help
+- [x] T009: Add tests for lint: valid roadmap, broken refs, schema errors, ad-hoc report
 
 ### Slice 3: Filtering
 - [ ] T010: Implement filter types: --period, --workstream, --owner matching entry/group meta
