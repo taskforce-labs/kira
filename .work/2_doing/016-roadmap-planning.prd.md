@@ -299,9 +299,9 @@ Slices are ordered; each slice is a committable unit of work. Tasks within a sli
 - [x] T021: Add confirmation prompt for promote; tests for draft and promote
 
 ### Slice 6: PLAN.md and docs
-- [ ] T022: Document PLAN.md location (e.g. .docs/PLAN.md from docs_folder); add to implementation notes or config if needed
-- [ ] T023: Document plan vs roadmap, extraction and generation workflow in command help or docs
-- [ ] T024: Optional: add run script or stub for plan-to-roadmap (read PLAN.md, emit/update ROADMAP.yml); minimal or no-op acceptable for v1
+- [x] T022: Document PLAN.md location (e.g. .docs/PLAN.md from docs_folder); add to implementation notes or config if needed
+- [x] T023: Document plan vs roadmap, extraction and generation workflow in command help or docs
+- [x] T024: Optional: add run script or stub for plan-to-roadmap (read PLAN.md, emit/update ROADMAP.yml); minimal or no-op acceptable for v1
 
 ## Release Notes
 

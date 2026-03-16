@@ -17,10 +17,13 @@ const roadmapFilename = "ROADMAP.yml"
 var roadmapCmd = &cobra.Command{
 	Use:   "roadmap",
 	Short: "Manage roadmaps (ROADMAP.yml)",
-	Long: `Manage the structured roadmap (ROADMAP.yml). Plan vs roadmap: PLAN.md is the
-free-form planning doc; ROADMAP.yml is the structured derivative. Use roadmap lint
-to validate refs and schema; roadmap apply to promote ad-hoc items to work items;
-roadmap draft and promote for draft workflows.`,
+	Long: `Manage the structured roadmap (ROADMAP.yml).
+
+Plan vs roadmap: PLAN.md (under docs folder, e.g. .docs/PLAN.md) is the free-form
+planning doc; ROADMAP.yml is the structured derivative. Extract from product docs
+into PLAN.md, then generate or edit ROADMAP.yml. Use roadmap lint to validate refs
+and schema; roadmap apply to promote ad-hoc items to work items; roadmap draft and
+promote for draft workflows.`,
 }
 
 var roadmapLintCmd = &cobra.Command{
@@ -36,10 +39,26 @@ Use --check-adhoc to list ad-hoc items.`,
 	SilenceErrors: true,
 }
 
+var roadmapPlanToRoadmapCmd = &cobra.Command{
+	Use:   "plan-to-roadmap",
+	Short: "Generate or update ROADMAP.yml from PLAN.md (v1 stub)",
+	Long: `Read PLAN.md (from docs folder, e.g. .docs/PLAN.md) and emit or update ROADMAP.yml.
+In v1 this is a stub: edit ROADMAP.yml manually or use an external tool/LLM to extract
+structure from PLAN.md.`,
+	Args: cobra.NoArgs,
+	RunE: runRoadmapPlanToRoadmap,
+}
+
 func init() {
 	roadmapCmd.AddCommand(roadmapLintCmd)
+	roadmapCmd.AddCommand(roadmapPlanToRoadmapCmd)
 	roadmapLintCmd.Flags().Bool("check-adhoc", false, "List ad-hoc items (entries with title but no id)")
 	roadmapLintCmd.Flags().Bool("check-deps", false, "Warn on unknown depends_on IDs and report dependency cycles")
+}
+
+func runRoadmapPlanToRoadmap(*cobra.Command, []string) error {
+	fmt.Println("plan-to-roadmap: v1 stub. Edit ROADMAP.yml manually or use an external tool to generate from PLAN.md.")
+	return nil
 }
 
 func runRoadmapLint(cmd *cobra.Command, _ []string) error {
