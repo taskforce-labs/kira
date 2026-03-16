@@ -69,40 +69,40 @@ Align with `kira move`: move uses `--commit` / `-c` (default false). Slice toggl
 
 ## Slices
 
-### Toggle default no-commit and --commit flag
+### 1. Toggle default no-commit and --commit flag
 Commit: Default to no commit for slice task toggle (both forms); add --commit/-c opt-in aligned with kira move.
 - [x] T001: Change default to no commit for `slice task toggle <work-item-id> <task-id>` and `slice task current [<work-item-id>] toggle` (update slice_run.go so commit only when flag set).
 - [x] T002: Replace `--no-commit` with `--commit`/`-c` (default false) on sliceTaskToggleCmd and sliceTaskCurrentCmd; when set, stage work item file and commit with same message style (e.g. "Toggle task T001 to done").
 - [x] T003: Add/update unit tests for toggle with and without --commit; ensure no commit by default, commit when --commit.
 
-### slice commit current (with validation)
+### 2. slice commit current (with validation)
 Commit: Add kira slice commit current: resolve work item from context, validate current slice has no open tasks, then generate and commit.
 - [x] T004: Add subcommand `slice commit current [<work-item-id>]`; resolve work item from args or doing folder (same as other slice commit commands).
 - [x] T005: Before committing: validate the slice to be committed (e.g. "previous" — the one just completed) has no open tasks; if any open tasks, fail with clear message listing task IDs.
 - [x] T006: On success: run generate for that slice and execute `git commit -F -` (reuse sliceCommitWorkItem or equivalent); ensure git availability and single work-item staging checks consistent with move/generate.
 - [x] T007: Add tests for `slice commit current`: success when current slice complete; failure when open tasks remain; work-item resolution from doing folder and explicit id.
 
-### Documentation
+### 3. Documentation
 Commit: Update AGENTS.md, kira-plan-and-build, and any loop docs to describe toggle no-commit default and slice commit current.
 - [x] T008: Update AGENTS.md: recommend loop with toggle (no commit by default), optional `kira slice commit generate | git commit -F -` or `kira slice commit current`; document `--commit`/`-c` for toggle.
 - [x] T009: Update .cursor/commands/kira-plan-and-build.md and internal/cursorassets/commands/kira-plan-and-build.md: toggle then commit via generate or `slice commit current`.
 - [x] T010: Update any PRD/spec that describes the slice workflow to mention default no-commit on toggle and `kira slice commit current`.
 
-### slice task done current and --next (expanded scope)
+### 4. slice task done current and --next (expanded scope)
 Commit: Add slice task done current; output completed task; --next shows next task and summary.
 - [x] T011: Add `slice task done [current  | <work-item-id>]`: resolve work item, find current open task, mark done, write file, print "Completed: <id> - <description>". Flags: --commit/-c, --next, --hide-summary.
 - [x] T012: With --next: after marking done, show next task and "same slice" vs "next slice: <name>"; print one-line summary (e.g. 2/4 slices · 10/20 tasks · 1/3 in current slice). Honor --hide-summary for the summary line. When all tasks done, print "All tasks complete" and full summary.
 - [x] T013: Add helper formatSliceSummary(slices, currentSliceName) and printSliceSummaryIf(cmd, path, cfg, currentSliceName); unit tests for summary format and done/--next behavior.
 
-### --hide-summary and summary on slice commands (expanded scope)
+### 5. --hide-summary and summary on slice commands (expanded scope)
 Commit: Add --hide-summary to slice commands; print one-line summary by default where applicable.
 - [x] T014: Add --hide-summary (e.g. persistent on sliceCmd or per-command) to slice add/remove, slice task add/remove/edit/toggle/note/current/done, slice show, slice current, slice progress, slice commit add/remove/current, slice lint. Do not add summary to slice commit generate when stdout is commit message.
 - [x] T015: At end of each runSlice* that modifies or displays state, call printSliceSummaryIf unless --hide-summary. For --output json, do not print human summary.
 
-### Toggle completion output (expanded scope)
+### 6. Toggle completion output (expanded scope)
 Commit: When slice task current ... toggle marks task done, print "Completed: <id> - <description>" for consistency.
 - [x] T016: N/A — `slice task current toggle` removed; use `slice task done current` instead.
 
-### Documentation for expanded scope
-- [ ] T017: Update AGENTS.md and kira-plan-and-build: recommend `slice task done current` and `--next`; document `--hide-summary` for slice commands.
+### 7. Documentation for expanded scope
+- [x] T017: Update AGENTS.md and kira-plan-and-build: recommend `slice task done current` and `--next`; document `--hide-summary` for slice commands.
 

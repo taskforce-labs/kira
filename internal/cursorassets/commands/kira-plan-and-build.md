@@ -10,7 +10,7 @@ Build the given work item by planning the approach and systematically implementi
 
 2. **Implementation Loop**
    For each open task:
-   - Get current task: `kira slice task current` (use `--output json` if needed)
+   - Get current task: `kira slice task show current` (use `--output json` if needed)
    - Implement the task, add/update tests
    - Verify: `kira check -t commit` before committing
    - Learn: If checks fail, analyze root cause, adjust implementation, and document learnings. Only commit when checks pass.
