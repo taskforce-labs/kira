@@ -103,6 +103,12 @@ func safeReadProjectFile(filePath string) ([]byte, error) {
 func findWorkItemFile(workItemID string, cfg *config.Config) (string, error) {
 	var foundPath string
 	workFolder := config.GetWorkFolderPath(cfg)
+	if cfg != nil && cfg.ConfigDir != "" {
+		absWork, err := config.GetWorkFolderAbsPath(cfg)
+		if err == nil {
+			workFolder = absWork
+		}
+	}
 
 	err := filepath.Walk(workFolder, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

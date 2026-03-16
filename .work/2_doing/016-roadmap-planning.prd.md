@@ -293,10 +293,10 @@ Slices are ordered; each slice is a committable unit of work. Tasks within a sli
 - [x] T017: Add --dry-run; best-effort on failure (log, skip already promoted); tests for apply and dry-run
 
 ### Slice 5: Draft and promote
-- [ ] T018: Implement `kira roadmap draft <name> [filters]`: default include outstanding items (status not done/released); --empty for empty draft
-- [ ] T019: Support draft filters: --status, --period, --workstream, --include-all
-- [ ] T020: Implement `kira roadmap promote <draft-name>`: mv draft to ROADMAP.yml, archive previous to .work/{archived}/roadmap/ROADMAP-{timestamp}.yml, git mv + commit
-- [ ] T021: Add confirmation prompt for promote; tests for draft and promote
+- [x] T018: Implement `kira roadmap draft <name> [filters]`: default include outstanding items (status not done/released); --empty for empty draft
+- [x] T019: Support draft filters: --status, --period, --workstream, --include-all
+- [x] T020: Implement `kira roadmap promote <draft-name>`: mv draft to ROADMAP.yml, archive previous to .work/{archived}/roadmap/ROADMAP-{timestamp}.yml, git mv + commit
+- [x] T021: Add confirmation prompt for promote; tests for draft and promote
 
 ### Slice 6: PLAN.md and docs
 - [ ] T022: Document PLAN.md location (e.g. .docs/PLAN.md from docs_folder); add to implementation notes or config if needed
