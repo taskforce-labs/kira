@@ -127,8 +127,8 @@ func runSliceAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Added slice %q to work item %s\n", sliceName, id)
-	noCommit, _ := cmd.Flags().GetBool("no-commit")
-	if !noCommit {
+	doCommit, _ := cmd.Flags().GetBool("commit")
+	if doCommit {
 		msg := fmt.Sprintf("Add slice %s to %s", sliceName, id)
 		if err := sliceCommitWorkItem(path, msg, cfg); err != nil {
 			return err
@@ -185,8 +185,8 @@ func runSliceRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Removed slice %q from work item %s\n", sliceName, id)
-	noCommit, _ := cmd.Flags().GetBool("no-commit")
-	if !noCommit {
+	doCommit, _ := cmd.Flags().GetBool("commit")
+	if doCommit {
 		msg := fmt.Sprintf("Remove slice %s from %s", sliceName, id)
 		if err := sliceCommitWorkItem(path, msg, cfg); err != nil {
 			return err
@@ -236,8 +236,8 @@ func runSliceTaskAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Added task %s to slice %q in work item %s\n", nextID, s.Name, id)
-	noCommit, _ := cmd.Flags().GetBool("no-commit")
-	if !noCommit {
+	doCommit, _ := cmd.Flags().GetBool("commit")
+	if doCommit {
 		msg := fmt.Sprintf("Add task %s to %s", nextID, id)
 		if err := sliceCommitWorkItem(path, msg, cfg); err != nil {
 			return err
@@ -300,8 +300,8 @@ func runSliceTaskRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Removed task %s from work item %s\n", taskID, id)
-	noCommit, _ := cmd.Flags().GetBool("no-commit")
-	if !noCommit {
+	doCommit, _ := cmd.Flags().GetBool("commit")
+	if doCommit {
 		msg := fmt.Sprintf("Remove task %s from %s", taskID, id)
 		if err := sliceCommitWorkItem(path, msg, cfg); err != nil {
 			return err
@@ -344,8 +344,8 @@ func runSliceTaskEdit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Updated task %s in work item %s\n", taskIDStyle(taskID), taskIDStyle(id))
-	noCommit, _ := cmd.Flags().GetBool("no-commit")
-	if !noCommit {
+	doCommit, _ := cmd.Flags().GetBool("commit")
+	if doCommit {
 		msg := fmt.Sprintf("Edit task %s in %s", taskID, id)
 		if err := sliceCommitWorkItem(path, msg, cfg); err != nil {
 			return err
@@ -388,8 +388,8 @@ func runSliceTaskNote(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Updated notes for task %s in work item %s\n", taskID, id)
-	noCommit, _ := cmd.Flags().GetBool("no-commit")
-	if !noCommit {
+	doCommit, _ := cmd.Flags().GetBool("commit")
+	if doCommit {
 		msg := fmt.Sprintf("Note task %s in %s", taskID, id)
 		if err := sliceCommitWorkItem(path, msg, cfg); err != nil {
 			return err
