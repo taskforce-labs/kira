@@ -268,10 +268,10 @@ roadmap:
 Slices are ordered; each slice is a committable unit of work. Tasks within a slice are implemented in order.
 
 ### Slice 1: Data model and YAML
-- [ ] T001: Define roadmap structs: entry types (id ref, title+meta ad-hoc, group+items), nested items; support arbitrary depth
-- [ ] T002: Implement YAML parse and serialize for ROADMAP.yml format (canonical group form: group: <title>, items:)
-- [ ] T003: Add schema validation: each entry has id or title or group+items; reject empty or invalid entries
-- [ ] T004: Add unit tests for parse, round-trip, and validation (valid flat and hierarchical examples)
+- [x] T001: Define roadmap structs: entry types (id ref, title+meta ad-hoc, group+items), nested items; support arbitrary depth
+- [x] T002: Implement YAML parse and serialize for ROADMAP.yml format (canonical group form: group: <title>, items:)
+- [x] T003: Add schema validation: each entry has id or title or group+items; reject empty or invalid entries
+- [x] T004: Add unit tests for parse, round-trip, and validation (valid flat and hierarchical examples)
 
 ### Slice 2: Work item resolution and roadmap lint
 - [ ] T005: Integrate findWorkItemFile(cfg) to resolve work item IDs to paths; use existing Kira config
