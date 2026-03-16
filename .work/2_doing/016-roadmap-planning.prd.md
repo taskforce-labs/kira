@@ -23,13 +23,11 @@ The core design goal is to separate:
 
 To support both human/LLM authoring and machine consumption, the system distinguishes:
 - **PLAN.md** — Free-form, prose-first planning document. It captures intent extracted from use cases, PRDs, and other text; it guides an LLM and serves as the source of truth for *what we want to do* before structure is fixed.
-- **roadmap.yml** — Structured, data-first representation derived from the plan. It is the canonical format for ordering, grouping, dependencies, and staged metadata; it can be generated or updated from the plan (e.g. via LLM extraction).
+- **ROADMAP.yml** — Structured, data-first representation derived from the plan. The canonical current roadmap file is always `ROADMAP.yml`. It is the canonical format for ordering, grouping, dependencies, and metadata; it can be generated or updated from the plan (e.g. via LLM extraction).
 
-Workflow: *product overview / use cases / domain models / architecture / other docs → extraction → plan.md (free text) → generation → roadmap YAML (structured).*
+Workflow: *product overview / use cases / domain models / architecture / other docs → extraction → PLAN.md (free text) → generation → ROADMAP.yml (structured).*
 
 To achieve this, roadmaps are data-first and YAML-based, with visualisation treated as a derived concern. A roadmap may contain references to existing work items as well as ad-hoc items that do not yet have an ID or backing file.
-
-Roadmaps also act as a *staging area* for proposed metadata changes (e.g. dependencies, targets, tags) that can later be applied to work items once planning stabilises.
 
 ## Plan vs Roadmap
 
@@ -39,10 +37,10 @@ Roadmaps also act as a *staging area* for proposed metadata changes (e.g. depend
   - **Extraction inputs**: PRODUCT.md high-level product idea and goals, Use cases, DOMAIN_MODELS.md, ARCHITECTURE.md, ADRs, notes, and other text in the repo can be summarized or distilled into PLAN.md (manually or via LLM) so that the “current plan” is captured in one place.
   - **Role**: Single, readable source for *what we’re planning* before committing to a structured format.
 
-- **Roadmap (e.g. roadmap.yml)** is the structured counterpart:
-  - YAML tree of entries (work item refs, ad-hoc items, groups), with ordering, dependencies, and staged metadata.
+- **Roadmap (ROADMAP.yml)** is the structured counterpart:
+  - YAML tree of entries (work item refs, ad-hoc items, groups), with ordering, dependencies, and metadata.
   - **Derived from the plan**: The roadmap can be generated or refreshed from PLAN.md (e.g. via an LLM or tool that parses the plan and emits/updates the YAML). This keeps the roadmap aligned with the narrative in the plan.
-  - **Role**: Machine-readable format for apply, filters, visualization, staging but ultimately this file feeds agentic workflows so that multiple agents can work in parallel picking up work items and progressing them, asking for help where need be etc.
+  - **Role**: Machine-readable format for apply, filters, and visualization; this file feeds agentic workflows so that multiple agents can work in parallel picking up work items and progressing them, asking for help where need be etc.
 
 This separation allows: (1) editing and reasoning in prose first, (2) extraction from scattered docs into one plan, and (3) generating a consistent, structured roadmap from that plan.
 
@@ -73,33 +71,35 @@ This separation allows: (1) editing and reasoning in prose first, (2) extraction
   - References to existing work items (which themselves may contain nested work items)
   - Ad-hoc items
   - Nested groups
-- Groups support staged metadata just like individual entries.
 - Groups can participate in dependency relationships (group-level dependencies).
 - Groups enable hierarchical filtering and selection (e.g., "all items in workstream:auth").
 
-### Staged Overrides
-- Roadmap entries may contain a `stage` block.
-- The `stage` block represents proposed or draft metadata changes.
-- Staged data does not modify the underlying work item until explicitly applied.
-- Supported staged fields are intentionally limited (e.g. dependencies, tags, targets, notes).
-
 ### Filtering and Selection
-- Roadmap entries may include metadata such as `period`, `workstream`, or `stream`.
+- Roadmap entries may include metadata such as `period`, `workstream`, etc. (use **workstream** consistently; do not use `stream`).
 - Operations can be scoped using selectors (e.g. period=Q1-26, workstream=auth).
-- Hierarchical selectors allow filtering by group path (e.g., "workstream:auth/epic:oauth").
+- **Hierarchical filter syntax:** Path is a sequence of segments separated by `/`. Each segment is `key:value` where `key` is a meta field name (e.g. `workstream`, `epic`, `period`) and `value` is a single token. Matching is **by meta only** (not group title): a group matches a segment if `meta[key] == value`. Include an entry (group or item) if its path from root to entry matches the filter path (prefix or full). Example: `workstream:auth/epic:oauth` includes all entries under a group with `meta.workstream == "auth"` that are under a child group with `meta.epic == "oauth"`. For values containing `:` or `/`, use **quoted values** (e.g. `workstream:"auth/sso"`); alternatively restrict v1 to alphanumeric plus hyphen/underscore and document that.
 - Selection can target specific levels of the hierarchy (e.g., "all groups at depth 2").
 
 ### Apply Operation
 - **Command**: `kira roadmap apply [filters] [flags]`
 - A roadmap apply operation must:
   - Select a subset of roadmap entries via filters.
-  - Promote ad-hoc items in that subset into real work items.
-  - Apply staged overrides to referenced work items.
-  - Update the roadmap to replace promoted ad-hoc items with newly assigned IDs.
+  - Promote ad-hoc items in that subset into real work items (creating work item files and assigning IDs).
+  - Update the roadmap in place to replace promoted ad-hoc items with newly assigned IDs (see below for file and conflict behavior).
+
+**Where promoted work items are created:** New work item files are created in the **backlog** folder (`status_folders.backlog`). Subfolders per phase (e.g. per period) may be used to organize promoted items; exact layout is implementation-defined.
+
+**ID generation:** Use the existing **GetNextID()** convention (e.g. numeric `\d{3}` or as configured via `validation.id_format`). No workstream prefix or custom ID shape is required for v1.
+
+**Failure and atomicity:** Apply is **best-effort**. If some promotions succeed and others fail (e.g. validation, file write), log each failure with a clear reason. The user can fix issues and re-run apply; already-promoted items are skipped (by ID), and the command brings across the remaining ad-hoc items. No rollback of partial writes is required.
+
+**Roadmap file update and conflicts:** Apply **rewrites the current roadmap file (ROADMAP.yml) in place** after promotions—either after each successful promotion or in a single write at the end of a best-effort run, replacing ad-hoc entries with their new IDs. **Read the roadmap once at the start of apply.** If the file is modified on disk after that read but before write, **overwrite** with the in-memory version. Optional: before writing, detect changed mtime/size and **warn** that the file may have been edited elsewhere, with a prompt to continue or abort.
+
+**Resolving work item IDs:** Resolution uses the same rule as the rest of Kira: **findWorkItemFile(workItemID, cfg)** (search work folder by `id` in front matter). When an ID in the roadmap has no file: **lint** — report a warning (or error if strict) and list broken IDs; **apply** — skip that entry (do not promote if it was ad-hoc); optionally support a "strict apply" mode that fails the whole apply with a clear message.
 
 #### Command Syntax Examples
 ```bash
-# Apply all staged changes in current roadmap
+# Promote ad-hoc items in current roadmap
 kira roadmap apply
 
 # Apply only items matching specific filters
@@ -128,7 +128,6 @@ kira roadmap apply --filter "workstream:auth/epic:oauth"
 - **PLAN.md** exists as the free-form planning artifact; roadmap YAML is the structured derivative that can be generated or updated from the plan.
 - Roadmaps can reference work items without duplicating their data.
 - Ad-hoc roadmap items can exist without IDs.
-- Staged overrides do not affect work items until an apply operation is run.
 - The apply operation can be safely run with filters to limit scope.
 - Applying a roadmap results in deterministic file creation and modification.
 - A dry-run mode clearly reports intended changes before mutation.
@@ -139,16 +138,16 @@ kira roadmap apply --filter "workstream:auth/epic:oauth"
 - The hierarchical structure maps naturally to Gantt chart work breakdown structures.
 - Roadmap visualization can render the tree structure (expandable groups, indentation, etc.).
 - Flat views can be generated by flattening the hierarchy when needed.
-- `ROADMAP.yml` is always the current/active roadmap.
+- **ROADMAP.yml** is always the current/active roadmap (canonical filename; content is YAML).
 - Draft roadmaps can be created with filtered items from the current roadmap.
 - Draft roadmaps can be promoted to current, archiving the previous roadmap.
 
 ## Implementation Notes
 
 ### PLAN.md and Roadmap Generation
-- **Location**: PLAN.md lives in the work tree (e.g. `.docs/` or repo root); exact path TBD.
-- **Extraction**: Use cases, PRDs, and other text can be used (manually or via tooling/LLM) to populate or update plan.md so it reflects current intent.
-- **Generation**: A run command  (e.g. `kira run plan-to-roadmap` or LLM-assisted) can read plan.md and produce or update the structured roadmap YAML, so the roadmap stays aligned with the plan. NOTE: `kira run <llm-workflow-script>` hasn't been implemented yet but it's worth understanding the intent and where we are going.
+- **Location**: PLAN.md lives under the docs folder, e.g. `.docs/PLAN.md` (when `docs_folder: .docs`). This keeps plan and roadmap-related docs together and makes tooling consistent.
+- **Extraction**: Use cases, PRDs, and other text can be used (manually or via tooling/LLM) to populate or update PLAN.md so it reflects current intent.
+- **Generation**: A run command (e.g. `kira run plan-to-roadmap` or LLM-assisted) can read PLAN.md and produce or update the structured roadmap YAML, so the roadmap stays aligned with the plan. Assume `kira run <llm-workflow-script>` will exist soon; plan→roadmap generation is in scope and can be implemented accordingly.
 
 ### Example Roadmap Structure
 
@@ -156,14 +155,11 @@ kira roadmap apply --filter "workstream:auth/epic:oauth"
 ```yaml
 roadmap:
   - id: AUTH-001
-    stage:
-      depends_on+: [PLAT-002]
 
   - title: OAuth provider spike
     meta:
       period: Q1-26
       workstream: auth
-    stage:
       owner: wayne
       outcome: decision
 ```
@@ -182,15 +178,13 @@ roadmap:
           epic: oauth
         items:
           - id: AUTH-001
-            stage:
-              depends_on+: [PLAT-002]
           - title: OAuth provider spike
-            stage:
+            meta:
               owner: wayne
               outcome: decision
           - title: OAuth token refresh
-            stage:
-              tags+: [security, oauth]
+            meta:
+              tags: [security, oauth]
 
       - group: SSO Features
         meta:
@@ -198,8 +192,8 @@ roadmap:
         items:
           - id: AUTH-002
           - title: SAML integration
-            stage:
-              depends_on+: [AUTH-001]
+            meta:
+              depends_on: [AUTH-001]
 
   - group: Platform Migration
     meta:
@@ -207,8 +201,8 @@ roadmap:
       workstream: platform
     items:
       - id: PLAT-002
-        stage:
-          tags+: [migration, infrastructure]
+        meta:
+          tags: [migration, infrastructure]
 ```
 
 #### Nested Work Items Example
@@ -226,61 +220,40 @@ roadmap:
       - title: New feature (ad-hoc, will be promoted)
 ```
 
-#### Alternative: Inline Group Syntax
-```yaml
-roadmap:
-  - title: Authentication Workstream
-    type: group
-    meta:
-      period: Q1-26
-      workstream: auth
-    items:
-      - title: OAuth Integration Epic
-        type: group
-        items:
-          - id: AUTH-001
-          - title: OAuth provider spike
-```
-
-**Note**: The exact syntax can be refined during implementation. The key is supporting nested groups that can contain both work item references and ad-hoc items, enabling tree-like organization that maps naturally to Gantt charts and roadmap visualizations.
+**Canonical group form (v1):** Use **`group: <title>`** with nested `items:` as the only supported form. This is compact, clearly distinguishes groups from leaf entries (no `type` field), and matches the hierarchical examples above. Parsing, generation, and lint use this schema only. A `title` + `type: group` form may be considered in a later release for a unified entry shape.
 
 ### Promotion Rules
 - When applying a roadmap:
-  - Entries without an ID are promoted to new work item files.
-  - ID generation may be based on workstream prefixes, group hierarchy, or repository conventions.
-  - Staged fields are written into the new work item on creation.
+  - Entries without an ID are promoted to new work item files (see Apply section for folder and ID generation).
+  - Entry and group metadata (e.g. workstream, owner, period, tags) can be written into the new work item on creation.
   - Groups are not promoted to work items (they remain organizational structure).
-  - Group metadata can be inherited by child items during promotion (e.g., workstream from parent group).
+  - **Group metadata inheritance:** All keys from a group's `meta` are inherited by child entries (items or nested groups) as **defaults**. Precedence: **child wins** — if the child has a value for a key (e.g. `meta.workstream`), that value is used; only missing keys are filled from the nearest parent group. When creating a work item from an ad-hoc entry, the effective metadata is the merged `meta` (parent chain with child wins) plus the entry's own fields. Document this behavior in command help and any promotion docs.
   - The hierarchical structure is preserved in the roadmap after promotion (groups remain, ad-hoc items become ID references).
-
-### Merge Semantics
-- `field:` replaces the existing value.
-- `field+:` appends to list-based fields.
-- `field-:` removes from list-based fields.
-- Conflicts may optionally be detected using a stored base hash.
+  - **Stage blocks:** v1 does not support staged overrides on existing work items. Apply only promotes ad-hoc items to new work items; to change dependencies, tags, or owner on existing work items, users edit the work item file or use existing commands. Staged overrides may be reintroduced in a later release.
 
 ### Roadmap Versioning and Archiving
-- **Current Roadmap**: `ROADMAP.md` is always the active/current roadmap file.
-- **Draft Roadmaps**: Users can create draft roadmaps (e.g., `ROADMAP-draft.md`, `ROADMAP-Q2-26.md`) for planning future periods or major changes.
+- **Current Roadmap**: **ROADMAP.yml** is always the active/current roadmap file.
+- **Draft Roadmaps**: Users can create draft roadmaps (e.g., `ROADMAP-draft.yml`, `ROADMAP-Q2-26.yml`) for planning future periods or major changes.
 - **Command**: `kira roadmap draft <name> [filters]` - Create a new draft roadmap
-  - Can optionally bring over outstanding items from the current roadmap
-  - Supports filtering to select which items come over (e.g., only items from specific workstreams, periods, or status)
-  - Example: `kira roadmap draft Q2-26 --period Q2-26 --status todo,doing`
+  - **Default when no filters are given:** Include **all outstanding items** from the current roadmap. "Outstanding" means status **not** in `done` or `released` (i.e. backlog, todo, doing, review, abandoned, archived are outstanding). Use **`--empty`** to create a draft with no items when starting from scratch.
+  - Supports filtering to select which items come over (e.g., only items from specific workstreams, periods, or status).
+  - Example: `kira roadmap draft Q2-26 --period Q2-26 --status todo,doing` or `kira roadmap draft Q2-26 --empty`.
 - **Command**: `kira roadmap promote <draft-name>` - Promote a draft to current and archive the previous
-  - Moves the draft roadmap to `ROADMAP.md` (becomes the current roadmap)
-  - Archives the previous `ROADMAP.md` to `.work/{archived}/roadmap/ROADMAP-{timestamp}.md` where `{archived}` is the configured archived folder (default: `z_archive`)
-  - Preserves git history through the rename operation
-- **Outstanding Items**: When creating a draft, outstanding items (not in "done" or "released" status) can be automatically included based on filters
+  - Moves the draft roadmap to **ROADMAP.yml** (becomes the current roadmap). Uses **git mv** and commits the rename so git history is preserved; implementation performs the rename and commit (push is optional/configurable).
+  - Archives the previous ROADMAP.yml to `.work/{archived}/roadmap/ROADMAP-{timestamp}.yml` where **{archived}** is the **folder name** from `status_folders.archived` (e.g. `z_archive`), not a separate config key.
+  - Preserves git history through the rename operation (git mv + commit).
 - **Filtering on Draft Creation**: Filters determine which items from the current roadmap are copied to the draft:
   - `--status <statuses>` - Only include items with specific statuses
   - `--period <period>` - Only include items from specific periods
   - `--workstream <workstream>` - Only include items from specific workstreams
   - `--exclude-done` - Exclude completed items (default behavior)
   - `--include-all` - Include all items regardless of status
+  - `--empty` - Create draft with no items (overrides default of including outstanding items)
 
 ### Safety and UX
 - Apply operations support `--dry-run`.
-- Roadmap linting validates references and staged fields.
+- **Roadmap linting:** **`kira roadmap lint`** (or `kira roadmap validate`) runs over the current roadmap file (ROADMAP.yml). It **validates:** (1) **References** — every `id:` references a work item that exists (via findWorkItemFile); (2) **Staged fields** — only allowlisted names appear under `stage` (if present); (3) **Schema** — required structure for entries (e.g. `id` or `title` or `group`/`items`, not empty); (4) **Dependencies** — optional: warn on unknown `depends_on` IDs and optionally detect cycles. Emit warnings for broken refs and unknown staged fields; exit non-zero if any errors (e.g. invalid schema). Do not modify the file. Document the command and checks in command help.
+- **Ad-hoc items:** Ad-hoc items can remain in the roadmap until promoted. Provide a **flag on roadmap lint** (e.g. `--check-adhoc` or a dedicated report) that lists ad-hoc items so teams can work through them and ensure they are addressed or promoted.
 - Visualisation (e.g. Mermaid, Gantt charts) is treated as a downstream render step and is not part of the core data model.
 - The hierarchical structure naturally supports Gantt chart rendering (groups as summary tasks, items as tasks).
 - Tree visualization can show the roadmap structure with expandable/collapsible groups.
@@ -291,12 +264,12 @@ roadmap:
 
 - Added roadmap planning system with hierarchical tree structure
 - **PLAN.md** as free-form planning doc; extraction from use cases/docs feeds the plan; roadmap YAML can be generated from the plan
-- Roadmaps stored as YAML files (ROADMAP.md for current roadmap)
+- Roadmaps stored as YAML files (**ROADMAP.yml** for current roadmap)
 - Support for nested work items (work items can contain other work items)
 - Support for groups and ad-hoc items at any nesting level
-- Staged metadata changes that can be applied to work items
-- `kira roadmap apply` command with filtering options (--period, --workstream, --owner, etc.)
+- `kira roadmap apply` command (promotes ad-hoc items to work items) with filtering options (--period, --workstream, --owner, etc.)
 - Draft roadmap creation with `kira roadmap draft` command
 - Draft roadmaps can selectively bring over outstanding items from current roadmap
 - Roadmap promotion with `kira roadmap promote` to make draft current and archive previous
+- `kira roadmap lint` (or validate) for reference, schema, and optional dependency checks; optional flag to report ad-hoc items
 - All roadmap operations support --dry-run for safety
