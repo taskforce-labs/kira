@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -483,8 +484,6 @@ func TestSliceCommandsWrongArgs(t *testing.T) {
 		{"slice task note with 0 args", []string{"slice", "task", "note"}, "arg(s)"},
 		{"slice task note with 1 arg", []string{"slice", "task", "note", "current"}, "arg(s)"},
 		{"slice task note with 2 args", []string{"slice", "task", "note", "current", "T001"}, "arg(s)"},
-		{"slice show with 0 args", []string{"slice", "show"}, "arg(s)"},
-		{"slice progress with 0 args", []string{"slice", "progress"}, "accepts 1 arg(s)"},
 		{"slice commit add with 0 args", []string{"slice", "commit", "add"}, "arg(s)"},
 		{"slice commit add with 1 arg", []string{"slice", "commit", "add", "MySlice"}, "arg(s)"},
 		{"slice commit remove with 0 args", []string{"slice", "commit", "remove"}, "arg(s)"},
@@ -884,17 +883,33 @@ kind: prd
 ### S1
 - [x] T001: Done one
 `
-	t.Run("no open tasks returns error", func(t *testing.T) {
+	t.Run("no open tasks shows friendly message and status and exits 0", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
 		require.NoError(t, os.WriteFile(".work/2_doing/002-all-done.prd.md", []byte(workItemAllDone), 0o600))
 
+		var buf bytes.Buffer
+		oldOut, oldErr := os.Stdout, os.Stderr
+		rOut, wOut, _ := os.Pipe()
+		rErr, wErr, _ := os.Pipe()
+		os.Stdout = wOut
+		os.Stderr = wErr
+		defer func() { os.Stdout = oldOut; os.Stderr = oldErr }()
+
 		rootCmd.SetArgs([]string{"slice", "task", "done", "current", "002", "--hide-summary"})
-		err := rootCmd.Execute()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no open tasks")
+		errCh := make(chan error, 1)
+		go func() { errCh <- rootCmd.Execute() }()
+		err := <-errCh
+		wOut.Close()
+		wErr.Close()
+		io.Copy(&buf, rOut)
+		io.Copy(&buf, rErr)
+		require.NoError(t, err)
+		out := buf.String()
+		assert.Contains(t, out, "No task marked done (all tasks already complete).")
+		assert.Contains(t, out, "All tasks complete.")
 	})
 	t.Run("marks current task done and prints Completed line", func(t *testing.T) {
 		tmpDir := t.TempDir()
