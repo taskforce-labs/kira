@@ -287,10 +287,10 @@ Slices are ordered; each slice is a committable unit of work. Tasks within a sli
 - [x] T013: Add unit tests for filter combination and path matching
 
 ### Slice 4: Apply
-- [ ] T014: Implement `kira roadmap apply [filters]`: read ROADMAP.yml, select entries by filters
-- [ ] T015: Promote ad-hoc entries: create work item files in status_folders.backlog, GetNextID(); merge group meta (child wins)
-- [ ] T016: After promotions, rewrite ROADMAP.yml in place (replace ad-hoc with new IDs); handle file-modified warning optional
-- [ ] T017: Add --dry-run; best-effort on failure (log, skip already promoted); tests for apply and dry-run
+- [x] T014: Implement `kira roadmap apply [filters]`: read ROADMAP.yml, select entries by filters
+- [x] T015: Promote ad-hoc entries: create work item files in status_folders.backlog, GetNextID(); merge group meta (child wins)
+- [x] T016: After promotions, rewrite ROADMAP.yml in place (replace ad-hoc with new IDs); handle file-modified warning optional
+- [x] T017: Add --dry-run; best-effort on failure (log, skip already promoted); tests for apply and dry-run
 
 ### Slice 5: Draft and promote
 - [ ] T018: Implement `kira roadmap draft <name> [filters]`: default include outstanding items (status not done/released); --empty for empty draft

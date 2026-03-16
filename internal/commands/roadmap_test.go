@@ -84,3 +84,55 @@ func TestRoadmapLint_FileNotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
+
+func TestRoadmapApply_DryRun(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Chdir(dir))
+	defer func() { _ = os.Chdir(t.TempDir()) }()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".work"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kira.yml"), []byte("version: \"1.0\"\ntemplates:\n  task: templates/template.task.md\nstatus_folders:\n  backlog: 0_backlog\n  todo: 1_todo\n  doing: 2_doing\n  review: 3_review\n  done: 4_done\n  archived: z_archive\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ROADMAP.yml"), []byte("roadmap:\n  - title: My ad-hoc item\n    meta:\n      period: Q1-26\n"), 0o600))
+
+	rootCmd.SetArgs([]string{"roadmap", "apply", "--dry-run"})
+	err := rootCmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestRoadmapApply_Promote(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Chdir(dir))
+	defer func() { _ = os.Chdir(t.TempDir()) }()
+
+	workDir := filepath.Join(dir, ".work")
+	backlogDir := filepath.Join(workDir, "0_backlog")
+	templateDir := filepath.Join(workDir, "templates")
+	require.NoError(t, os.MkdirAll(backlogDir, 0o700))
+	require.NoError(t, os.MkdirAll(templateDir, 0o700))
+	// Minimal task template (only required inputs for ProcessTemplate)
+	minimalTask := `---
+id: <!--input-number:id:"Task ID"-->
+title: <!--input-string:title:"Task title"-->
+status: <!--input-string[backlog,todo,doing,review,done,released,abandoned,archived]:status:"Current status"-->
+kind: task
+created: <!--input-datetime[yyyy-mm-dd]:created:"Creation date"-->
+---
+# <!--input-string:title:"Task title"`
+	require.NoError(t, os.WriteFile(filepath.Join(templateDir, "template.task.md"), []byte(minimalTask), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kira.yml"), []byte("version: \"1.0\"\ntemplates:\n  task: templates/template.task.md\nstatus_folders:\n  backlog: 0_backlog\n  todo: 1_todo\n  doing: 2_doing\n  review: 3_review\n  done: 4_done\n  archived: z_archive\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ROADMAP.yml"), []byte("roadmap:\n  - title: Promoted item\n    meta:\n      workstream: auth\n"), 0o600))
+
+	rootCmd.SetArgs([]string{"roadmap", "apply"})
+	_ = roadmapApplyCmd.Flags().Set("dry-run", "false")
+	err := rootCmd.Execute()
+	require.NoError(t, err)
+
+	// Check work item was created in backlog
+	entries, _ := os.ReadDir(backlogDir)
+	require.GreaterOrEqual(t, len(entries), 1)
+	// Check ROADMAP.yml was updated (ad-hoc replaced with id)
+	// #nosec G304 - dir is from t.TempDir(), path is under it
+	data, _ := os.ReadFile(filepath.Join(dir, "ROADMAP.yml"))
+	assert.Contains(t, string(data), "id:")
+	assert.NotContains(t, string(data), "title: Promoted item")
+}
