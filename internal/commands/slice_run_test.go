@@ -537,7 +537,7 @@ kind: prd
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
 		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemWithSlices), 0o600))
 
-		rootCmd.SetArgs([]string{"slice", "commit", "add", "--no-commit", "041", "MySlice", "New task"})
+		rootCmd.SetArgs([]string{"slice", "commit", "add", "041", "MySlice", "New task"})
 		err := rootCmd.Execute()
 		require.NoError(t, err)
 
@@ -556,7 +556,7 @@ kind: prd
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
 		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemWithSlices), 0o600))
 
-		rootCmd.SetArgs([]string{"slice", "commit", "add", "--no-commit", "MySlice", "Another task"})
+		rootCmd.SetArgs([]string{"slice", "commit", "add", "MySlice", "Another task"})
 		err := rootCmd.Execute()
 		require.NoError(t, err)
 
@@ -624,7 +624,7 @@ kind: prd
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
 		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemTwoSlices), 0o600))
 
-		rootCmd.SetArgs([]string{"slice", "commit", "remove", "--yes", "--no-commit", "041", "RemoveMe"})
+		rootCmd.SetArgs([]string{"slice", "commit", "remove", "--yes", "041", "RemoveMe"})
 		err := rootCmd.Execute()
 		require.NoError(t, err)
 
@@ -641,7 +641,7 @@ kind: prd
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
 		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemTwoSlices), 0o600))
 
-		rootCmd.SetArgs([]string{"slice", "commit", "remove", "--yes", "--no-commit", "RemoveMe"})
+		rootCmd.SetArgs([]string{"slice", "commit", "remove", "--yes", "RemoveMe"})
 		err := rootCmd.Execute()
 		require.NoError(t, err)
 
