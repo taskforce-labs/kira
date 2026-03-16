@@ -281,10 +281,10 @@ Slices are ordered; each slice is a committable unit of work. Tasks within a sli
 - [x] T009: Add tests for lint: valid roadmap, broken refs, schema errors, ad-hoc report
 
 ### Slice 3: Filtering
-- [ ] T010: Implement filter types: --period, --workstream, --owner matching entry/group meta
-- [ ] T011: Implement hierarchical path filter (key:value/key:value, quoted values for : or /)
-- [ ] T012: Implement selection: include entry if path from root matches filter (prefix or full); by meta only
-- [ ] T013: Add unit tests for filter combination and path matching
+- [x] T010: Implement filter types: --period, --workstream, --owner matching entry/group meta
+- [x] T011: Implement hierarchical path filter (key:value/key:value, quoted values for : or /)
+- [x] T012: Implement selection: include entry if path from root matches filter (prefix or full); by meta only
+- [x] T013: Add unit tests for filter combination and path matching
 
 ### Slice 4: Apply
 - [ ] T014: Implement `kira roadmap apply [filters]`: read ROADMAP.yml, select entries by filters

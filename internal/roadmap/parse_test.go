@@ -27,8 +27,8 @@ roadmap:
 	assert.Equal(t, "AUTH-001", f.Roadmap[0].ID)
 	assert.True(t, f.Roadmap[1].IsAdHoc())
 	assert.Equal(t, "OAuth provider spike", f.Roadmap[1].Title)
-	assert.Equal(t, "Q1-26", metaStr(f.Roadmap[1].Meta, "period"))
-	assert.Equal(t, "auth", metaStr(f.Roadmap[1].Meta, "workstream"))
+	assert.Equal(t, "Q1-26", testMetaStr(f.Roadmap[1].Meta, "period"))
+	assert.Equal(t, "auth", testMetaStr(f.Roadmap[1].Meta, "workstream"))
 }
 
 func TestParse_HierarchicalStructure(t *testing.T) {
@@ -129,7 +129,7 @@ roadmap:
 	require.NoError(t, err)
 	assert.Equal(t, f.Roadmap[0].ID, f2.Roadmap[0].ID)
 	assert.Equal(t, f.Roadmap[1].Title, f2.Roadmap[1].Title)
-	assert.Equal(t, metaStr(f.Roadmap[1].Meta, "period"), metaStr(f2.Roadmap[1].Meta, "period"))
+	assert.Equal(t, testMetaStr(f.Roadmap[1].Meta, "period"), testMetaStr(f2.Roadmap[1].Meta, "period"))
 }
 
 func TestRoundTrip_Hierarchical(t *testing.T) {
@@ -198,7 +198,7 @@ func TestSaveFile(t *testing.T) {
 	assert.Equal(t, "001", f2.Roadmap[0].ID)
 }
 
-func metaStr(m map[string]interface{}, key string) string {
+func testMetaStr(m map[string]interface{}, key string) string {
 	if m == nil {
 		return ""
 	}
