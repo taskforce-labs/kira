@@ -34,7 +34,9 @@ func TestFindWorkItemFile(t *testing.T) {
 		// Find the work item
 		foundPath, err := findWorkItemFile("001", cfg)
 		require.NoError(t, err)
-		assert.Equal(t, filePath, foundPath)
+		expectedPath, err := filepath.Abs(filePath)
+		require.NoError(t, err)
+		assert.Equal(t, expectedPath, foundPath)
 	})
 
 	t.Run("returns error when work item not found", func(t *testing.T) {
@@ -77,7 +79,9 @@ kind: prd
 
 		path, err := resolveSliceWorkItem("001", cfg)
 		require.NoError(t, err)
-		assert.Equal(t, ".work/1_todo/001-test.prd.md", path)
+		expectedPath, err := filepath.Abs(".work/1_todo/001-test.prd.md")
+		require.NoError(t, err)
+		assert.Equal(t, expectedPath, path)
 	})
 
 	t.Run("returns error when no work item in doing folder", func(t *testing.T) {
