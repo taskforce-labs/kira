@@ -186,6 +186,7 @@ func TestRoadmapDraft_IncludeAll(t *testing.T) {
 	require.Len(t, f.Roadmap, 2, "ROADMAP.yml must have 2 entries")
 
 	rootCmd.SetArgs([]string{"roadmap", "draft", "include-all-test", "--include-all"})
+	_ = roadmapDraftCmd.Flags().Set("empty", "false")
 	err := rootCmd.Execute()
 	require.NoError(t, err)
 
