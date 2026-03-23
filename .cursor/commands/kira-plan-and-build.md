@@ -8,8 +8,7 @@ For each **slice** (not each task):
 4. **Commit (one commit per slice):**
    - The commit must include **both** the code changes for the slice **and** the work item with that slice’s tasks marked done.
    - To avoid separate "Toggle task" commits: **edit the work item** to check the boxes for the tasks you just completed (in the `## Slices` section), then run `kira slice lint [current | <work-item-id>]` and fix any errors.
-   - Stage the code files and the work item file, then run:
-     `kira slice commit generate [current | <work-item-id>] | git commit -F -`
+  - Stage the code files and the work item file, then run `git commit` with an appropriate message for the slice.
    - Do **not** run `kira slice task done current` before this commit if it would create its own commit; either skip and edit the work item by hand, or run `kira slice task done current --commit` when you intend to commit **only** the work item (e.g. no code this step). Use `kira slice task done current --next` to mark done and see the next task plus progress summary; use `--hide-summary` on slice commands to suppress the one-line summary.
 5. Move to the next slice and repeat.
 

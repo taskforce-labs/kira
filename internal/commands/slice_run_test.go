@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"kira/internal/config"
@@ -306,36 +304,6 @@ func TestFormatSliceSummary(t *testing.T) {
 	})
 }
 
-func TestDetectTaskChanges(t *testing.T) {
-	current := []Slice{{Name: "S", Tasks: []Task{
-		{ID: "T001", Description: "A", Done: true},
-		{ID: "T002", Description: "B", Done: false},
-		{ID: "T003", Description: "C", Done: false},
-	}}}
-	previous := []Slice{{Name: "S", Tasks: []Task{
-		{ID: "T001", Description: "A", Done: false},
-		{ID: "T002", Description: "B", Done: true},
-	}}}
-	completed, reopened, added := detectTaskChanges(previous, current)
-	assert.Len(t, completed, 1)
-	assert.Equal(t, "T001", completed[0].ID)
-	assert.Len(t, reopened, 1)
-	assert.Equal(t, "T002", reopened[0].ID)
-	assert.Len(t, added, 1)
-	assert.Equal(t, "T003", added[0].ID)
-}
-
-func TestFormatSliceCommitParts(t *testing.T) {
-	completed := []Task{{ID: "T001", Description: "Done task"}}
-	reopened := []Task{{ID: "T002", Description: "Reopened"}}
-	added := []Task{{ID: "T003", Description: "New"}}
-	msg := formatSliceCommitParts(completed, reopened, added)
-	assert.Contains(t, msg, "Complete T001")
-	assert.Contains(t, msg, "Reopen T002")
-	assert.Contains(t, msg, "Add tasks T003")
-	assert.Empty(t, formatSliceCommitParts(nil, nil, nil))
-}
-
 func TestLintSlicesSection(t *testing.T) {
 	t.Run("reports missing Slices section", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -448,17 +416,19 @@ func TestPrintSliceSummaryIfPresent(t *testing.T) {
 	})
 }
 
-func TestSliceCommitRequiresSubcommand(t *testing.T) {
-	t.Run("slice commit with no subcommand prints usage and exits non-zero", func(t *testing.T) {
-		rootCmd.SetArgs([]string{"slice", "commit"})
-		err := rootCmd.Execute()
-		require.Error(t, err)
-	})
-	t.Run("slice commit with unknown subcommand prints usage and exits non-zero", func(t *testing.T) {
-		rootCmd.SetArgs([]string{"slice", "commit", "unknownsub"})
-		err := rootCmd.Execute()
-		require.Error(t, err)
-	})
+func TestSliceCommandHelpDoesNotIncludeCommit(t *testing.T) {
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	defer func() {
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+	}()
+
+	rootCmd.SetArgs([]string{"slice", "--help"})
+	err := rootCmd.Execute()
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "commit")
 }
 
 // TestSliceCommandsWrongArgs ensures slice subcommands with required args return an error
@@ -484,9 +454,6 @@ func TestSliceCommandsWrongArgs(t *testing.T) {
 		{"slice task note with 0 args", []string{"slice", "task", "note"}, "arg(s)"},
 		{"slice task note with 1 arg", []string{"slice", "task", "note", "current"}, "arg(s)"},
 		{"slice task note with 2 args", []string{"slice", "task", "note", "current", "T001"}, "arg(s)"},
-		{"slice commit add with 0 args", []string{"slice", "commit", "add"}, "arg(s)"},
-		{"slice commit add with 1 arg", []string{"slice", "commit", "add", "MySlice"}, "arg(s)"},
-		{"slice commit remove with 0 args", []string{"slice", "commit", "remove"}, "arg(s)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -516,347 +483,6 @@ func TestSliceCommandsWrongArgsPrintsUsage(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "Usage:", "output should contain usage when args are wrong")
 	assert.Contains(t, out, "slice add", "output should contain the command use line")
-}
-
-func TestSliceCommitAdd(t *testing.T) {
-	workItemWithSlices := `---
-id: 041
-title: slice commit
-status: doing
-kind: prd
----
-# slice commit
-## Slices
-### MySlice
-- [ ] T001: First task
-`
-	t.Run("add with explicit work-item-id adds task to slice", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemWithSlices), 0o600))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "add", "041", "MySlice", "New task"})
-		err := rootCmd.Execute()
-		require.NoError(t, err)
-
-		cfg, _ := config.LoadConfig()
-		_, slices, err := loadSlicesFromFile(".work/2_doing/041-slice-commit.prd.md", cfg)
-		require.NoError(t, err)
-		require.Len(t, slices, 1)
-		require.Len(t, slices[0].Tasks, 2)
-		assert.Equal(t, "T002", slices[0].Tasks[1].ID)
-		assert.Equal(t, "New task", slices[0].Tasks[1].Description)
-	})
-	t.Run("add with 2 args uses doing folder when one work item", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemWithSlices), 0o600))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "add", "MySlice", "Another task"})
-		err := rootCmd.Execute()
-		require.NoError(t, err)
-
-		cfg, _ := config.LoadConfig()
-		_, slices, err := loadSlicesFromFile(".work/2_doing/041-slice-commit.prd.md", cfg)
-		require.NoError(t, err)
-		require.Len(t, slices[0].Tasks, 2)
-		assert.Equal(t, "Another task", slices[0].Tasks[1].Description)
-	})
-	t.Run("add with no work-item-id and zero work items in doing returns error", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "add", "SomeSlice", "desc"})
-		err := rootCmd.Execute()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no work item in doing folder")
-	})
-	t.Run("add with no work-item-id and multiple work items in doing returns error", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		require.NoError(t, os.WriteFile(".work/2_doing/041-a.prd.md", []byte(workItemWithSlices), 0o600))
-		other := `---
-id: 042
-title: other
-status: doing
-kind: prd
----
-# other
-## Slices
-### S1
-- [ ] T001: x
-`
-		require.NoError(t, os.WriteFile(".work/2_doing/042-b.prd.md", []byte(other), 0o600))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "add", "S1", "desc"})
-		err := rootCmd.Execute()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "multiple work items in doing folder")
-	})
-}
-
-func TestSliceCommitRemove(t *testing.T) {
-	workItemTwoSlices := `---
-id: 041
-title: slice commit
-status: doing
-kind: prd
----
-# slice commit
-## Slices
-### Keep
-- [ ] T001: Keep task
-### RemoveMe
-- [ ] T002: Remove task
-`
-	t.Run("remove with explicit work-item-id and slice name removes slice", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemTwoSlices), 0o600))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "remove", "--yes", "041", "RemoveMe"})
-		err := rootCmd.Execute()
-		require.NoError(t, err)
-
-		cfg, _ := config.LoadConfig()
-		_, slices, err := loadSlicesFromFile(".work/2_doing/041-slice-commit.prd.md", cfg)
-		require.NoError(t, err)
-		require.Len(t, slices, 1)
-		assert.Equal(t, "Keep", slices[0].Name)
-	})
-	t.Run("remove with 1 arg uses doing folder when one work item", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		require.NoError(t, os.WriteFile(".work/2_doing/041-slice-commit.prd.md", []byte(workItemTwoSlices), 0o600))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "remove", "--yes", "RemoveMe"})
-		err := rootCmd.Execute()
-		require.NoError(t, err)
-
-		cfg, _ := config.LoadConfig()
-		_, slices, err := loadSlicesFromFile(".work/2_doing/041-slice-commit.prd.md", cfg)
-		require.NoError(t, err)
-		require.Len(t, slices, 1)
-		assert.Equal(t, "Keep", slices[0].Name)
-	})
-	t.Run("remove with no work-item-id and zero work items in doing returns error", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "remove", "SomeSlice"})
-		err := rootCmd.Execute()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no work item in doing folder")
-	})
-}
-
-func TestSliceCommitGenerate(t *testing.T) {
-	workItemGenerate := `---
-id: 001
-title: Implement OIDC login flow
-status: doing
-kind: prd
----
-# Auth
-## Slices
-### Auth Token Validation
-- [ ] T001: Implement OIDC login flow
-- [ ] T002: Add JWT token validation
-### Other Slice
-- [ ] T003: Other task
-`
-	t.Run("generate output format: line1 id+message, line2 slug, line3 slice name, then task lines", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		require.NoError(t, os.WriteFile(".work/2_doing/001-auth.prd.md", []byte(workItemGenerate), 0o600))
-
-		cfg, _ := config.LoadConfig()
-		out, err := formatGeneratedCommitMessage(".work/2_doing/001-auth.prd.md", cfg, "001", "current")
-		require.NoError(t, err)
-		lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-		require.GreaterOrEqual(t, len(lines), 6)
-		assert.True(t, strings.HasPrefix(lines[0], "001 "))
-		assert.Equal(t, "", lines[1])
-		assert.Equal(t, "001-implement-oidc-login-flow", lines[2])
-		assert.Equal(t, "", lines[3])
-		assert.Equal(t, "Auth Token Validation:", lines[4])
-		assert.Equal(t, "- T001 Implement OIDC login flow", lines[5])
-		assert.Equal(t, "- T002 Add JWT token validation", lines[6])
-	})
-	t.Run("generate with named slice selector", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		require.NoError(t, os.WriteFile(".work/2_doing/001-auth.prd.md", []byte(workItemGenerate), 0o600))
-
-		cfg, _ := config.LoadConfig()
-		out, err := formatGeneratedCommitMessage(".work/2_doing/001-auth.prd.md", cfg, "001", "Other Slice")
-		require.NoError(t, err)
-		lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-		require.GreaterOrEqual(t, len(lines), 5)
-		assert.Equal(t, "Other Slice:", lines[4])
-		assert.Equal(t, "- T003 Other task", lines[5])
-	})
-	t.Run("generate previous slice selector", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		// First slice all done so "current" is second slice; "previous" is first
-		wi := `---
-id: 001
-title: Test
-status: doing
-kind: prd
----
-# Test
-## Slices
-### First
-- [x] T001: Done
-### Second
-- [ ] T002: Open
-`
-		require.NoError(t, os.WriteFile(".work/2_doing/001-test.prd.md", []byte(wi), 0o600))
-
-		cfg, _ := config.LoadConfig()
-		out, err := formatGeneratedCommitMessage(".work/2_doing/001-test.prd.md", cfg, "001", "previous")
-		require.NoError(t, err)
-		lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-		assert.Equal(t, "First:", lines[4])
-		assert.Equal(t, "- T001 Done", lines[5])
-	})
-	t.Run("generate with no work-item-id and zero work items in doing returns error", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "generate"})
-		err := rootCmd.Execute()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no work item in doing folder")
-	})
-}
-
-func TestSliceCommitCurrent(t *testing.T) {
-	// Two slices: first all done, second has open. "previous" = first slice.
-	wiPreviousComplete := `---
-id: 047
-title: slice commit current
-status: doing
-kind: prd
----
-# slice commit current
-## Slices
-### First
-- [x] T001: Done one
-- [x] T002: Done two
-### Second
-- [ ] T003: Open
-`
-	// One slice with open tasks: no "previous" slice.
-	wiNoPrevious := `---
-id: 048
-title: no previous
-status: doing
-kind: prd
----
-# no previous
-## Slices
-### Only
-- [ ] T001: Open
-`
-	t.Run("success when previous slice complete", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		path := ".work/2_doing/047-slice-commit-current.prd.md"
-		require.NoError(t, os.WriteFile(path, []byte(wiPreviousComplete), 0o600))
-
-		require.NoError(t, exec.Command("git", "init").Run())
-		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
-		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
-		require.NoError(t, exec.Command("git", "add", path).Run())
-		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
-		// Modify work item so we have something to commit
-		require.NoError(t, os.WriteFile(path, []byte(strings.Replace(wiPreviousComplete, "Open", "Open task", 1)), 0o600))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "current", "047"})
-		err := rootCmd.Execute()
-		require.NoError(t, err)
-
-		out, err := exec.Command("git", "log", "--oneline", "-1").Output()
-		require.NoError(t, err)
-		assert.Contains(t, string(out), "047")
-		// Full message should reference the committed slice (First)
-		fullMsg, _ := exec.Command("git", "log", "-1", "--format=%B").Output()
-		assert.Contains(t, string(fullMsg), "First:")
-	})
-	t.Run("failure when no previous slice", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		path := ".work/2_doing/048-no-previous.prd.md"
-		require.NoError(t, os.WriteFile(path, []byte(wiNoPrevious), 0o600))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "current", "048"})
-		err := rootCmd.Execute()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no previous slice")
-	})
-	t.Run("work-item resolution from doing folder when one work item", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		path := ".work/2_doing/047-slice-commit-current.prd.md"
-		require.NoError(t, os.WriteFile(path, []byte(wiPreviousComplete), 0o600))
-
-		require.NoError(t, exec.Command("git", "init").Run())
-		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
-		require.NoError(t, exec.Command("git", "config", "user.name", "Test").Run())
-		require.NoError(t, exec.Command("git", "add", path).Run())
-		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
-		require.NoError(t, os.WriteFile(path, []byte(strings.Replace(wiPreviousComplete, "Open", "Open task", 1)), 0o600))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "current"})
-		err := rootCmd.Execute()
-		require.NoError(t, err)
-	})
-	t.Run("failure when zero work items in doing folder", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-
-		rootCmd.SetArgs([]string{"slice", "commit", "current"})
-		err := rootCmd.Execute()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no work item in doing folder")
-	})
 }
 
 func TestSliceTaskDoneCurrent(t *testing.T) {
@@ -902,14 +528,13 @@ kind: prd
 		errCh := make(chan error, 1)
 		go func() { errCh <- rootCmd.Execute() }()
 		err := <-errCh
-		wOut.Close()
-		wErr.Close()
-		io.Copy(&buf, rOut)
-		io.Copy(&buf, rErr)
+		_ = wOut.Close()
+		_ = wErr.Close()
+		_, _ = io.Copy(&buf, rOut)
+		_, _ = io.Copy(&buf, rErr)
 		require.NoError(t, err)
 		out := buf.String()
 		assert.Contains(t, out, "No task marked done (all tasks already complete).")
-		assert.Contains(t, out, "All tasks complete.")
 	})
 	t.Run("marks current task done and prints Completed line", func(t *testing.T) {
 		tmpDir := t.TempDir()

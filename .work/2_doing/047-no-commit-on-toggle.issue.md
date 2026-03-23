@@ -106,3 +106,7 @@ Commit: When slice task current ... toggle marks task done, print "Completed: <i
 ### 7. Documentation for expanded scope
 - [x] T017: Update AGENTS.md and kira-plan-and-build: recommend `slice task done current` and `--next`; document `--hide-summary` for slice commands.
 
+### 8. Remove kira commit commands
+- [x] T018: remove commands
+
+
