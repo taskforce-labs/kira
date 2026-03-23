@@ -1,4 +1,4 @@
-.PHONY: build test test-coverage e2e clean clean-all install uninstall lint fmt check security build-all release-snapshot install-tools clean-tools dev-setup help demo
+.PHONY: build test test-coverage e2e clean clean-all install uninstall lint fmt check security build-all release-snapshot install-tools clean-tools dev-setup help demo print-versions compare-tool-versions update-tool-versions
 
 PREFIX ?= /usr/local
 DESTDIR ?=
@@ -85,7 +85,62 @@ security:
 	@PATH="$$(go env GOPATH)/bin:$$PATH" govulncheck ./...
 
 # Run all checks (lint includes formatting, vet, and gosec security checks via golangci-lint)
-check: lint security test
+check: print-versions lint security test
+
+# Print tool versions used by checks
+print-versions:
+	@echo "== Tool Versions =="
+	@go version
+	@if [ -x "$$(go env GOPATH)/bin/golangci-lint" ]; then \
+		"$$(go env GOPATH)/bin/golangci-lint" version; \
+	elif command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint version; \
+	else \
+		echo "golangci-lint: not found"; \
+	fi
+	@if [ -x "$$(go env GOPATH)/bin/govulncheck" ]; then \
+		"$$(go env GOPATH)/bin/govulncheck" -version; \
+	elif command -v govulncheck >/dev/null 2>&1; then \
+		govulncheck -version; \
+	else \
+		echo "govulncheck: not found"; \
+	fi
+
+# Compare installed lint/security tools to latest upstream (needs network for GitHub + module proxy)
+compare-tool-versions:
+	@echo "== Compare tool versions (installed vs latest) =="
+	@BIN=$$(go env GOPATH)/bin; \
+	GL_INST="(not found)"; \
+	if [ -x "$$BIN/golangci-lint" ]; then \
+	  GL_INST=$$("$$BIN/golangci-lint" version --short 2>/dev/null | head -1 || echo ""); \
+	elif command -v golangci-lint >/dev/null 2>&1; then \
+	  GL_INST=$$(golangci-lint version --short 2>/dev/null | head -1 || echo ""); \
+	fi; \
+	GL_LAT=$$(curl -sSfL https://api.github.com/repos/golangci/golangci-lint/releases/latest 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || echo "(could not fetch)"); \
+	echo "golangci-lint   installed: $$GL_INST"; \
+	echo "golangci-lint   latest:    $$GL_LAT"; \
+	GV_INST="(not found)"; \
+	if [ -x "$$BIN/govulncheck" ]; then \
+	  GV_INST=$$("$$BIN/govulncheck" -version 2>/dev/null | grep -oE 'govulncheck@v[0-9.]+' | head -1 | sed 's/^govulncheck@//' || echo ""); \
+	elif command -v govulncheck >/dev/null 2>&1; then \
+	  GV_INST=$$(govulncheck -version 2>/dev/null | grep -oE 'govulncheck@v[0-9.]+' | head -1 | sed 's/^govulncheck@//' || echo ""); \
+	fi; \
+	GV_LAT=$$(go list -m golang.org/x/vuln@latest 2>/dev/null | awk '{print $$2}' || echo "(could not fetch)"); \
+	echo "govulncheck     installed: $$GV_INST"; \
+	echo "govulncheck     latest:    $$GV_LAT"; \
+	echo "go (toolchain)  $$(go version | sed 's/^go version //')"; \
+	if [ -f go.mod ]; then echo "go (go.mod)      $$(grep '^go ' go.mod | head -1 | sed 's/^go //')"; fi
+
+# Reinstall golangci-lint (GOLANGCI_LINT_VERSION) and govulncheck (@latest) into GOPATH/bin
+update-tool-versions:
+	@echo "Updating golangci-lint ($(GOLANGCI_LINT_VERSION)) and govulncheck (@latest)..."
+	@BIN_DIR=$$(go env GOPATH)/bin; \
+	INSTALL_SCRIPT=$$(mktemp) || exit 1; \
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh -o $$INSTALL_SCRIPT || (rm -f $$INSTALL_SCRIPT; exit 1); \
+	sh $$INSTALL_SCRIPT -b $$BIN_DIR $(GOLANGCI_LINT_VERSION); \
+	rm -f $$INSTALL_SCRIPT; \
+	go install golang.org/x/vuln/cmd/govulncheck@latest; \
+	echo "Done. Run: make compare-tool-versions"
 
 # Build for multiple platforms
 build-all:
@@ -109,7 +164,7 @@ install-tools:
 	  echo "Checking if golangci-lint is already installed..."; \
 	  if command -v golangci-lint >/dev/null 2>&1; then \
 	    echo "golangci-lint found, checking version..."; \
-	    INSTALLED_VERSION=$$(golangci-lint version --format short 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo ""); \
+	    INSTALLED_VERSION=$$(golangci-lint version --short 2>/dev/null | head -1 || echo ""); \
 	    if [ "$$INSTALLED_VERSION" = "$(GOLANGCI_LINT_VERSION)" ]; then \
 	      echo "golangci-lint $(GOLANGCI_LINT_VERSION) already installed, skipping download"; \
 	      exit 0; \
