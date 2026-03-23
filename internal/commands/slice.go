@@ -133,49 +133,6 @@ var sliceLintCmd = &cobra.Command{
 	SilenceErrors: true,  // main prints error once
 }
 
-var sliceCommitCmd = &cobra.Command{
-	Use:   "commit",
-	Short: "Slice commit: add task, remove slice, or generate commit message",
-	Long: `Generate a structured commit message, or add a task to a slice, or remove a slice.
-Use: slice commit add, slice commit remove, slice commit generate, slice commit current.
-Generate prints to stdout only; use 'git commit -F -' to commit with the message.`,
-	Args:         cobra.ArbitraryArgs,
-	RunE:         runSliceCommitNoSubcommand,
-	SilenceUsage: false, // show usage when args are wrong
-}
-
-var sliceCommitAddCmd = &cobra.Command{
-	Use:          "add [current | <work-item-id>] (<slice-number> | <slice-name>) <task-description>",
-	Short:        "Add a task to a slice",
-	Args:         cobra.MinimumNArgs(2),
-	RunE:         runSliceCommitAdd,
-	SilenceUsage: false, // show usage when args are wrong
-}
-
-var sliceCommitRemoveCmd = &cobra.Command{
-	Use:          "remove [current | <work-item-id>] (<slice-number> | <slice-name>)",
-	Args:         cobra.MinimumNArgs(1),
-	Short:        "Remove a slice and all its tasks",
-	RunE:         runSliceCommitRemove,
-	SilenceUsage: false, // show usage when args are wrong
-}
-
-var sliceCommitGenerateCmd = &cobra.Command{
-	Use:          "generate [current | <work-item-id>] [current|previous|<slice-number>|<slice-name>]",
-	Short:        "Print a structured commit message to stdout",
-	Long:         "When first argument is \"current\", work item is resolved from the current branch (worktree) or doing folder.",
-	RunE:         runSliceCommitGenerate,
-	SilenceUsage: false, // show usage when args are wrong
-}
-
-var sliceCommitCurrentCmd = &cobra.Command{
-	Use:          "current [current | <work-item-id>]",
-	Short:        "Validate current slice is complete, then generate and commit",
-	Long:         `Resolves work item from args or doing folder. Validates the slice to be committed (previous — the one just completed) has no open tasks, then runs generate and git commit -F -.`,
-	RunE:         runSliceCommitCurrent,
-	SilenceUsage: false, // show usage when args are wrong
-}
-
 func init() {
 	sliceCmd.AddCommand(sliceAddCmd)
 	sliceCmd.AddCommand(sliceRemoveCmd)
@@ -183,16 +140,6 @@ func init() {
 	sliceCmd.AddCommand(sliceShowCmd)
 	sliceCmd.AddCommand(sliceProgressCmd)
 	sliceCmd.AddCommand(sliceLintCmd)
-	sliceCmd.AddCommand(sliceCommitCmd)
-
-	sliceCommitCmd.AddCommand(sliceCommitAddCmd)
-	sliceCommitCmd.AddCommand(sliceCommitRemoveCmd)
-	sliceCommitCmd.AddCommand(sliceCommitGenerateCmd)
-	sliceCommitCmd.AddCommand(sliceCommitCurrentCmd)
-	sliceCommitAddCmd.Flags().BoolP("commit", "c", false, "Commit the work item change (default: no commit)")
-	sliceCommitRemoveCmd.Flags().BoolP("commit", "c", false, "Commit the work item change (default: no commit)")
-	sliceCommitRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
-
 	sliceTaskCmd.AddCommand(sliceTaskAddCmd)
 	sliceTaskCmd.AddCommand(sliceTaskRemoveCmd)
 	sliceTaskCmd.AddCommand(sliceTaskEditCmd)

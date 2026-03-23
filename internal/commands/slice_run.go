@@ -126,6 +126,7 @@ func runSliceAdd(cmd *cobra.Command, args []string) error {
 	if err := writeSlicesToFile(path, content, slices, cfg); err != nil {
 		return err
 	}
+	printSliceSummaryIf(cmd, path, cfg, "")
 	fmt.Printf("Added slice %q to work item %s\n", sliceName, id)
 	doCommit, _ := cmd.Flags().GetBool("commit")
 	if doCommit {
@@ -135,7 +136,6 @@ func runSliceAdd(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println("Changes committed.")
 	}
-	printSliceSummaryIf(cmd, path, cfg, "")
 	return nil
 }
 
@@ -184,6 +184,7 @@ func runSliceRemove(cmd *cobra.Command, args []string) error {
 	if err := writeSlicesToFile(path, content, newSlices, cfg); err != nil {
 		return err
 	}
+	printSliceSummaryIf(cmd, path, cfg, "")
 	fmt.Printf("Removed slice %q from work item %s\n", sliceName, id)
 	doCommit, _ := cmd.Flags().GetBool("commit")
 	if doCommit {
@@ -193,7 +194,6 @@ func runSliceRemove(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println("Changes committed.")
 	}
-	printSliceSummaryIf(cmd, path, cfg, "")
 	return nil
 }
 
@@ -235,7 +235,8 @@ func runSliceTaskAdd(cmd *cobra.Command, args []string) error {
 	if err := writeSlicesToFile(path, content, slices, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("Added task %s to slice %q in work item %s\n", nextID, s.Name, id)
+	printSliceSummaryIf(cmd, path, cfg, s.Name)
+	fmt.Printf("Added task %s to slice %s in work item %s\n", taskIDStyle(nextID), sliceNameStyle(fmt.Sprintf("%d. %s", sliceIdx, s.Name)), id)
 	doCommit, _ := cmd.Flags().GetBool("commit")
 	if doCommit {
 		msg := fmt.Sprintf("Add task %s to %s", nextID, id)
@@ -244,7 +245,6 @@ func runSliceTaskAdd(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println("Changes committed.")
 	}
-	printSliceSummaryIf(cmd, path, cfg, s.Name)
 	return nil
 }
 
@@ -299,7 +299,10 @@ func runSliceTaskRemove(cmd *cobra.Command, args []string) error {
 	if err := writeSlicesToFile(path, content, slices, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("Removed task %s from work item %s\n", taskID, id)
+	sliceIdx := si + 1
+	sliceLabel := sliceNameStyle(fmt.Sprintf("%d. %s", sliceIdx, slices[si].Name))
+	printSliceSummaryIf(cmd, path, cfg, "")
+	fmt.Printf("Removed task %s from slice %s in work item %s\n", taskIDStyle(taskID), sliceLabel, id)
 	doCommit, _ := cmd.Flags().GetBool("commit")
 	if doCommit {
 		msg := fmt.Sprintf("Remove task %s from %s", taskID, id)
@@ -308,7 +311,6 @@ func runSliceTaskRemove(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println("Changes committed.")
 	}
-	printSliceSummaryIf(cmd, path, cfg, "")
 	return nil
 }
 
@@ -343,7 +345,10 @@ func runSliceTaskEdit(cmd *cobra.Command, args []string) error {
 	if err := writeSlicesToFile(path, content, slices, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("Updated task %s in work item %s\n", taskIDStyle(taskID), taskIDStyle(id))
+	sliceIdx := si + 1
+	sliceLabel := sliceNameStyle(fmt.Sprintf("%d. %s", sliceIdx, slices[si].Name))
+	printSliceSummaryIf(cmd, path, cfg, "")
+	fmt.Printf("Updated task %s in slice %s (work item %s)\n", taskIDStyle(taskID), sliceLabel, taskIDStyle(id))
 	doCommit, _ := cmd.Flags().GetBool("commit")
 	if doCommit {
 		msg := fmt.Sprintf("Edit task %s in %s", taskID, id)
@@ -352,7 +357,6 @@ func runSliceTaskEdit(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println("Changes committed.")
 	}
-	printSliceSummaryIf(cmd, path, cfg, "")
 	return nil
 }
 
@@ -387,7 +391,10 @@ func runSliceTaskNote(cmd *cobra.Command, args []string) error {
 	if err := writeSlicesToFile(path, content, slices, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("Updated notes for task %s in work item %s\n", taskID, id)
+	sliceIdx := si + 1
+	sliceLabel := sliceNameStyle(fmt.Sprintf("%d. %s", sliceIdx, slices[si].Name))
+	printSliceSummaryIf(cmd, path, cfg, "")
+	fmt.Printf("Updated notes for task %s in slice %s (work item %s)\n", taskIDStyle(taskID), sliceLabel, id)
 	doCommit, _ := cmd.Flags().GetBool("commit")
 	if doCommit {
 		msg := fmt.Sprintf("Note task %s in %s", taskID, id)
@@ -396,7 +403,6 @@ func runSliceTaskNote(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println("Changes committed.")
 	}
-	printSliceSummaryIf(cmd, path, cfg, "")
 	return nil
 }
 
@@ -704,6 +710,18 @@ func printTaskDetail(t Task, sliceName string) {
 	fmt.Printf("%s %s\n", labelStyle("State:"), stateStr)
 	if t.Notes != "" {
 		fmt.Printf("%s %s\n", labelStyle("Notes:"), t.Notes)
+	}
+}
+
+// printSliceTaskShowCurrentOutput prints work item line, progress block, slice, current task, and notes for slice task show.
+func printSliceTaskShowCurrentOutput(cmd *cobra.Command, path string, cfg *config.Config, workItemID string, slices []Slice, s *Slice, t *Task) {
+	printSliceProgressWorkItemLine(path, cfg, workItemID)
+	printSliceSummaryBlock(cmd, slices, s.Name, sliceProgressPct(slices, s.Name))
+	sliceIdx := sliceIndex1Based(slices, s)
+	fmt.Printf("%s %s\n", labelStyle("Slice:"), sliceNameStyle(fmt.Sprintf("%d. %s", sliceIdx, s.Name)))
+	fmt.Printf("%s %s - %s\n", labelStyle("Current task:"), taskIDStyle(t.ID), t.Description)
+	if t.Notes != "" {
+		fmt.Printf("  %s %s\n", labelStyle("Notes:"), t.Notes)
 	}
 }
 
@@ -1087,7 +1105,7 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 		}
 		printSliceProgressWorkItemLine(path, cfg, workItemID)
 		printSliceSummaryBlock(cmd, slices, "", sliceProgressPct(slices, ""))
-		fmt.Printf("All tasks complete. %s\n", summaryCompleteStyle(formatSliceSummary(slices, "")))
+		fmt.Println(summaryCompleteStyle("All tasks complete."))
 		return nil
 	}
 	t := firstOpenTaskInSlice(s)
@@ -1106,7 +1124,7 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 		}
 		printSliceProgressWorkItemLine(path, cfg, workItemID)
 		printSliceSummaryBlock(cmd, slices, "", sliceProgressPct(slices, ""))
-		fmt.Printf("All tasks complete. %s\n", summaryCompleteStyle(formatSliceSummary(slices, "")))
+		fmt.Println(summaryCompleteStyle("All tasks complete."))
 		return nil
 	}
 	outputFormat, _ := cmd.Flags().GetString("output")
@@ -1123,37 +1141,54 @@ func runSliceTaskCurrent(cmd *cobra.Command, args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	}
-	printSliceProgressWorkItemLine(path, cfg, workItemID)
-	printSliceSummaryBlock(cmd, slices, s.Name, sliceProgressPct(slices, s.Name))
-	fmt.Printf("%s %s - %s\n", labelStyle("Current task:"), taskIDStyle(t.ID), t.Description)
-	if t.Notes != "" {
-		fmt.Printf("  %s %s\n", labelStyle("Notes:"), t.Notes)
-	}
+	printSliceTaskShowCurrentOutput(cmd, path, cfg, workItemID, slices, s, t)
 	return nil
 }
 
-// printDoneCurrentNext prints the status block (same format as slice show) then either "All tasks complete" or the next open task.
-func printDoneCurrentNext(cmd *cobra.Command, path string, cfg *config.Config, workItemID string, slices []Slice, completedSliceName string) {
+// printDoneCurrentNext prints the status block, slice, optional message, completed task line (if any), then either "All tasks complete" or the next task block (Next / Same slice | New slice / New task).
+// messageAfterStatus is printed after the status header when nextSlice is nil (e.g. "No task marked done (all tasks already complete).").
+func printDoneCurrentNext(cmd *cobra.Command, path string, cfg *config.Config, workItemID string, slices []Slice, completedSliceName, completedTaskID, completedTaskDesc, messageAfterStatus string) {
 	hideSummary, _ := cmd.Flags().GetBool("hide-summary")
 	if !hideSummary {
 		printSliceProgressWorkItemLine(path, cfg, workItemID)
 		printSliceSummaryBlock(cmd, slices, "", sliceProgressPct(slices, ""))
 	}
 	nextSlice := firstSliceWithOpenTasks(slices)
+	var sliceForHeader *Slice
+	if nextSlice != nil {
+		sliceForHeader = nextSlice
+	} else if completedSliceName != "" {
+		sliceForHeader = findSliceByName(slices, completedSliceName)
+	}
+	if sliceForHeader != nil {
+		idx := sliceIndex1Based(slices, sliceForHeader)
+		fmt.Printf("%s %s\n", labelStyle("Slice:"), sliceNameStyle(fmt.Sprintf("%d. %s", idx, sliceForHeader.Name)))
+	}
 	if nextSlice == nil {
-		fmt.Printf("All tasks complete. %s\n", summaryCompleteStyle(formatSliceSummary(slices, "")))
+		if messageAfterStatus != "" {
+			fmt.Println(messageAfterStatus)
+			return
+		}
+		fmt.Println(summaryCompleteStyle("All tasks complete."))
 		return
+	}
+	if completedTaskID != "" {
+		fmt.Printf("%s %s - %s\n", labelStyle("Completed task:"), taskIDStyle(completedTaskID), completedTaskDesc)
 	}
 	nextTask := firstOpenTaskInSlice(nextSlice)
 	if nextTask == nil {
-		fmt.Printf("All tasks complete. %s\n", summaryCompleteStyle(formatSliceSummary(slices, "")))
+		fmt.Println(summaryCompleteStyle("All tasks complete."))
 		return
 	}
+	nextSliceIdx := sliceIndex1Based(slices, nextSlice)
+	sliceLabel := sliceNameStyle(fmt.Sprintf("%d. %s", nextSliceIdx, nextSlice.Name))
+	fmt.Println(labelStyle("\nNext"))
 	if nextSlice.Name == completedSliceName {
-		fmt.Printf("Next (same slice): %s - %s\n", taskIDStyle(nextTask.ID), nextTask.Description)
+		fmt.Printf("%s %s\n", labelStyle("Same slice:"), sliceLabel)
 	} else {
-		fmt.Printf("Next slice: %s — %s - %s\n", sliceNameStyle(nextSlice.Name), taskIDStyle(nextTask.ID), nextTask.Description)
+		fmt.Printf("%s %s\n", labelStyle("New slice:"), sliceLabel)
 	}
+	fmt.Printf("%s %s - %s\n", labelStyle("New task:"), taskIDStyle(nextTask.ID), nextTask.Description)
 }
 
 func runSliceTaskDoneCurrent(cmd *cobra.Command, args []string) error {
@@ -1179,15 +1214,13 @@ func runSliceTaskDoneCurrent(cmd *cobra.Command, args []string) error {
 	s := firstSliceWithOpenTasks(slices)
 	if s == nil {
 		// All tasks already complete: show same status as after marking last task done (idempotent, exit 0).
-		fmt.Println("No task marked done (all tasks already complete).")
-		printDoneCurrentNext(cmd, path, cfg, workItemID, slices, "")
+		printDoneCurrentNext(cmd, path, cfg, workItemID, slices, "", "", "", "No task marked done (all tasks already complete).")
 		return nil
 	}
 	t := firstOpenTaskInSlice(s)
 	if t == nil {
 		// Slice has no open tasks: same idempotent success with status.
-		fmt.Println("No task marked done (all tasks already complete).")
-		printDoneCurrentNext(cmd, path, cfg, workItemID, slices, "")
+		printDoneCurrentNext(cmd, path, cfg, workItemID, slices, "", "", "", "No task marked done (all tasks already complete).")
 		return nil
 	}
 	si, ti := findTaskByID(slices, t.ID)
@@ -1201,7 +1234,6 @@ func runSliceTaskDoneCurrent(cmd *cobra.Command, args []string) error {
 	if err := writeSlicesToFile(path, content, slices, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("Completed: %s - %s\n", taskIDStyle(completedTaskID), completedDesc)
 	doCommit, _ := cmd.Flags().GetBool("commit")
 	if doCommit {
 		msg := fmt.Sprintf("Toggle task %s to %s", completedTaskID, defaultReleaseStatus)
@@ -1210,7 +1242,7 @@ func runSliceTaskDoneCurrent(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println("Changes committed.")
 	}
-	printDoneCurrentNext(cmd, path, cfg, workItemID, slices, completedSliceName)
+	printDoneCurrentNext(cmd, path, cfg, workItemID, slices, completedSliceName, completedTaskID, completedDesc, "")
 	return nil
 }
 
@@ -1220,349 +1252,6 @@ func workItemIDFromPath(path string, cfg *config.Config) string {
 		return ""
 	}
 	return id
-}
-
-// runSliceCommitNoSubcommand is run when "slice commit" is invoked without a valid subcommand (add, remove, generate, current). Returns error so exit code is non-zero.
-func runSliceCommitNoSubcommand(_ *cobra.Command, _ []string) error {
-	return fmt.Errorf("subcommand required: use 'add', 'remove', 'generate', or 'current'")
-}
-
-// runSliceCommitAdd adds a task to a slice. Args: 2 = slice-name + task-desc (doing folder); 3+ = work-item-id, slice-name, task-desc.
-func runSliceCommitAdd(cmd *cobra.Command, args []string) error {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	if err := checkWorkDir(cfg); err != nil {
-		return err
-	}
-	var workItemID, sliceName, description string
-	if len(args) >= 3 {
-		workItemID = args[0]
-		sliceName = args[1]
-		description = strings.Join(args[2:], " ")
-	} else {
-		workItemID = sliceSelectorCurrent
-		sliceName = args[0]
-		description = strings.Join(args[1:], " ")
-	}
-	path, err := resolveSliceWorkItem(workItemID, cfg, "slice commit add")
-	if err != nil {
-		return err
-	}
-	id := workItemIDFromPath(path, cfg)
-	if id == "" {
-		id = workItemID
-	}
-	return runSliceTaskAdd(cmd, []string{id, sliceName, description})
-}
-
-// runSliceCommitRemove removes a slice. Args: 1 = slice-name (doing folder); 2 = work-item-id, slice-name.
-func runSliceCommitRemove(cmd *cobra.Command, args []string) error {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	if err := checkWorkDir(cfg); err != nil {
-		return err
-	}
-	var workItemID, sliceName string
-	if len(args) >= 2 {
-		workItemID = args[0]
-		sliceName = args[1]
-	} else {
-		workItemID = sliceSelectorCurrent
-		sliceName = args[0]
-	}
-	path, err := resolveSliceWorkItem(workItemID, cfg, "slice commit remove")
-	if err != nil {
-		return err
-	}
-	id := workItemIDFromPath(path, cfg)
-	if id == "" {
-		id = workItemID
-	}
-	return runSliceRemove(cmd, []string{id, sliceName})
-}
-
-// runSliceCommitGenerate prints a structured commit message to stdout in the PRD format.
-func runSliceCommitGenerate(_ *cobra.Command, args []string) error {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	if err := checkWorkDir(cfg); err != nil {
-		return err
-	}
-	workItemID := sliceSelectorCurrent
-	selector := sliceSelectorCurrent
-	if len(args) > 0 {
-		workItemID = args[0]
-	}
-	if len(args) > 1 {
-		selector = args[1]
-	}
-	path, err := resolveSliceWorkItem(workItemID, cfg, "slice commit generate")
-	if err != nil {
-		return err
-	}
-	id := workItemIDFromPath(path, cfg)
-	if id == "" {
-		id = workItemID
-	}
-	out, err := formatGeneratedCommitMessage(path, cfg, id, selector)
-	if err != nil {
-		return err
-	}
-	fmt.Print(out)
-	return nil
-}
-
-// runSliceCommitCurrent resolves work item from args or doing folder, validates the previous (to-be-committed) slice has no open tasks, then generates a commit message and runs git commit -F -.
-func runSliceCommitCurrent(cmd *cobra.Command, args []string) error {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	if err := checkWorkDir(cfg); err != nil {
-		return err
-	}
-	workItemID := sliceSelectorCurrent
-	if len(args) > 0 {
-		workItemID = args[0]
-	}
-	path, err := resolveSliceWorkItem(workItemID, cfg, "slice commit current")
-	if err != nil {
-		return err
-	}
-	id := workItemIDFromPath(path, cfg)
-	if id == "" {
-		id = workItemID
-	}
-	_, slices, err := loadSlicesFromFile(path, cfg)
-	if err != nil {
-		return err
-	}
-	if err := validatePreviousSliceNoOpenTasks(slices); err != nil {
-		return err
-	}
-	if err := runSliceCommitCurrentCommit(path, cfg, id); err != nil {
-		return err
-	}
-	printSliceSummaryIf(cmd, path, cfg, "")
-	return nil
-}
-
-func validatePreviousSliceNoOpenTasks(slices []Slice) error {
-	previousSlice, err := selectSliceBySelector(slices, "previous")
-	if err != nil {
-		return err
-	}
-	var openIDs []string
-	for _, t := range previousSlice.Tasks {
-		if !t.Done {
-			openIDs = append(openIDs, t.ID)
-		}
-	}
-	if len(openIDs) > 0 {
-		return fmt.Errorf("current slice has open tasks: %s. Complete or toggle them before committing", strings.Join(openIDs, ", "))
-	}
-	return nil
-}
-
-func runSliceCommitCurrentCommit(path string, cfg *config.Config, workItemID string) error {
-	if err := validateStagedChanges([]string{path}); err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
-	defer cancel()
-	if _, err := executeCommand(ctx, "git", []string{"add", path}, "", false); err != nil {
-		return fmt.Errorf("failed to stage changes: %w", err)
-	}
-	msg, err := formatGeneratedCommitMessage(path, cfg, workItemID, "previous")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp("", "kira-commit-*.txt")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file for commit message: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
-	if _, err := tmp.WriteString(msg); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("failed to write commit message: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("failed to close temp file: %w", err)
-	}
-	commitCtx, commitCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
-	defer commitCancel()
-	if _, err := executeCommand(commitCtx, "git", []string{"commit", "-F", tmpPath}, "", false); err != nil {
-		return fmt.Errorf("failed to commit: %w", err)
-	}
-	return nil
-}
-
-// selectSliceBySelector returns the slice for generate: current (first with open tasks), previous, or by name or number.
-func selectSliceBySelector(slices []Slice, selector string) (*Slice, error) {
-	s, _, err := resolveSliceSelector(slices, selector)
-	return s, err
-}
-
-// formatGeneratedCommitMessage builds the exact PRD format: line1 id+message, line2 id-kebab-title, line3 slice name, then task lines.
-func formatGeneratedCommitMessage(path string, cfg *config.Config, workItemID, selector string) (string, error) {
-	content, err := safeReadFile(path, cfg)
-	if err != nil {
-		return "", fmt.Errorf("failed to read work item: %w", err)
-	}
-	slices, err := ParseSlicesSection(content)
-	if err != nil || slices == nil {
-		return "", fmt.Errorf("failed to parse Slices section: %w", err)
-	}
-	chosen, err := selectSliceBySelector(slices, selector)
-	if err != nil {
-		return "", err
-	}
-	var oneLine string
-	if chosen.CommitSummary != "" {
-		oneLine = chosen.CommitSummary
-	} else {
-		fullMsg := generateSliceCommitMessage(path, cfg, workItemID)
-		oneLine = fullMsg
-		if idx := strings.Index(fullMsg, "\n"); idx >= 0 {
-			oneLine = fullMsg[:idx]
-		}
-	}
-	_, _, title, _, _, _ := extractWorkItemMetadata(path, cfg)
-	slug := workItemID + "-" + kebabCase(title)
-	if title == "" || title == unknownValue {
-		slug = workItemID
-	}
-	var b strings.Builder
-	b.WriteString(workItemID + " " + strings.TrimSpace(oneLine) + "\n")
-	b.WriteString("\n")
-	b.WriteString(slug + "\n")
-	b.WriteString("\n")
-	b.WriteString(chosen.Name + ":\n")
-	for _, t := range chosen.Tasks {
-		b.WriteString("- " + t.ID + " " + t.Description + "\n")
-	}
-	return b.String(), nil
-}
-
-// generateSliceCommitMessage builds a commit message from task state changes, or fallback.
-func generateSliceCommitMessage(path string, cfg *config.Config, workItemID string) string {
-	content, err := safeReadFile(path, cfg)
-	if err != nil {
-		return fallbackSliceCommitMessage(path, cfg, workItemID)
-	}
-	current, err := ParseSlicesSection(content)
-	if err != nil || current == nil {
-		return fallbackSliceCommitMessage(path, cfg, workItemID)
-	}
-	previous := loadPreviousSlicesFromGit(path)
-	completed, reopened, added := detectTaskChanges(previous, current)
-	msg := formatSliceCommitParts(completed, reopened, added)
-	if msg != "" {
-		return msg
-	}
-	return fallbackSliceCommitMessage(path, cfg, workItemID)
-}
-
-func loadPreviousSlicesFromGit(path string) []Slice {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
-	defer cancel()
-	output, err := executeCommand(ctx, "git", []string{"show", "HEAD:" + path}, "", false)
-	if err != nil {
-		return nil
-	}
-	previous, _ := ParseSlicesSection([]byte(output))
-	return previous
-}
-
-func detectTaskChanges(previous, current []Slice) (completed, reopened, added []Task) {
-	currentByID := make(map[string]Task)
-	for _, s := range current {
-		for _, t := range s.Tasks {
-			currentByID[t.ID] = t
-		}
-	}
-	if previous == nil {
-		for _, t := range currentByID {
-			added = append(added, t)
-		}
-		return completed, reopened, added
-	}
-	prevByID := make(map[string]bool)
-	for _, s := range previous {
-		for _, t := range s.Tasks {
-			prevDone := t.Done
-			cur, ok := currentByID[t.ID]
-			if ok {
-				if cur.Done && !prevDone {
-					completed = append(completed, cur)
-				}
-				if !cur.Done && prevDone {
-					reopened = append(reopened, cur)
-				}
-			}
-			prevByID[t.ID] = true
-		}
-	}
-	for id, t := range currentByID {
-		if !prevByID[id] {
-			added = append(added, t)
-		}
-	}
-	return completed, reopened, added
-}
-
-func formatSliceCommitParts(completed, reopened, added []Task) string {
-	var parts []string
-	if len(completed) > 0 {
-		ids := make([]string, 0, len(completed))
-		descs := make([]string, 0, len(completed))
-		for _, t := range completed {
-			ids = append(ids, t.ID)
-			descs = append(descs, t.Description)
-		}
-		parts = append(parts, fmt.Sprintf("Complete %s: %s", strings.Join(ids, ", "), strings.Join(descs, "; ")))
-	}
-	if len(reopened) > 0 {
-		ids := make([]string, 0, len(reopened))
-		for _, t := range reopened {
-			ids = append(ids, t.ID)
-		}
-		parts = append(parts, fmt.Sprintf("Reopen %s", strings.Join(ids, ", ")))
-	}
-	if len(added) > 0 {
-		ids := make([]string, 0, len(added))
-		for _, t := range added {
-			ids = append(ids, t.ID)
-		}
-		parts = append(parts, fmt.Sprintf("Add tasks %s", strings.Join(ids, ", ")))
-	}
-	if len(parts) > 0 {
-		return strings.Join(parts, "\n")
-	}
-	return ""
-}
-
-func fallbackSliceCommitMessage(path string, cfg *config.Config, workItemID string) string {
-	content, err := safeReadFile(path, cfg)
-	if err != nil {
-		return "Update slices for " + workItemID
-	}
-	slices, _ := ParseSlicesSection(content)
-	if s := firstSliceWithOpenTasks(slices); s != nil {
-		return s.Name
-	}
-	_, _, title, _, _, err := extractWorkItemMetadata(path, cfg)
-	if err == nil && title != "" && title != unknownValue {
-		return title
-	}
-	return "Update slices for " + workItemID
 }
 
 // SliceLintError represents a single lint error with location, rule, message, and optional suggestion.
@@ -1597,12 +1286,14 @@ func runSliceLintOne(cmd *cobra.Command, cfg *config.Config, workItemID, outputF
 	if outputFormat == sliceLintOutputJSON {
 		return outputSliceLintJSON(errors)
 	}
-	if err := outputSliceLintHuman(path, errors); err != nil {
-		return err
+	if len(errors) > 0 {
+		if err := outputSliceLintHuman(path, errors); err != nil {
+			return err
+		}
+		return nil
 	}
-	if len(errors) == 0 {
-		printSliceSummaryIf(cmd, path, cfg, "")
-	}
+	printSliceSummaryIf(cmd, path, cfg, "")
+	fmt.Println(successStyle("Slices section is valid."))
 	return nil
 }
 
@@ -1633,10 +1324,13 @@ func runSliceLintAll(cmd *cobra.Command, cfg *config.Config, outputFormat string
 			fmt.Println(filepath.Base(path))
 		}
 		errs := lintSlicesSection(path, cfg)
-		if err := outputSliceLintHuman(path, errs); err != nil {
-			anyFailed = true
-		} else if len(errs) == 0 {
+		if len(errs) > 0 {
+			if err := outputSliceLintHuman(path, errs); err != nil {
+				anyFailed = true
+			}
+		} else {
 			printSliceSummaryIf(cmd, path, cfg, "")
+			fmt.Println(successStyle("Slices section is valid."))
 		}
 	}
 	if anyFailed {
