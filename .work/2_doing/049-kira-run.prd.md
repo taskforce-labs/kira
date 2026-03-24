@@ -1,7 +1,7 @@
 ---
 id: 049
 title: kira run
-status: todo
+status: doing
 kind: prd
 assigned: 
 estimate: 0
