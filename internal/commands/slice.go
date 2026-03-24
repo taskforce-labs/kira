@@ -133,6 +133,23 @@ var sliceLintCmd = &cobra.Command{
 	SilenceErrors: true,  // main prints error once
 }
 
+var sliceCommitCmd = &cobra.Command{
+	Use:   "commit [current | <work-item-id>] [completed | <slice-number> | <slice-name>]",
+	Short: "Commit the work item with a generated message for a completed slice",
+	Long: `Stage the work item file and create a git commit with a multi-line message for the target slice.
+
+The first optional argument is the work item selector: "current", a work-item id, or omit for current (same resolution as other slice commands). These are placeholders, not separate commands.
+
+The second optional argument selects the slice: "completed" (default), a 1-based slice number, or slice name. "completed" means the slice you just finished—the slice before the first slice that still has open tasks, or the last slice when all tasks are done (same as "previous").
+
+The commit body layout is: line 1 as <work-item-id>:<slice-number>. <slice-name>; then the slug line (<id>-<kebab-title>); optional Message or Commit line from the work item (line after ###); then a numbered slice heading (N. name) and task bullets. Optional -m/--message text is appended after the task list. The slice Message or Commit line is copied as in the file when present. Slice name and task lines use plain text (inline markdown stripped) except the Message/Commit line, which is copied verbatim.
+
+Staging runs git add -A (all changes in the repository), then git commit, so code and work item are committed together.`,
+	Args:         cobra.MaximumNArgs(2),
+	RunE:         runSliceCommit,
+	SilenceUsage: false,
+}
+
 func init() {
 	sliceCmd.AddCommand(sliceAddCmd)
 	sliceCmd.AddCommand(sliceRemoveCmd)
@@ -140,6 +157,7 @@ func init() {
 	sliceCmd.AddCommand(sliceShowCmd)
 	sliceCmd.AddCommand(sliceProgressCmd)
 	sliceCmd.AddCommand(sliceLintCmd)
+	sliceCmd.AddCommand(sliceCommitCmd)
 	sliceTaskCmd.AddCommand(sliceTaskAddCmd)
 	sliceTaskCmd.AddCommand(sliceTaskRemoveCmd)
 	sliceTaskCmd.AddCommand(sliceTaskEditCmd)
@@ -163,4 +181,10 @@ func init() {
 	sliceLintCmd.Flags().String("output", "", "Output format: json")
 	sliceTaskShowCmd.Flags().String("output", "", "Output format: json")
 	sliceShowCmd.Flags().String("output", "", "Output format: json")
+
+	sliceCommitCmd.Flags().Bool("dry-run", false, "Print validation, commit message, and intended git steps; do not stage or commit")
+	sliceCommitCmd.Flags().StringP("message", "m", "", "Supplementary text appended after the task list (does not replace the generated template)")
+	sliceCommitCmd.Flags().String("override-message", "", "Use this as the full commit body instead of the generated template (cannot be combined with -m/--message)")
+	sliceCommitCmd.Flags().Bool("commit-check", false, "Run kira check with tag filter before committing")
+	sliceCommitCmd.Flags().StringSlice("commit-check-tags", nil, "Tags for --commit-check (default when flag omitted: commit). Replaces the default when set with --commit-check")
 }

@@ -18,13 +18,13 @@ var (
 	taskLineRegex         = regexp.MustCompile(`^-\s+\[([ xX])\]\s+(T[0-9A-Za-z]+):\s*(.*)$`)
 	taskLineOpenDone      = regexp.MustCompile(`^-\s+\[(open|done)\]\s+(T[0-9A-Za-z]+):\s*(.*)$`)
 	taskIDNumRegex        = regexp.MustCompile(`T(\d+)`)
-	commitLineRegex       = regexp.MustCompile(`^Commit:\s*(.*)$`)
+	sliceMetaLineRegex    = regexp.MustCompile(`^(?:Message|Commit):\s*(.*)$`)
 	notesLineRegex        = regexp.MustCompile(`^\s+-\s+Notes:\s*(.*)$`)
 	sliceHeadingNumPrefix = regexp.MustCompile(`^\d+\.\s+`)
 )
 
 // ParseSlicesSection parses the ## Slices section from work item markdown.
-// Returns slices with tasks; optional "Commit: ..." under ### Name; task lines
+// Returns slices with tasks; optional "Message: ..." or "Commit: ..." on the line after ### Name; task lines
 // - [ ] T001: desc (open) or - [x] T001: desc (done). Optional [open]/[done] format.
 func ParseSlicesSection(content []byte) ([]Slice, error) {
 	start, end, found := findSlicesSection(content)
@@ -65,8 +65,8 @@ func parseSliceHeading(lines []string, i int, trimmed string) *Slice {
 	s := &Slice{Name: name, Tasks: []Task{}}
 	if i+1 < len(lines) {
 		next := strings.TrimSpace(lines[i+1])
-		if commitLineRegex.MatchString(next) {
-			matches := commitLineRegex.FindStringSubmatch(next)
+		if sliceMetaLineRegex.MatchString(next) {
+			matches := sliceMetaLineRegex.FindStringSubmatch(next)
 			if len(matches) >= 2 {
 				s.CommitSummary = strings.TrimSpace(matches[1])
 			}

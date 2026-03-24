@@ -48,6 +48,19 @@ Commit: Complete Foundation
 		assert.Equal(t, "Complete Foundation", slices[0].CommitSummary)
 	})
 
+	t.Run("parses Message line under slice heading", func(t *testing.T) {
+		content := []byte(`## Slices
+
+### Nine
+Message: Implement **kira slice commit** per spec.
+- [ ] T001: Task one
+`)
+		slices, err := ParseSlicesSection(content)
+		require.NoError(t, err)
+		require.Len(t, slices, 1)
+		assert.Equal(t, "Implement **kira slice commit** per spec.", slices[0].CommitSummary)
+	})
+
 	t.Run("parses multiple slices", func(t *testing.T) {
 		content := []byte(`## Slices
 
