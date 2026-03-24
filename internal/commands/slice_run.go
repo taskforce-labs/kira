@@ -548,10 +548,11 @@ func runSliceProgress(_ *cobra.Command, args []string) error {
 
 // firstSliceWithOpenTasks returns the first slice (in order) that has at least one open task.
 func firstSliceWithOpenTasks(slices []Slice) *Slice {
-	for i := range slices {
-		for _, t := range slices[i].Tasks {
+	for _, s := range slices {
+		for _, t := range s.Tasks {
 			if !t.Done {
-				return &slices[i]
+				sCopy := s
+				return &sCopy
 			}
 		}
 	}

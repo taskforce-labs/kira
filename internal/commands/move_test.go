@@ -709,6 +709,7 @@ func TestCommitMove(t *testing.T) {
 		content, err := os.ReadFile(testTargetPath)
 		require.NoError(t, err)
 		contentStr := strings.ReplaceAll(string(content), "status: todo", "status: doing")
+		// #nosec G703 -- test-only path constant under temp workspace
 		require.NoError(t, os.WriteFile(testTargetPath, []byte(contentStr), 0o600))
 
 		// Commit the move
