@@ -54,37 +54,32 @@ Unless **`--override-message`** is set, the git commit body uses this **normativ
 
 | Part | Content |
 |------|---------|
-| **Line 1** | `<work-item-id>` + space + **base summary** (always from the default chain) + if **`-m`**: **separator** + **supplementary text** (see below) |
+| **Line 1** | `<work-item-id>` + **`:`** + `<slice-number>` + **`. `** + **slice name** (1-based slice index and heading title, same as in the Slices section) |
 | **Blank** | |
-| **Line 2** | `<work-item-id>-<kebab-case-title>` (slug) |
+| **Line 2** | `<work-item-id>-<kebab-case-title>` (slug from work item title) |
 | **Blank** | |
-| **Line 3** | **Slice name** (selected slice heading/title) |
-| **Following** | One line per task in the target slice, each a **markdown-style bullet**: **`- `** + `<task-id>` + space + description (all tasks, stable order — typically document order) |
+| **Slice message** | Optional **Message:** / **Commit:** line after the `###` heading (verbatim when present) |
+| **Blank** | (omitted if no slice message) |
+| **Slice heading** | `<slice-number>.` + space + **slice name** (matches generated `### N. Name` title) |
+| **Following** | One line per task: **`- `** + `<task-id>` + space + plain description |
+| **Optional** | **`-m` / `--message`**: supplementary paragraph **after** the task list (whitespace collapsed to one line unless documented otherwise) |
 
-### Line 1: base summary + optional `-m` (additive)
+### Line 1
 
-**Base summary** (always present, unless **`--override-message`**): everything after `<work-item-id>` and the space **before** any **`-m`** text. It comes **only** from a **fixed, documented fallback chain**, for example:
+Line 1 is **`&lt;work-item-id&gt;:&lt;slice-number&gt;. &lt;slice-name&gt;`** (phase = slice number and name). There is no separate “base summary” chain on line 1; the slug line still uses the work item **title** for **`-&lt;kebab-case-title&gt;`**.
 
-1. work item **`title`** from front matter; else
-2. **slice name** (selected slice); else
-3. a short line derived from task ids/descriptions in that slice; else
-4. **`Update slices for <work-item-id>`** (or equivalent last resort).
-
-Document the exact chain in code and **`kira slice commit --help`**.
-
-**`-m` / `--message` (supplementary):** optional. **Does not replace** the base summary. When set, append to line 1 using a **documented separator** (recommend **` — `**, em dash + spaces). Use case: an LLM or human adds **extra context** (what was done, caveats, pointers) on top of the stable default subject.
-
-- If **`-m`** is a **single line**, the result is **`…` base ` — ` `-m` text** on one line (subject may get long; still one line unless you document wrapping).
-- If **`-m`** contains **newlines**, either normalize to one line (e.g. spaces instead of newlines) or place **continuation lines** after line 1 and **before** the blank line that precedes the slug — pick one behavior and document it.
+**`-m` / `--message` (supplementary):** optional. **Does not replace** the generated template. When set, append **after** the task bullets (see schematic below). Newlines in **`-m`** are normalized to spaces for a single trailing paragraph.
 
 **`--override-message`:** replaces the **entire** commit body; template not used. **`--override-message`** wins over **`-m`** for the final body (or error if both are ambiguous — pick one rule and document it).
 
 **Schematic:**
 
 ```text
-<work-item-id> <base-summary>
+<work-item-id>:<slice-number>. <slice-name>
 
 <work-item-id>-<kebab-case-work-item-title>
+
+<slice-message>
 
 <slice-name>
 - <task-id> <task-description>
@@ -97,11 +92,13 @@ Document the exact chain in code and **`kira slice commit --help`**.
 **Example:**
 
 ```text
-001 Implement OIDC login flow and JWT validation
+001:1 Auth Token Validation
 
 001-authentication
 
-Auth Token Validation
+Implement OIDC login flow and JWT validation
+
+1. Auth Token Validation
 - T001 Implement OIDC login flow
 - T002 Add JWT token validation
 
@@ -109,7 +106,7 @@ Auth Token Validation
 Refreshed OpenAPI fixtures for error shapes
 ```
 
-*(Without **`-m`**, line 1 would end after **`JWT validation`** — no **` — …`** tail.)*
+*(Without **`-m`**, there is no supplementary paragraph after the task list.)*
 
 ### Behavior
 
@@ -122,7 +119,7 @@ Refreshed OpenAPI fixtures for error shapes
    - [ ] bar
    ```
 
-3. Build message per template unless **`--override-message`** (line 1 = base summary + optional **`-m`** append); stage work item per **`kira move`** conventions; **`git commit`** unless **`--dry-run`**.
+3. Build message per template unless **`--override-message`** (see schematic: line 1 = **`id:sliceNo. name`**; optional **`-m`** after tasks); stage work item per **`kira move`** conventions; **`git commit`** unless **`--dry-run`**.
 4. **`--dry-run`:** print validation result, full final message, and intended git steps; no commit.
 5. **`--commit-check`:** run **`kira check`** with tag filter; **default** **`kira check -t commit`**. Tags after the flag **replace** that default (e.g. **`--commit-check lint e2e`** → checks tagged `lint` or `e2e`).
 
@@ -130,7 +127,7 @@ Refreshed OpenAPI fixtures for error shapes
 
 - [ ] **AC1:** No args → same as explicit **`current`** + **`completed`** defaults.
 - [ ] **AC2:** Fails if the target slice has any open task; succeeds only when all are done.
-- [ ] **AC3:** Line 1 **base summary** always follows the documented default chain; **`-m` / `--message`** **appends** supplementary text (does not replace the base); **`--override-message`** replaces the full body.
+- [ ] **AC3:** Line 1 is **`&lt;id&gt;:&lt;slice-number&gt;. &lt;slice-name&gt;`**; **`-m` / `--message`** appends supplementary text **after** the task list (does not replace the template); **`--override-message`** replaces the full body.
 - [ ] **AC4:** Non-override commits match the normative template (lines + blanks; task lines each prefixed with **`- `**).
 - [ ] **AC5:** **`--dry-run`** shows validation, full message, and git intent; no commit.
 - [ ] **AC6:** **`--commit-check`** defaults to **`commit`** tag; explicit tags override.
@@ -184,12 +181,12 @@ Message: When slice task current ... toggle marks task done, print "Completed: <
 
 ### 9. Add new kira slice commit command
 Message: Implement **`kira slice commit`** per **Acceptance criteria (`kira slice commit`)** and the **`kira slice commit`** section above.
-- [ ] T019: Wire **`kira slice commit`** with work-item and slice **selectors** (defaults **`current`** / **`completed`**), flags **`--dry-run`**, **`-m` / `--message`** (append-only context), **`--override-message`**, **`--commit-check`** (optional trailing tags). Help text describes selectors as placeholders, not extra commands.
-- [ ] T020: Resolve work item and target slice from selectors; support **`completed`**, slice number, slice name.
-- [ ] T021: Validation: all tasks in target slice done; clear errors with open task ids (include mixed-checkbox case in tests).
-- [ ] T022: Build commit body from normative template (bulleted task lines); line 1 **base summary** from documented fallback chain; **`-m`** appends supplementary text (separator + rules for multiline); **`--override-message`** = full body; document interaction if both **`-m`** and **`--override-message`** are set.
-- [ ] T023: Stage and **`git commit`**; **`--dry-run`** prints validation + message + git intent only.
-- [ ] T024: **`--commit-check`:** default **`kira check -t commit`**; explicit tags override; fail closed on check failure.
-- [ ] T025: Tests: defaults, validation, dry-run, messages, commit-check.
-- [ ] T026: Update AGENTS.md and plan-and-build to match this issue (selectors, **`kira slice commit`**, task done flags).
+- [x] T019: Wire **`kira slice commit`** with work-item and slice **selectors** (defaults **`current`** / **`completed`**), flags **`--dry-run`**, **`-m` / `--message`** (append-only context), **`--override-message`**, **`--commit-check`** (optional trailing tags). Help text describes selectors as placeholders, not extra commands.
+- [x] T020: Resolve work item and target slice from selectors; support **`completed`**, slice number, slice name.
+- [x] T021: Validation: all tasks in target slice done; clear errors with open task ids (include mixed-checkbox case in tests).
+- [x] T022: Build commit body from normative template (bulleted task lines); line 1 **base summary** from documented fallback chain; **`-m`** appends supplementary text (separator + rules for multiline); **`--override-message`** = full body; document interaction if both **`-m`** and **`--override-message`** are set.
+- [x] T023: Stage and **`git commit`**; **`--dry-run`** prints validation + message + git intent only.
+- [x] T024: **`--commit-check`:** default **`kira check -t commit`**; explicit tags override; fail closed on check failure.
+- [x] T025: Tests: defaults, validation, dry-run, messages, commit-check.
+- [x] T026: Update AGENTS.md and plan-and-build to match this issue (selectors, **`kira slice commit`**, task done flags).
 

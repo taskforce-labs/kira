@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kira/internal/config"
@@ -14,6 +16,18 @@ import (
 )
 
 const sliceTestWorkItemPath = ".work/2_doing/001-test.prd.md"
+
+const sliceCommitTestWorkItemOneSliceDone = `---
+id: 047
+title: WI
+status: doing
+kind: issue
+---
+# WI
+## Slices
+### S1
+- [x] T001: A
+`
 
 func TestLoadSlicesFromFile(t *testing.T) {
 	t.Run("returns content and slices when Slices section exists", func(t *testing.T) {
@@ -192,6 +206,14 @@ func TestResolveSliceSelector(t *testing.T) {
 
 	t.Run("previous returns slice before current", func(t *testing.T) {
 		s, idx, err := resolveSliceSelector(slices, "previous")
+		require.NoError(t, err)
+		require.NotNil(t, s)
+		assert.Equal(t, "First", s.Name)
+		assert.Equal(t, 1, idx)
+	})
+
+	t.Run("completed matches previous (slice before first with open tasks)", func(t *testing.T) {
+		s, idx, err := resolveSliceSelector(slices, "completed")
 		require.NoError(t, err)
 		require.NotNil(t, s)
 		assert.Equal(t, "First", s.Name)
@@ -416,7 +438,7 @@ func TestPrintSliceSummaryIfPresent(t *testing.T) {
 	})
 }
 
-func TestSliceCommandHelpDoesNotIncludeCommit(t *testing.T) {
+func TestSliceCommandHelpIncludesSliceCommit(t *testing.T) {
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&buf)
@@ -428,7 +450,7 @@ func TestSliceCommandHelpDoesNotIncludeCommit(t *testing.T) {
 	rootCmd.SetArgs([]string{"slice", "--help"})
 	err := rootCmd.Execute()
 	require.NoError(t, err)
-	assert.NotContains(t, buf.String(), "commit")
+	assert.Contains(t, buf.String(), "commit      Commit the work item with a generated message")
 }
 
 // TestSliceCommandsWrongArgs ensures slice subcommands with required args return an error
@@ -627,4 +649,181 @@ kind: prd
 		assert.Equal(t, "NewSlice", slices[0].Name)
 		assert.Len(t, slices[0].Tasks, 0)
 	})
+}
+
+func TestBuildSliceCommitTemplateBody(t *testing.T) {
+	tasks := []Task{
+		{ID: "T001", Description: "First", Done: true},
+		{ID: "T002", Description: "Second", Done: true},
+	}
+	body := buildSliceCommitTemplateBody("047", "My title", "SliceName", 3, tasks, "extra context", "")
+	assert.Contains(t, body, "047:3. SliceName")
+	assert.Contains(t, body, "047-my-title")
+	assert.Contains(t, body, "3. SliceName")
+	assert.Contains(t, body, "- T001 First")
+	assert.Contains(t, body, "- T002 Second")
+	assert.True(t, strings.HasSuffix(strings.TrimSpace(body), "extra context"))
+
+	bodyWithMsg := buildSliceCommitTemplateBody("047", "My title", "SliceName", 1, tasks, "", "Slice scope summary line")
+	assert.Contains(t, bodyWithMsg, "047:1. SliceName")
+	assert.Contains(t, bodyWithMsg, "Slice scope summary line")
+	assert.Contains(t, bodyWithMsg, "1. SliceName\n- T001")
+}
+
+func TestSliceCommitPlainLineStripsMarkdown(t *testing.T) {
+	assert.Equal(t, "Wire kira slice commit with selectors", sliceCommitPlainLine("Wire **`kira slice commit`** with **selectors**"))
+	assert.Equal(t, "Use kira slice commit", sliceCommitPlainLine("Use `kira slice commit`"))
+	assert.Equal(t, "see docs", sliceCommitPlainLine("[see docs](https://example.com)"))
+	assert.Equal(t, "a b", sliceCommitPlainLine("a  \n\tb"))
+}
+
+func TestSliceCommitAppendMessageCollapsesNewlines(t *testing.T) {
+	line := sliceCommitAppendMessage("047 base", "line1\nline2")
+	assert.Equal(t, "047 base — line1 line2", line)
+}
+
+func TestSliceCommitOpenTasksFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir("/") }()
+	require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+	content := `---
+id: 047
+title: WI
+status: doing
+kind: issue
+---
+# WI
+## Slices
+### MixedSlice
+- [x] T001: A
+- [ ] T002: B
+`
+	path := ".work/2_doing/047-wi.issue.md"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	resetHelpFlag(rootCmd)
+	rootCmd.SetArgs([]string{"slice", "commit", "047", "1", "--hide-summary"})
+	err := rootCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "open tasks")
+	assert.Contains(t, err.Error(), "T002")
+}
+
+func TestSliceCommitMessageAndOverrideConflict(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir("/") }()
+	require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+	require.NoError(t, os.WriteFile(".work/2_doing/047-x.issue.md", []byte(sliceCommitTestWorkItemOneSliceDone), 0o600))
+
+	resetHelpFlag(rootCmd)
+	rootCmd.SetArgs([]string{"slice", "commit", "047", "--message", "x", "--override-message", "y", "--hide-summary"})
+	err := rootCmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot use both")
+}
+
+func TestSliceCommitDryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir("/") }()
+	require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+	require.NoError(t, os.WriteFile(".work/2_doing/047-dr.issue.md", []byte(sliceCommitTestWorkItemOneSliceDone), 0o600))
+
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	defer func() {
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+	}()
+
+	resetHelpFlag(rootCmd)
+	rootCmd.SetArgs([]string{"slice", "commit", "047", "--dry-run", "--commit-check"})
+	err := rootCmd.Execute()
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "Validation:")
+	assert.Contains(t, out, "Commit message:")
+	assert.Contains(t, out, "047")
+	assert.Contains(t, out, "git add -A")
+	assert.Contains(t, out, "git commit -F")
+	assert.Contains(t, out, "kira check -t commit")
+}
+
+func TestSliceCommitGitCreatesCommit(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir("/") }()
+
+	require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+	require.NoError(t, os.WriteFile("kira.yml", []byte("version: 1\n"), 0o600))
+
+	initial := `---
+id: 047
+title: WI
+status: doing
+kind: issue
+---
+# WI
+## Slices
+### S1
+- [ ] T001: A
+### S2
+- [ ] T002: B
+`
+	path := ".work/2_doing/047-git.issue.md"
+	require.NoError(t, os.WriteFile(path, []byte(initial), 0o600))
+
+	require.NoError(t, exec.Command("git", "init").Run())
+	require.NoError(t, exec.Command("git", "config", "user.email", "t@t.c").Run())
+	require.NoError(t, exec.Command("git", "config", "user.name", "t").Run())
+	require.NoError(t, exec.Command("git", "add", "kira.yml", path).Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+
+	updated := strings.Replace(initial, "- [ ] T001:", "- [x] T001:", 1)
+	require.NoError(t, os.WriteFile(path, []byte(updated), 0o600))
+
+	resetHelpFlag(rootCmd)
+	rootCmd.SetArgs([]string{"slice", "commit", "047", "completed", "--hide-summary"})
+	err := rootCmd.Execute()
+	require.NoError(t, err)
+
+	logOut, err := exec.Command("git", "log", "-1", "--pretty=%B").CombinedOutput()
+	require.NoError(t, err)
+	logStr := string(logOut)
+	assert.Contains(t, logStr, "047")
+	assert.Contains(t, logStr, "S1")
+	assert.Contains(t, logStr, "- T001")
+}
+
+func TestSliceCommitWithCommitCheckRuns(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir("/") }()
+
+	require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+	kiraYml := `version: 1
+checks:
+  - name: noop
+    command: "true"
+    tags: [commit]
+`
+	require.NoError(t, os.WriteFile("kira.yml", []byte(kiraYml), 0o600))
+
+	path := ".work/2_doing/047-cc.issue.md"
+	require.NoError(t, exec.Command("git", "init").Run())
+	require.NoError(t, exec.Command("git", "config", "user.email", "t@t.c").Run())
+	require.NoError(t, exec.Command("git", "config", "user.name", "t").Run())
+	require.NoError(t, exec.Command("git", "add", "kira.yml").Run())
+	require.NoError(t, exec.Command("git", "commit", "-m", "init").Run())
+
+	// Work item is untracked until slice commit stages and commits it.
+	require.NoError(t, os.WriteFile(path, []byte(sliceCommitTestWorkItemOneSliceDone), 0o600))
+
+	resetHelpFlag(rootCmd)
+	rootCmd.SetArgs([]string{"slice", "commit", "047", "--commit-check", "--hide-summary"})
+	err := rootCmd.Execute()
+	require.NoError(t, err)
 }

@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -91,6 +93,248 @@ func sliceCommitWorkItem(path, message string, _ *config.Config) error {
 	if _, err := executeCommandCombinedOutput(commitCtx, "git", []string{"commit", "-m", message}, "", false); err != nil {
 		return fmt.Errorf("failed to commit: %w", err)
 	}
+	return nil
+}
+
+// sliceCommitWorkItemMultiLine stages all changes in the repository (git add -A) and commits with a multi-line message via git commit -F.
+func sliceCommitWorkItemMultiLine(body string, _ *config.Config) error {
+	tmp, err := os.CreateTemp("", "kira-slice-commit-*.txt")
+	if err != nil {
+		return fmt.Errorf("failed to create temp commit message file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if _, err := tmp.WriteString(body); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to write commit message: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close commit message file: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer cancel()
+	if _, err := executeCommand(ctx, "git", []string{"add", "-A"}, "", false); err != nil {
+		return fmt.Errorf("failed to stage changes: %w", err)
+	}
+	commitCtx, commitCancel := context.WithTimeout(context.Background(), gitCommandTimeout)
+	defer commitCancel()
+	if _, err := executeCommandCombinedOutput(commitCtx, "git", []string{"commit", "-F", tmpPath}, "", false); err != nil {
+		return fmt.Errorf("failed to commit: %w", err)
+	}
+	return nil
+}
+
+var (
+	sliceCommitWhitespace = regexp.MustCompile(`\s+`)
+	sliceCommitBoldRE     = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	sliceCommitCodeRE     = regexp.MustCompile("`([^`]+)`")
+	sliceCommitLinkRE     = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`)
+)
+
+// sliceCommitPlainLine strips common inline markdown (bold, backticks, links) and collapses whitespace
+// so commit bodies match the normative plain-text example (task lines like "T001 Implement …", not raw markdown).
+func sliceCommitPlainLine(s string) string {
+	s = strings.TrimSpace(s)
+	prev := ""
+	for prev != s {
+		prev = s
+		s = sliceCommitBoldRE.ReplaceAllString(s, "$1")
+		s = sliceCommitCodeRE.ReplaceAllString(s, "$1")
+		s = sliceCommitLinkRE.ReplaceAllString(s, "$1")
+	}
+	return strings.TrimSpace(sliceCommitWhitespace.ReplaceAllString(s, " "))
+}
+
+func sliceCommitAppendMessage(line1, supplementary string) string {
+	sup := strings.TrimSpace(supplementary)
+	if sup == "" {
+		return line1
+	}
+	collapsed := strings.TrimSpace(sliceCommitWhitespace.ReplaceAllString(sup, " "))
+	if collapsed == "" {
+		return line1
+	}
+	return line1 + " — " + collapsed
+}
+
+// buildSliceCommitTemplateBody builds the normative multi-line commit body (without override).
+// Layout: line 1 = <id>:<slice-number>. <slice-name>; slug; optional Message/Commit line; "N. name" before tasks;
+// optional -m supplementary after task list (see kira slice commit --help and work item PRD).
+func buildSliceCommitTemplateBody(displayWorkItemID, title, sliceName string, sliceIndex1Based int, tasks []Task, supplementaryLine1, sliceCommitSummary string) string {
+	line1 := fmt.Sprintf("%s: %d. %s", displayWorkItemID, sliceIndex1Based, sliceCommitPlainLine(sliceName))
+
+	titleForSlug := strings.TrimSpace(title)
+	if titleForSlug == "" || title == unknownValue {
+		titleForSlug = "work-item"
+	} else {
+		titleForSlug = sliceCommitPlainLine(titleForSlug)
+	}
+	slugLine := fmt.Sprintf("%s-%s", displayWorkItemID, kebabCase(titleForSlug))
+
+	var b strings.Builder
+	b.WriteString(line1)
+	b.WriteString("\n\n")
+	b.WriteString(slugLine)
+	b.WriteString("\n\n")
+	if strings.TrimSpace(sliceCommitSummary) != "" {
+		b.WriteString(strings.TrimSpace(sliceCommitSummary))
+		b.WriteString("\n\n")
+	}
+	_, _ = fmt.Fprintf(&b, "%d. %s", sliceIndex1Based, sliceCommitPlainLine(sliceName))
+	b.WriteString("\n")
+	for _, t := range tasks {
+		b.WriteString("- ")
+		b.WriteString(t.ID)
+		b.WriteString(" ")
+		b.WriteString(sliceCommitPlainLine(t.Description))
+		b.WriteString("\n")
+	}
+	if sup := strings.TrimSpace(supplementaryLine1); sup != "" {
+		collapsed := strings.TrimSpace(sliceCommitWhitespace.ReplaceAllString(sup, " "))
+		if collapsed != "" {
+			b.WriteString("\n")
+			b.WriteString("\n")
+			b.WriteString(collapsed)
+		}
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func sliceCommitOpenTaskIDs(target *Slice) []string {
+	var ids []string
+	for _, t := range target.Tasks {
+		if !t.Done {
+			ids = append(ids, t.ID)
+		}
+	}
+	return ids
+}
+
+func sliceCommitArgsAndFlags(cmd *cobra.Command, args []string) (
+	workItemSel, sliceSel, supplementary, override string,
+	dryRun, doCommitCheck bool,
+	checkTags []string,
+	err error,
+) {
+	workItemSel = sliceSelectorCurrent
+	if len(args) >= 1 {
+		workItemSel = args[0]
+	}
+	sliceSel = "completed"
+	if len(args) >= 2 {
+		sliceSel = args[1]
+	}
+	supplementary, _ = cmd.Flags().GetString("message")
+	override, _ = cmd.Flags().GetString("override-message")
+	if strings.TrimSpace(supplementary) != "" && strings.TrimSpace(override) != "" {
+		err = fmt.Errorf("cannot use both --message and --override-message; use one or the other")
+		return workItemSel, sliceSel, supplementary, override, dryRun, doCommitCheck, checkTags, err
+	}
+	dryRun, _ = cmd.Flags().GetBool("dry-run")
+	doCommitCheck, _ = cmd.Flags().GetBool("commit-check")
+	checkTags, _ = cmd.Flags().GetStringSlice("commit-check-tags")
+	if doCommitCheck && len(checkTags) == 0 {
+		checkTags = []string{"commit"}
+	}
+	return workItemSel, sliceSel, supplementary, override, dryRun, doCommitCheck, checkTags, nil
+}
+
+func sliceCommitResolveValidatedTarget(workItemSel, sliceSel string, cfg *config.Config) (path string, target *Slice, sliceIndex1Based int, err error) {
+	path, err = resolveSliceWorkItem(workItemSel, cfg, "slice commit")
+	if err != nil {
+		return "", nil, 0, err
+	}
+	_, slices, err := loadSlicesFromFile(path, cfg)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	if len(slices) == 0 {
+		return "", nil, 0, fmt.Errorf("slice commit: no slices in work item")
+	}
+	t, sliceIdx, err := resolveSliceSelector(slices, sliceSel)
+	if err != nil {
+		return "", nil, 0, fmt.Errorf("slice commit: %w", err)
+	}
+	if ids := sliceCommitOpenTaskIDs(t); len(ids) > 0 {
+		return "", nil, 0, fmt.Errorf("slice commit: slice %q has open tasks: %s (complete all tasks before committing)", t.Name, strings.Join(ids, ", "))
+	}
+	return path, t, sliceIdx, nil
+}
+
+func sliceCommitPrintDryRun(out io.Writer, body string, doCommitCheck bool, checkTags []string) {
+	_, _ = fmt.Fprintln(out, labelStyle("Validation:"), successStyle("all tasks in target slice are done"))
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, labelStyle("Commit message:"))
+	_, _ = fmt.Fprintln(out, body)
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, labelStyle("Intended git steps:"))
+	_, _ = fmt.Fprintln(out, "  git add -A")
+	_, _ = fmt.Fprintln(out, "  git commit -F <file-with-message-above>")
+	if !doCommitCheck {
+		return
+	}
+	if len(checkTags) == 0 {
+		checkTags = []string{"commit"}
+	}
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, labelStyle("Would run before commit:"))
+	_, _ = fmt.Fprintf(out, "  kira check -t %s\n", strings.Join(checkTags, " -t "))
+}
+
+func runSliceCommit(cmd *cobra.Command, args []string) error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if err := checkWorkDir(cfg); err != nil {
+		return err
+	}
+
+	workItemSel, sliceSel, supplementary, override, dryRun, doCommitCheck, checkTags, err := sliceCommitArgsAndFlags(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	path, target, sliceIdx, err := sliceCommitResolveValidatedTarget(workItemSel, sliceSel, cfg)
+	if err != nil {
+		return err
+	}
+
+	_, metaID, metaTitle, _, _, err := extractWorkItemMetadata(path, cfg)
+	if err != nil {
+		return fmt.Errorf("slice commit: %w", err)
+	}
+	displayID := workItemIDFromPath(path, cfg)
+	if displayID == "" {
+		displayID = workItemSel
+	}
+	if metaID != "" && metaID != unknownValue {
+		displayID = metaID
+	}
+
+	var body string
+	if strings.TrimSpace(override) != "" {
+		body = override
+	} else {
+		body = buildSliceCommitTemplateBody(displayID, metaTitle, target.Name, sliceIdx, target.Tasks, supplementary, target.CommitSummary)
+	}
+
+	if dryRun {
+		sliceCommitPrintDryRun(cmd.OutOrStdout(), body, doCommitCheck, checkTags)
+		return nil
+	}
+
+	if doCommitCheck {
+		if err := runCheckRun(cfg, checkTags); err != nil {
+			return err
+		}
+	}
+
+	if err := sliceCommitWorkItemMultiLine(body, cfg); err != nil {
+		return err
+	}
+	_, _ = fmt.Println("Changes committed.")
+	printSliceSummaryIf(cmd, path, cfg, target.Name)
 	return nil
 }
 
@@ -601,8 +845,8 @@ func findSliceByName(slices []Slice, name string) *Slice {
 }
 
 // resolveSliceSelector resolves a slice by selector string. Returns the slice, its 1-based index, and an error.
-// Selector can be: "current" (first with open tasks), "previous" (slice before current), a positive integer
-// string ("1", "2", ...) for 1-based index, or a slice name.
+// Selector can be: "current" (first with open tasks), "previous" or "completed" (slice before first with open tasks,
+// or last slice if all done), a positive integer string ("1", "2", ...) for 1-based index, or a slice name.
 func resolveSliceSelector(slices []Slice, selector string) (*Slice, int, error) {
 	if len(slices) == 0 {
 		return nil, 0, fmt.Errorf("no slices in work item")
@@ -614,7 +858,8 @@ func resolveSliceSelector(slices []Slice, selector string) (*Slice, int, error) 
 	switch strings.ToLower(sel) {
 	case sliceSelectorCurrent:
 		return resolveSliceCurrent(slices)
-	case "previous":
+	case "previous", "completed":
+		// "completed" is the slice to commit: same as "previous" (slice before first with open tasks, or last slice if all done).
 		return resolveSlicePrevious(slices)
 	default:
 		return resolveSliceByNameWithIndex(slices, selector)

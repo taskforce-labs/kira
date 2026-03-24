@@ -25,8 +25,21 @@ import (
 
 const testMergedAtTimestamp = "2024-06-01T12:00:00Z"
 
+// resetSliceCommitFlags clears slice commit flags so one test's --message / --override-message etc. does not leak to the next Execute().
+func resetSliceCommitFlags() {
+	f := sliceCommitCmd.Flags()
+	_ = f.Set("dry-run", "false")
+	_ = f.Set("message", "")
+	_ = f.Set("override-message", "")
+	_ = f.Set("commit-check", "false")
+	_ = f.Set("commit-check-tags", "")
+}
+
 // resetHelpFlag clears the help flag on cmd and its children so a previous test's --help doesn't affect the next Execute().
 func resetHelpFlag(cmd *cobra.Command) {
+	if cmd == rootCmd {
+		resetSliceCommitFlags()
+	}
 	for c := cmd; c != nil; c = c.Parent() {
 		if f := c.Flags().Lookup("help"); f != nil {
 			_ = f.Value.Set("false")
