@@ -1,12 +1,16 @@
 ---
 id: 016
 title: roadmap-planning
-status: review
+status: done
 kind: prd
-assigned:
+created: 2026-01-21T00:00:00Z
+assigned: null
+due: 2026-01-21T00:00:00Z
 estimate: 0
-created: 2026-01-21
-due: 2026-01-21
+merge_commit_sha: 2862c0e859de225438ba9554eafbc8be258f8c89
+merge_strategy: rebase
+merged_at: "2026-03-24T03:56:25Z"
+pr_number: 27
 tags: [planning, roadmap, visualization, polyrepo]
 ---
 
