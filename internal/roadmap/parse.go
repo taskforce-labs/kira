@@ -65,17 +65,22 @@ func Serialize(f *File) ([]byte, error) {
 	return data, nil
 }
 
-// SaveFile writes a File to a path. Path must be under baseDir.
-func SaveFile(baseDir, path string, f *File) error {
+// WriteBytes writes data to path with permission 0o600 after validating path is under baseDir.
+func WriteBytes(baseDir, path string, data []byte) error {
 	if err := validateRoadmapPath(baseDir, path); err != nil {
-		return err
-	}
-	data, err := Serialize(f)
-	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write roadmap file: %w", err)
 	}
 	return nil
+}
+
+// SaveFile writes a File to a path. Path must be under baseDir.
+func SaveFile(baseDir, path string, f *File) error {
+	data, err := Serialize(f)
+	if err != nil {
+		return err
+	}
+	return WriteBytes(baseDir, path, data)
 }
