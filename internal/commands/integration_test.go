@@ -1878,6 +1878,7 @@ created: 2024-01-16
     required: true
     default: user@example.com
 `, 1)
+		// #nosec G703 -- test-only path from t.TempDir()
 		require.NoError(t, os.WriteFile(kiraConfigPath, []byte(configWithFields), 0o600))
 
 		// Create a work item that is missing the required 'assigned' field
@@ -1937,6 +1938,7 @@ created: 2024-01-15
     type: enum
     allowed_values: [low, medium, high]
 `, 1)
+		// #nosec G703 -- test-only path from t.TempDir()
 		require.NoError(t, os.WriteFile(kiraConfigPath, []byte(configWithFields), 0o600))
 
 		// Create a work item with an invalid enum value that cannot be auto-fixed
