@@ -161,7 +161,7 @@ func sliceCommitAppendMessage(line1, supplementary string) string {
 // Layout: line 1 = <id>:<slice-number>. <slice-name>; slug; optional Message/Commit line; "N. name" before tasks;
 // optional -m supplementary after task list (see kira slice commit --help and work item PRD).
 func buildSliceCommitTemplateBody(displayWorkItemID, title, sliceName string, sliceIndex1Based int, tasks []Task, supplementaryLine1, sliceCommitSummary string) string {
-	line1 := fmt.Sprintf("%s: %d. %s", displayWorkItemID, sliceIndex1Based, sliceCommitPlainLine(sliceName))
+	line1 := fmt.Sprintf("%s:%d. %s", displayWorkItemID, sliceIndex1Based, sliceCommitPlainLine(sliceName))
 
 	titleForSlug := strings.TrimSpace(title)
 	if titleForSlug == "" || title == unknownValue {
@@ -1051,11 +1051,11 @@ func runSliceProgress(cmd *cobra.Command, args []string) error {
 
 // firstSliceWithOpenTasks returns the first slice (in order) that has at least one open task.
 func firstSliceWithOpenTasks(slices []Slice) *Slice {
-	for _, s := range slices {
-		for _, t := range s.Tasks {
-			if !t.Done {
-				sCopy := s
-				return &sCopy
+	for i := range slices {
+		s := &slices[i]
+		for j := range s.Tasks {
+			if !s.Tasks[j].Done {
+				return s
 			}
 		}
 	}
