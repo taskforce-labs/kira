@@ -269,10 +269,7 @@ func archiveCurrentAndWriteDraft(roadmapDir, archivePath, draftPath string) erro
 		if err != nil {
 			return fmt.Errorf("read current roadmap: %w", err)
 		}
-		if err := roadmap.ValidateRoadmapPath(baseDir, archivePath); err != nil {
-			return fmt.Errorf("invalid archive path: %w", err)
-		}
-		if err := os.WriteFile(archivePath, data, 0o600); err != nil {
+		if err := roadmap.WriteBytes(baseDir, archivePath, data); err != nil {
 			return fmt.Errorf("write archive: %w", err)
 		}
 		if err := os.Remove(roadmapDir); err != nil {
@@ -283,10 +280,7 @@ func archiveCurrentAndWriteDraft(roadmapDir, archivePath, draftPath string) erro
 	if err != nil {
 		return fmt.Errorf("read draft: %w", err)
 	}
-	if err := roadmap.ValidateRoadmapPath(baseDir, roadmapDir); err != nil {
-		return fmt.Errorf("invalid roadmap path: %w", err)
-	}
-	if err := os.WriteFile(roadmapDir, data, 0o600); err != nil {
+	if err := roadmap.WriteBytes(baseDir, roadmapDir, data); err != nil {
 		return fmt.Errorf("write current roadmap: %w", err)
 	}
 	if err := os.Remove(draftPath); err != nil {
