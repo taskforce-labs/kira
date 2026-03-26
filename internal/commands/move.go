@@ -252,12 +252,28 @@ func verifyDeletionStaged(ctx context.Context, oldPath, dir string, dryRun bool)
 
 // stageFileChanges stages the old file deletion and new file addition for a move
 func stageFileChanges(ctx context.Context, oldPath, newPath string, dryRun bool) error {
+	repoRoot := ""
+	if !dryRun {
+		var err error
+		repoRoot, err = getRepoRoot()
+		if err != nil {
+			return fmt.Errorf("failed to determine repository root: %w", err)
+		}
+	}
+
+	oldPathForGit := oldPath
+	newPathForGit := newPath
+	if !dryRun {
+		oldPathForGit = normalizePathForGit(repoRoot, oldPath)
+		newPathForGit = normalizePathForGit(repoRoot, newPath)
+	}
+
 	// Stage the old file deletion first using git rm --cached
-	_, cmdErr := executeCommand(ctx, "git", []string{"rm", "--cached", oldPath}, "", dryRun)
+	_, cmdErr := executeCommand(ctx, "git", []string{"rm", "--cached", oldPathForGit}, repoRoot, dryRun)
 	if cmdErr != nil && !dryRun {
 		// If git rm fails (file wasn't tracked), try git add -u to stage deletions
-		oldDir := filepath.Dir(oldPath)
-		_, fallbackErr := executeCommand(ctx, "git", []string{"add", "-u", oldDir}, "", dryRun)
+		oldDir := filepath.Dir(oldPathForGit)
+		_, fallbackErr := executeCommand(ctx, "git", []string{"add", "-u", oldDir}, repoRoot, dryRun)
 		if fallbackErr != nil {
 			return fmt.Errorf("failed to stage deletion: git rm --cached failed (%v) and git add -u fallback also failed (%w)", cmdErr, fallbackErr)
 		}
@@ -265,7 +281,7 @@ func stageFileChanges(ctx context.Context, oldPath, newPath string, dryRun bool)
 
 	// Verify deletion was staged (skip in dry-run mode)
 	if !dryRun {
-		deletionStaged, err := verifyDeletionStaged(ctx, oldPath, "", dryRun)
+		deletionStaged, err := verifyDeletionStaged(ctx, oldPathForGit, repoRoot, dryRun)
 		if err != nil {
 			return fmt.Errorf("failed to verify deletion was staged: %w", err)
 		}
@@ -275,11 +291,45 @@ func stageFileChanges(ctx context.Context, oldPath, newPath string, dryRun bool)
 	}
 
 	// Stage the new file addition
-	_, cmdErr = executeCommand(ctx, "git", []string{"add", newPath}, "", dryRun)
+	_, cmdErr = executeCommand(ctx, "git", []string{"add", newPathForGit}, repoRoot, dryRun)
 	if cmdErr != nil && !dryRun {
 		return fmt.Errorf("failed to stage changes: %w", cmdErr)
 	}
 	return nil
+}
+
+// normalizePathForGit returns a repo-relative path when possible.
+// This avoids absolute-path and symlink root mismatches in git output comparisons.
+func normalizePathForGit(repoRoot, path string) string {
+	if path == "" {
+		return path
+	}
+	if !filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+
+	repoEval, repoErr := filepath.EvalSymlinks(repoRoot)
+	pathEval, pathErr := evalPathPreservingMissingLeaf(path)
+	if repoErr == nil && pathErr == nil {
+		if rel, err := filepath.Rel(repoEval, pathEval); err == nil && rel != "" && rel != "." && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
+
+	if rel, err := filepath.Rel(repoRoot, path); err == nil && rel != "" && rel != "." && !strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(path)
+}
+
+func evalPathPreservingMissingLeaf(path string) (string, error) {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	evalDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(evalDir, base), nil
 }
 
 // commitMove stages the moved files and commits with sanitized message

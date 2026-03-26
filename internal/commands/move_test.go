@@ -646,6 +646,37 @@ func TestStageFileChanges(t *testing.T) {
 		verifyStagedMove(t, testFilePath, testTargetPath)
 	})
 
+	t.Run("stages deletion and addition when called with absolute paths", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		// Initialize git repo
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+
+		// Create and commit a file
+		require.NoError(t, os.MkdirAll(".work/1_todo", 0o700))
+		require.NoError(t, os.WriteFile(testFilePath, []byte(testWorkItemContent), 0o600))
+		require.NoError(t, exec.Command("git", "add", testFilePath).Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial commit").Run())
+
+		// Move file on disk
+		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
+		require.NoError(t, os.Rename(testFilePath, testTargetPath))
+
+		// Stage the changes using absolute paths to guard against absolute-vs-relative mismatch regressions
+		oldAbsPath := tmpDir + "/" + testFilePath
+		newAbsPath := tmpDir + "/" + testTargetPath
+		ctx := context.Background()
+		err := stageFileChanges(ctx, oldAbsPath, newAbsPath, false)
+		require.NoError(t, err)
+
+		// Verify both deletion and addition are staged
+		verifyStagedMove(t, testFilePath, testTargetPath)
+	})
+
 	t.Run("dry run does not stage changes", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
