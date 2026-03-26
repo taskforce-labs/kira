@@ -1,11 +1,15 @@
 ---
 id: 047
 title: no commit on toggle
-status: review
+status: done
 kind: issue
-assigned:
+created: 2026-02-26T00:00:00Z
+assigned: null
 estimate: 0
-created: 2026-02-26
+merge_commit_sha: 5d4d87b4deba1ad97b349e65bce2d6923d44dbd8
+merge_strategy: rebase
+merged_at: "2026-03-24T09:33:38Z"
+pr_number: 26
 tags: []
 ---
 
