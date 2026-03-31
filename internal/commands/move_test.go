@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,6 +29,67 @@ created: 2024-01-01
 	testTargetPath   = ".work/2_doing/001-test-feature.prd.md"
 	testDoneFilePath = ".work/4_done/001-test-feature.prd.md"
 )
+
+func TestWorkItemFileAlreadyReflectsTarget(t *testing.T) {
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { _ = os.Chdir("/") }()
+
+	cfg := &config.DefaultConfig
+	require.NoError(t, os.MkdirAll(".work/4_done", 0o700))
+	path := filepath.Join(".work", "4_done", "047-example.issue.md")
+	doneContent := `---
+id: 047
+title: Example
+status: done
+kind: issue
+merged_at: "2026-01-01T12:00:00Z"
+merge_commit_sha: abcdef1
+pr_number: 26
+merge_strategy: merge
+---
+
+# Example
+`
+	require.NoError(t, os.WriteFile(path, []byte(doneContent), 0o600))
+
+	fields := map[string]interface{}{
+		"merged_at":        "2026-01-01T12:00:00Z",
+		"merge_commit_sha": "abcdef1",
+		"pr_number":        26,
+		"merge_strategy":   "merge",
+	}
+	ok, err := workItemFileAlreadyReflectsTarget(path, cfg, "done", fields)
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	fieldsMismatch := map[string]interface{}{
+		"merged_at":        "2026-01-01T12:00:00Z",
+		"merge_commit_sha": "abcdef1",
+		"pr_number":        99,
+		"merge_strategy":   "merge",
+	}
+	ok, err = workItemFileAlreadyReflectsTarget(path, cfg, "done", fieldsMismatch)
+	require.NoError(t, err)
+	assert.False(t, ok)
+
+	ok, err = workItemFileAlreadyReflectsTarget(path, cfg, "doing", fields)
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestWorkItemsSamePath(t *testing.T) {
+	tmp := t.TempDir()
+	repoRoot := tmp
+	absDone := filepath.Join(repoRoot, ".work", "4_done", "001-test-feature.prd.md")
+	relDone := ".work/4_done/001-test-feature.prd.md"
+
+	assert.True(t, workItemsSamePath(repoRoot, absDone, relDone))
+	assert.True(t, workItemsSamePath(repoRoot, relDone, absDone))
+	assert.False(t, workItemsSamePath(repoRoot, filepath.Join(repoRoot, ".work", "1_todo", "001-test-feature.prd.md"), relDone))
+	assert.True(t, workItemsSamePath("", filepath.Join("a", "b"), filepath.Join("a", "b")))
+	assert.False(t, workItemsSamePath("", filepath.Join(tmp, "x.md"), "x.md"))
+}
 
 func TestExtractWorkItemMetadata(t *testing.T) {
 	t.Run("extracts all metadata fields", func(t *testing.T) {
@@ -496,6 +558,57 @@ func TestMoveWorkItem(t *testing.T) {
 		assert.Equal(t, "abc123", fm["merge_commit_sha"])
 		assert.Equal(t, 42, fm["pr_number"])
 		assert.Equal(t, "squash", fm["merge_strategy"])
+	})
+
+	t.Run("skips update when already done with matching metadata", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+		defer func() { _ = os.Chdir("/") }()
+
+		cfg := &config.DefaultConfig
+		require.NoError(t, os.MkdirAll(".work/4_done", 0o700))
+		content := `---
+id: 001
+title: Test Feature
+status: done
+kind: prd
+created: 2024-01-01
+merged_at: "2024-06-01T12:00:00Z"
+merge_commit_sha: abc123
+pr_number: 42
+merge_strategy: squash
+---
+
+# Test Feature
+`
+		require.NoError(t, os.WriteFile(testDoneFilePath, []byte(content), 0o600))
+
+		require.NoError(t, exec.Command("git", "init").Run())
+		require.NoError(t, exec.Command("git", "config", "user.email", "test@example.com").Run())
+		require.NoError(t, exec.Command("git", "config", "user.name", "Test User").Run())
+		require.NoError(t, exec.Command("git", "add", ".work/").Run())
+		require.NoError(t, exec.Command("git", "commit", "-m", "Initial").Run())
+
+		additionalFields := map[string]interface{}{
+			"merged_at":        "2024-06-01T12:00:00Z",
+			"merge_commit_sha": "abc123",
+			"pr_number":        42,
+			"merge_strategy":   "squash",
+		}
+		err := moveWorkItem(cfg, "001", "done", true, false, additionalFields)
+		require.NoError(t, err)
+
+		out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+		require.NoError(t, err)
+		headAfterFirst := strings.TrimSpace(string(out))
+
+		err = moveWorkItem(cfg, "001", "done", true, false, additionalFields)
+		require.NoError(t, err)
+
+		out, err = exec.Command("git", "rev-parse", "HEAD").Output()
+		require.NoError(t, err)
+		headAfterSecond := strings.TrimSpace(string(out))
+		assert.Equal(t, headAfterFirst, headAfterSecond, "skip path should not create a commit")
 	})
 }
 

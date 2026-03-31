@@ -300,6 +300,17 @@ func stageFileChanges(ctx context.Context, oldPath, newPath string, dryRun bool)
 
 // normalizePathForGit returns a repo-relative path when possible.
 // This avoids absolute-path and symlink root mismatches in git output comparisons.
+// workItemsSamePath reports whether two paths refer to the same work item file (including absolute vs relative under repoRoot).
+func workItemsSamePath(repoRoot, workItemPath, targetPath string) bool {
+	if filepath.Clean(workItemPath) == filepath.Clean(targetPath) {
+		return true
+	}
+	if repoRoot == "" {
+		return false
+	}
+	return normalizePathForGit(repoRoot, workItemPath) == normalizePathForGit(repoRoot, targetPath)
+}
+
 func normalizePathForGit(repoRoot, path string) string {
 	if path == "" {
 		return path
@@ -375,6 +386,10 @@ func commitMove(oldPath, newPath, subject, body string, dryRun bool) error {
 
 	_, err = executeCommandCombinedOutput(commitCtx, "git", commitArgs, "", dryRun)
 	if err != nil && !dryRun {
+		errStr := err.Error()
+		if strings.Contains(errStr, "nothing to commit") || strings.Contains(errStr, "no changes added to commit") {
+			return nil
+		}
 		return fmt.Errorf("failed to commit: %w", err)
 	}
 
@@ -449,9 +464,14 @@ func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFla
 	filename := filepath.Base(workItemPath)
 	targetPath := filepath.Join(targetFolder, filename)
 
-	// Idempotent: already at target path (e.g. file was moved on trunk and we just pulled)
-	if filepath.Clean(workItemPath) == filepath.Clean(targetPath) {
-		return moveWorkItemAlreadyAtTarget(cfg, targetPath, targetStatus, commitFlag, metadata, additionalFields)
+	// Idempotent: already at target path (e.g. file was moved on trunk and we just pulled).
+	// findWorkItemFile may return an absolute path (e.g. when the work folder is absolute) while
+	// targetPath is relative; filepath.Clean alone would miss that and fall through to commitMove,
+	// which then gets "nothing to commit" after a no-op rename.
+	repoRoot, _ := getRepoRoot()
+	if workItemsSamePath(repoRoot, workItemPath, targetPath) {
+		// Use workItemPath (from findWorkItemFile) for I/O so validation matches how the file was found.
+		return moveWorkItemAlreadyAtTarget(cfg, workItemPath, targetStatus, commitFlag, dryRun, metadata, additionalFields)
 	}
 
 	if dryRun {
@@ -461,8 +481,84 @@ func moveWorkItem(cfg *config.Config, workItemID, targetStatus string, commitFla
 	return executeMoveWorkItem(cfg, workItemID, workItemPath, targetPath, targetStatus, commitFlag, metadata, additionalFields)
 }
 
+// workItemFileAlreadyReflectsTarget reports whether the file's front matter already matches targetStatus and additionalFields.
+func workItemFileAlreadyReflectsTarget(filePath string, cfg *config.Config, targetStatus string, additionalFields map[string]interface{}) (bool, error) {
+	frontMatter, _, err := parseWorkItemFrontMatter(filePath, cfg)
+	if err != nil {
+		return false, err
+	}
+	if frontMatter == nil {
+		return false, nil
+	}
+	cur := strings.TrimSpace(fmt.Sprint(frontMatter["status"]))
+	if cur != targetStatus {
+		return false, nil
+	}
+	for k, want := range additionalFields {
+		if !frontMatterFieldEqual(frontMatter[k], want) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func frontMatterFieldEqual(got, want interface{}) bool {
+	if want == nil {
+		return got == nil
+	}
+	if got == nil {
+		return false
+	}
+	switch w := want.(type) {
+	case string:
+		return strings.TrimSpace(fmt.Sprint(got)) == strings.TrimSpace(w)
+	case int:
+		gi, ok := scalarToInt64(got)
+		return ok && gi == int64(w)
+	case int64:
+		gi, ok := scalarToInt64(got)
+		return ok && gi == w
+	case float64:
+		gi, ok := scalarToInt64(got)
+		return ok && gi == int64(w)
+	default:
+		return fmt.Sprint(got) == fmt.Sprint(w)
+	}
+}
+
+func scalarToInt64(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case int:
+		return int64(n), true
+	case int64:
+		return n, true
+	case float64:
+		return int64(n), true
+	case string:
+		i, err := strconv.ParseInt(strings.TrimSpace(n), 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return i, true
+	default:
+		return 0, false
+	}
+}
+
 // moveWorkItemAlreadyAtTarget updates frontmatter when the file is already at the target path (idempotent path).
-func moveWorkItemAlreadyAtTarget(cfg *config.Config, targetPath, targetStatus string, commitFlag bool, metadata workItemMetadata, additionalFields map[string]interface{}) error {
+func moveWorkItemAlreadyAtTarget(cfg *config.Config, targetPath, targetStatus string, commitFlag, dryRun bool, metadata workItemMetadata, additionalFields map[string]interface{}) error {
+	// Skip all file I/O when nothing would change (e.g. kira done after trunk already has the item marked done).
+	if !dryRun {
+		match, err := workItemFileAlreadyReflectsTarget(targetPath, cfg, targetStatus, additionalFields)
+		if err != nil {
+			return err
+		}
+		if match {
+			fmt.Printf("Work item %s already in '%s' with expected metadata; skipping update\n", metadata.id, targetStatus)
+			return nil
+		}
+	}
+
 	if err := updateWorkItemStatus(targetPath, targetStatus, cfg); err != nil {
 		return fmt.Errorf("failed to update work item status: %w", err)
 	}
