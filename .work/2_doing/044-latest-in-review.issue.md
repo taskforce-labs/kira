@@ -39,6 +39,29 @@ The command currently requires a work item in the doing folder before discoverin
 
 Drop the work-item check entirely for `kira latest`. Do not use work item status or folder; repository discovery does not use the work item (the work item ID is already ignored in `resolveRepositoriesForLatest`). Trunk vs feature-branch behavior is determined by the current git branch per repo. Discover repos from workspace behavior only (standalone/monorepo = current dir, polyrepo = all projects); for each repo, if on trunk then update from remote, else rebase onto trunk. Remove the call to `findCurrentWorkItem` (and the work-item path/metadata steps) from `discoverRepositories`.
 
+## Slices
+
+### 1. Latest discovery without work item
+
+Commit: `discoverRepositories` uses workspace behavior only; no doing-folder work item; clearer empty-repo error; drop dead discovery helpers if unused.
+
+- [ ] T001: Refactor `discoverRepositories` in `internal/commands/latest.go` to skip `findCurrentWorkItem` and `extractWorkItemMetadataForLatest`; run `detectWorkspaceBehavior` then `resolveRepositoriesForLatest` (same behavior as today aside from the removed gate).
+- [ ] T002: Remove the unused work-item ID argument from `resolveRepositoriesForLatest` (and update `discoverRepositories`, `discoverRepositoriesFromPath`, and call sites) if it is only passed for legacy reasons.
+- [ ] T003: Remove `findCurrentWorkItem` if nothing references it after T001; otherwise keep only where still required.
+- [ ] T004: Update `runLatest` empty-repository error text so it does not mention a work item (e.g. workspace-focused wording).
+
+**Acceptance:** With a valid git workspace and an empty or missing `.work/2_doing/` (no work item in doing), `kira latest` discovers repos and proceeds like today (subject to repo state), matching expected behavior in the issue.
+
+### 2. Tests and regression coverage
+
+Commit: Unit tests assert no doing work item is required; existing latest flows stay covered.
+
+- [ ] T005: Replace or extend `TestDiscoverRepositories` (and any tests that expect “no work item in doing folder”) so an empty doing folder no longer fails discovery when the cwd is a valid standalone/polyrepo workspace; keep or adjust parity between `discoverRepositories` and `discoverRepositoriesFromPath` as appropriate.
+- [ ] T006: Remove or rewrite `TestFindCurrentWorkItem` (or equivalent) if `findCurrentWorkItem` is deleted in slice 1.
+- [ ] T007: Run `make check`; if e2e scripts still assume a doing work item for every `kira latest` scenario, add or adjust one scenario that runs `kira latest` with no markdown file in doing (e.g. work item only in review) and assert success.
+
+**Acceptance:** `make check` passes; new or updated tests document the regression (latest while work item not in doing).
+
 ## Release Notes
 
 - `kira latest` no longer depends on work item status or folder. It runs based only on workspace type and whether each repo is on trunk or a feature branch (on trunk: update from remote; on feature branch: rebase onto trunk).
