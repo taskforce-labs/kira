@@ -104,7 +104,7 @@ func runReviewExecute(ctx *reviewContext, cfg *config.Config) error {
 	if err := runReviewTrunkUpdateAndRebase(cfg, ctx.WorkItemPath, effectiveNoTrunkUpdate, effectiveNoRebase); err != nil {
 		return err
 	}
-	repos, err := discoverRepositoriesFromPath(cfg, ctx.WorkItemPath)
+	repos, err := discoverRepositories(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to discover repositories for push: %w", err)
 	}

@@ -9,11 +9,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
-
-	yaml "gopkg.in/yaml.v3"
 
 	"kira/internal/config"
 
@@ -58,15 +55,6 @@ type RepositoryInfo struct {
 	TrunkBranch string // Resolved trunk branch (project override > git.trunk_branch > auto-detect)
 	Remote      string // Resolved remote name (project override > git.remote > "origin")
 	RepoRoot    string // For polyrepo: repo_root value if present
-}
-
-// WorkItemMetadata contains extracted metadata from a work item file
-type WorkItemMetadata struct {
-	ID       string
-	Title    string
-	Status   string
-	Kind     string
-	Filepath string
 }
 
 // RepositoryState represents the current state of a repository
@@ -147,7 +135,7 @@ func runLatest(cmd *cobra.Command, _ []string) error {
 	}
 
 	if len(repos) == 0 {
-		return fmt.Errorf("no repositories found for current work item")
+		return fmt.Errorf("no repositories found for the current workspace")
 	}
 
 	displayDiscoveredRepositories(repos)
@@ -249,7 +237,7 @@ func handleUpdateResults(results []RepositoryOperationResult) error {
 
 // displayDiscoveredRepositories displays the list of discovered repositories
 func displayDiscoveredRepositories(repos []RepositoryInfo) {
-	fmt.Printf("Discovered %d repository(ies) for current work item:\n", len(repos))
+	fmt.Printf("Discovered %d repository(ies) for current workspace:\n", len(repos))
 	for _, repo := range repos {
 		branchNote := ""
 		if onTrunk, err := isOnTrunkBranch(repo); err == nil && onTrunk {
@@ -341,44 +329,8 @@ func getStateSymbol(state RepositoryState) string {
 
 // discoverRepositories is the main entry point for repository discovery
 func discoverRepositories(cfg *config.Config) ([]RepositoryInfo, error) {
-	// Step 1: Find current work item in doing folder
-	workItemPath, err := findCurrentWorkItem(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	// Step 2: Extract work item metadata
-	metadata, err := extractWorkItemMetadataForLatest(workItemPath, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract work item metadata: %w", err)
-	}
-
-	// Step 3: Detect workspace behavior
 	behavior := detectWorkspaceBehavior(cfg)
-
-	// Step 4: Resolve repositories based on behavior
-	repos, err := resolveRepositoriesForLatest(cfg, behavior, metadata.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Step 5: Validate repositories
-	if err := validateRepositories(repos); err != nil {
-		return nil, err
-	}
-
-	return repos, nil
-}
-
-// discoverRepositoriesFromPath discovers repositories for the work item at workItemPath.
-// Used by review when work item ID is derived from branch (caller already has path).
-func discoverRepositoriesFromPath(cfg *config.Config, workItemPath string) ([]RepositoryInfo, error) {
-	metadata, err := extractWorkItemMetadataForLatest(workItemPath, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract work item metadata: %w", err)
-	}
-	behavior := detectWorkspaceBehavior(cfg)
-	repos, err := resolveRepositoriesForLatest(cfg, behavior, metadata.ID)
+	repos, err := resolveRepositoriesForLatest(cfg, behavior)
 	if err != nil {
 		return nil, err
 	}
@@ -386,94 +338,6 @@ func discoverRepositoriesFromPath(cfg *config.Config, workItemPath string) ([]Re
 		return nil, err
 	}
 	return repos, nil
-}
-
-// findCurrentWorkItem locates the work item file in the doing folder
-func findCurrentWorkItem(cfg *config.Config) (string, error) {
-	doingFolder := cfg.StatusFolders["doing"]
-	if doingFolder == "" {
-		doingFolder = "2_doing" // default
-	}
-
-	workFolder := config.GetWorkFolderPath(cfg)
-	doingPath := filepath.Join(workFolder, doingFolder)
-	entries, err := os.ReadDir(doingPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("doing folder not found at %s: no work item in progress", doingPath)
-		}
-		return "", fmt.Errorf("failed to read doing folder: %w", err)
-	}
-
-	var workItemFiles []string
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
-			workItemFiles = append(workItemFiles, entry.Name())
-		}
-	}
-
-	if len(workItemFiles) == 0 {
-		return "", fmt.Errorf("no work item found in doing folder (%s): start a work item first", doingPath)
-	}
-
-	// If multiple work items exist, use the first one (work item ID is not used for repository discovery)
-	if len(workItemFiles) > 1 {
-		// Sort for deterministic selection
-		sort.Strings(workItemFiles)
-	}
-
-	return filepath.Join(doingPath, workItemFiles[0]), nil
-}
-
-const yamlFrontMatterDelimiter = "---"
-
-// extractWorkItemMetadataForLatest parses YAML front matter from work item file
-func extractWorkItemMetadataForLatest(filePath string, cfg *config.Config) (*WorkItemMetadata, error) {
-	content, err := safeReadFile(filePath, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read work item file: %w", err)
-	}
-
-	// Extract YAML front matter between the first pair of --- lines
-	lines := strings.Split(string(content), "\n")
-	var yamlLines []string
-	inYAML := false
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if i == 0 && trimmed == yamlFrontMatterDelimiter {
-			inYAML = true
-			continue
-		}
-		if inYAML {
-			if trimmed == yamlFrontMatterDelimiter {
-				break
-			}
-			yamlLines = append(yamlLines, line)
-		}
-	}
-
-	// Parse YAML to extract fields
-	type workItemFields struct {
-		ID     string `yaml:"id"`
-		Title  string `yaml:"title"`
-		Status string `yaml:"status"`
-		Kind   string `yaml:"kind"`
-	}
-
-	fields := &workItemFields{}
-	if len(yamlLines) > 0 {
-		if err := yaml.Unmarshal([]byte(strings.Join(yamlLines, "\n")), fields); err != nil {
-			return nil, fmt.Errorf("failed to parse front matter: %w", err)
-		}
-	}
-
-	return &WorkItemMetadata{
-		ID:       fields.ID,
-		Title:    fields.Title,
-		Status:   fields.Status,
-		Kind:     fields.Kind,
-		Filepath: filePath,
-	}, nil
 }
 
 // detectWorkspaceBehavior determines the workspace type from configuration
@@ -536,7 +400,7 @@ func orderRepositoriesByDependencies(repos []RepositoryInfo) []RepositoryInfo {
 	return ordered
 }
 
-func resolveRepositoriesForLatest(cfg *config.Config, behavior WorkspaceBehavior, _ string) ([]RepositoryInfo, error) {
+func resolveRepositoriesForLatest(cfg *config.Config, behavior WorkspaceBehavior) ([]RepositoryInfo, error) {
 	switch behavior {
 	case WorkspaceBehaviorStandalone, WorkspaceBehaviorMonorepo:
 		// For standalone/monorepo, return single repository (current directory)
@@ -1914,16 +1778,16 @@ func displayOperationResults(results []RepositoryOperationResult) {
 // runReviewTrunkUpdateAndRebase runs trunk update and/or rebase for the review command.
 // noTrunkUpdate: skip fetch and trunk update; when false and noRebase, still do rebase onto local trunk only.
 // noRebase: skip rebase for feature branches; when false and noTrunkUpdate, do rebase onto local trunk only.
-func runReviewTrunkUpdateAndRebase(cfg *config.Config, workItemPath string, noTrunkUpdate, noRebase bool) error {
+func runReviewTrunkUpdateAndRebase(cfg *config.Config, _ string, noTrunkUpdate, noRebase bool) error {
 	if noTrunkUpdate && noRebase {
 		return nil
 	}
-	repos, err := discoverRepositoriesFromPath(cfg, workItemPath)
+	repos, err := discoverRepositories(cfg)
 	if err != nil {
 		return err
 	}
 	if len(repos) == 0 {
-		return fmt.Errorf("no repositories found for work item")
+		return fmt.Errorf("no repositories found for the current workspace")
 	}
 	displayDiscoveredRepositories(repos)
 	stateInfos := checkAllRepositoryStates(repos)

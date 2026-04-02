@@ -147,217 +147,17 @@ func TestRunLatest(t *testing.T) {
 		assert.Contains(t, err.Error(), "Run 'kira init' first")
 	})
 
-	t.Run("returns error when no work item in doing folder", func(t *testing.T) {
+	t.Run("empty doing folder does not block latest; still requires a git repository", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
 
-		// Create .work directory and doing folder
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
 
 		err := runLatest(nil, nil)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no work item found in doing folder")
-	})
-}
-
-func TestFindCurrentWorkItem(t *testing.T) {
-	t.Run("finds work item in doing folder", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		cfg := &config.Config{
-			StatusFolders: map[string]string{
-				"doing": "2_doing",
-			},
-		}
-
-		// Create doing folder and work item
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(testWorkItemContentDoing), 0o600))
-
-		path, err := findCurrentWorkItem(cfg)
-		require.NoError(t, err)
-		assert.Equal(t, filepath.Join(".work", "2_doing", "001-test-feature.prd.md"), path)
-	})
-
-	t.Run("uses default doing folder when not configured", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		cfg := &config.Config{
-			StatusFolders: map[string]string{},
-		}
-
-		// Create default doing folder
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(testWorkItemContentDoing), 0o600))
-
-		path, err := findCurrentWorkItem(cfg)
-		require.NoError(t, err)
-		assert.Equal(t, filepath.Join(".work", "2_doing", "001-test-feature.prd.md"), path)
-	})
-
-	t.Run("returns error when no work item exists", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		cfg := &config.Config{
-			StatusFolders: map[string]string{
-				"doing": "2_doing",
-			},
-		}
-
-		// Create empty doing folder
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-
-		_, err := findCurrentWorkItem(cfg)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no work item found in doing folder")
-	})
-
-	t.Run("returns first work item when multiple exist", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		cfg := &config.Config{
-			StatusFolders: map[string]string{
-				"doing": "2_doing",
-			},
-		}
-
-		// Create doing folder with multiple work items
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(testWorkItemContentDoing), 0o600))
-		require.NoError(t, os.WriteFile(".work/2_doing/002-another-feature.prd.md", []byte(testWorkItemContentDoing), 0o600))
-
-		// Should return the first work item (sorted alphabetically)
-		path, err := findCurrentWorkItem(cfg)
-		require.NoError(t, err)
-		// Should return one of the work items (deterministic based on sorting)
-		assert.True(t, strings.HasSuffix(path, "001-test-feature.prd.md") || strings.HasSuffix(path, "002-another-feature.prd.md"))
-	})
-
-	t.Run("returns error when doing folder does not exist", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		cfg := &config.Config{
-			StatusFolders: map[string]string{
-				"doing": "2_doing",
-			},
-		}
-
-		// Create .work but not doing folder
-		require.NoError(t, os.MkdirAll(".work", 0o700))
-
-		_, err := findCurrentWorkItem(cfg)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "doing folder not found")
-	})
-}
-
-func TestExtractWorkItemMetadataForLatest(t *testing.T) {
-	t.Run("parses valid work item metadata", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		// Create .work directory structure
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-
-		workItemContent := `---
-id: 001
-title: Test Feature
-status: doing
-kind: prd
----
-# Test Feature
-Content here
-`
-		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(workItemContent), 0o600))
-
-		cfg, err := config.LoadConfig()
-		require.NoError(t, err)
-
-		metadata, err := extractWorkItemMetadataForLatest(testWorkItemPathDoing, cfg)
-		require.NoError(t, err)
-		assert.Equal(t, "001", metadata.ID)
-		assert.Equal(t, "Test Feature", metadata.Title)
-		assert.Equal(t, "doing", metadata.Status)
-		assert.Equal(t, "prd", metadata.Kind)
-		assert.Equal(t, testWorkItemPathDoing, metadata.Filepath)
-	})
-
-	t.Run("handles missing fields", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		// Create .work directory structure
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-
-		workItemContent := `---
-id: 001
----
-# Test Feature
-`
-		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(workItemContent), 0o600))
-
-		cfg, err := config.LoadConfig()
-		require.NoError(t, err)
-
-		metadata, err := extractWorkItemMetadataForLatest(testWorkItemPathDoing, cfg)
-		require.NoError(t, err)
-		assert.Equal(t, "001", metadata.ID)
-		assert.Empty(t, metadata.Title)
-		assert.Empty(t, metadata.Status)
-		assert.Empty(t, metadata.Kind)
-	})
-
-	t.Run("handles invalid YAML", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		// Create .work directory structure
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-
-		workItemContent := `---
-id: 001
-title: [invalid
----
-# Test Feature
-`
-		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(workItemContent), 0o600))
-
-		cfg, err := config.LoadConfig()
-		require.NoError(t, err)
-
-		_, err = extractWorkItemMetadataForLatest(testWorkItemPathDoing, cfg)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to parse front matter")
-	})
-
-	t.Run("handles missing file", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		// Create .work directory structure
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-
-		cfg, err := config.LoadConfig()
-		require.NoError(t, err)
-
-		_, err = extractWorkItemMetadataForLatest(".work/2_doing/nonexistent.md", cfg)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to read work item file")
+		assert.NotContains(t, err.Error(), "no work item found in doing folder")
+		assert.Contains(t, err.Error(), "failed to get repository root")
 	})
 }
 
@@ -420,7 +220,7 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 			},
 		}
 
-		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorStandalone, "001")
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorStandalone)
 		require.NoError(t, err)
 		require.Len(t, repos, 1)
 		// Repository name should be the directory name, not "main"
@@ -449,7 +249,7 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 			},
 		}
 
-		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorMonorepo, "001")
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorMonorepo)
 		require.NoError(t, err)
 		require.Len(t, repos, 1)
 		// Repository name should be the directory name, not "main"
@@ -490,7 +290,7 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 			},
 		}
 
-		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorPolyrepo, "001")
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorPolyrepo)
 		require.NoError(t, err)
 		require.Len(t, repos, 1)
 		assert.Equal(t, "project1", repos[0].Name)
@@ -508,7 +308,7 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 		// No .git directory
 		cfg := &config.Config{}
 
-		_, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorStandalone, "001")
+		_, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorStandalone)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to get repository root")
 	})
@@ -556,7 +356,7 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 			},
 		}
 
-		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorPolyrepo, "001")
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorPolyrepo)
 		require.NoError(t, err)
 		require.Len(t, repos, 1)
 		// Project override should win
@@ -581,7 +381,7 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 		// No git config - should auto-detect
 		cfg := &config.Config{}
 
-		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorStandalone, "001")
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorStandalone)
 		require.NoError(t, err)
 		require.Len(t, repos, 1)
 		// Should auto-detect "main"
@@ -619,7 +419,7 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 			},
 		}
 
-		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorPolyrepo, "001")
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorPolyrepo)
 		require.NoError(t, err)
 		require.Len(t, repos, 1)
 		// Should use global config
@@ -642,7 +442,7 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 			},
 		}
 
-		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorStandalone, "001")
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorStandalone)
 		require.NoError(t, err)
 		require.Len(t, repos, 1)
 		assert.Equal(t, "develop", repos[0].TrunkBranch)
@@ -688,7 +488,7 @@ func TestResolveRepositoriesForLatest(t *testing.T) {
 			},
 		}
 
-		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorPolyrepo, "001")
+		repos, err := resolveRepositoriesForLatest(cfg, WorkspaceBehaviorPolyrepo)
 		require.NoError(t, err)
 		require.Len(t, repos, 2)
 
@@ -841,14 +641,13 @@ func TestDiscoverRepositories(t *testing.T) {
 		assert.Equal(t, expectedPath, actualPath)
 	})
 
-	t.Run("discoverRepositoriesFromPath returns same repos as discoverRepositories for work item path", func(t *testing.T) {
+	t.Run("discovers standalone repository with empty doing folder", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		require.NoError(t, os.Chdir(tmpDir))
 		defer func() { _ = os.Chdir("/") }()
 
 		require.NoError(t, os.MkdirAll(".git", 0o700))
 		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-		require.NoError(t, os.WriteFile(testWorkItemPathDoing, []byte(testWorkItemContentDoing), 0o600))
 
 		cfg := &config.Config{
 			StatusFolders: map[string]string{
@@ -860,7 +659,7 @@ func TestDiscoverRepositories(t *testing.T) {
 			},
 		}
 
-		repos, err := discoverRepositoriesFromPath(cfg, testWorkItemPathDoing)
+		repos, err := discoverRepositories(cfg)
 		require.NoError(t, err)
 		require.Len(t, repos, 1)
 		expectedName := filepath.Base(tmpDir)
@@ -868,28 +667,6 @@ func TestDiscoverRepositories(t *testing.T) {
 		expectedPath, _ := filepath.EvalSymlinks(tmpDir)
 		actualPath, _ := filepath.EvalSymlinks(repos[0].Path)
 		assert.Equal(t, expectedPath, actualPath)
-	})
-
-	t.Run("returns error when no work item in doing folder", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
-		defer func() { _ = os.Chdir("/") }()
-
-		// Initialize git repo
-		require.NoError(t, os.MkdirAll(".git", 0o700))
-
-		// Create empty doing folder
-		require.NoError(t, os.MkdirAll(".work/2_doing", 0o700))
-
-		cfg := &config.Config{
-			StatusFolders: map[string]string{
-				"doing": "2_doing",
-			},
-		}
-
-		_, err := discoverRepositories(cfg)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no work item found in doing folder")
 	})
 
 	t.Run("discovers polyrepo repositories", func(t *testing.T) {
