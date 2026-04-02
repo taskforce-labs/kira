@@ -45,10 +45,10 @@ Drop the work-item check entirely for `kira latest`. Do not use work item status
 
 Commit: `discoverRepositories` uses workspace behavior only; no doing-folder work item; clearer empty-repo error; drop dead discovery helpers if unused.
 
-- [ ] T001: Refactor `discoverRepositories` in `internal/commands/latest.go` to skip `findCurrentWorkItem` and `extractWorkItemMetadataForLatest`; run `detectWorkspaceBehavior` then `resolveRepositoriesForLatest` (same behavior as today aside from the removed gate).
-- [ ] T002: Remove the unused work-item ID argument from `resolveRepositoriesForLatest` (and update `discoverRepositories`, `discoverRepositoriesFromPath`, and call sites) if it is only passed for legacy reasons.
-- [ ] T003: Remove `findCurrentWorkItem` if nothing references it after T001; otherwise keep only where still required.
-- [ ] T004: Update `runLatest` empty-repository error text so it does not mention a work item (e.g. workspace-focused wording).
+- [x] T001: Refactor `discoverRepositories` in `internal/commands/latest.go` to skip `findCurrentWorkItem` and `extractWorkItemMetadataForLatest`; run `detectWorkspaceBehavior` then `resolveRepositoriesForLatest` (same behavior as today aside from the removed gate).
+- [x] T002: Remove the unused work-item ID argument from `resolveRepositoriesForLatest` (and update `discoverRepositories`, `discoverRepositoriesFromPath`, and call sites) if it is only passed for legacy reasons.
+- [x] T003: Remove `findCurrentWorkItem` if nothing references it after T001; otherwise keep only where still required.
+- [x] T004: Update `runLatest` empty-repository error text so it does not mention a work item (e.g. workspace-focused wording).
 
 **Acceptance:** With a valid git workspace and an empty or missing `.work/2_doing/` (no work item in doing), `kira latest` discovers repos and proceeds like today (subject to repo state), matching expected behavior in the issue.
 
