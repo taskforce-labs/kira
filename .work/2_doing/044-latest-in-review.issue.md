@@ -56,9 +56,9 @@ Commit: `discoverRepositories` uses workspace behavior only; no doing-folder wor
 
 Commit: Unit tests assert no doing work item is required; existing latest flows stay covered.
 
-- [ ] T005: Replace or extend `TestDiscoverRepositories` (and any tests that expect “no work item in doing folder”) so an empty doing folder no longer fails discovery when the cwd is a valid standalone/polyrepo workspace; keep or adjust parity between `discoverRepositories` and `discoverRepositoriesFromPath` as appropriate.
-- [ ] T006: Remove or rewrite `TestFindCurrentWorkItem` (or equivalent) if `findCurrentWorkItem` is deleted in slice 1.
-- [ ] T007: Run `make check`; if e2e scripts still assume a doing work item for every `kira latest` scenario, add or adjust one scenario that runs `kira latest` with no markdown file in doing (e.g. work item only in review) and assert success.
+- [x] T005: Replace or extend `TestDiscoverRepositories` (and any tests that expect “no work item in doing folder”) so an empty doing folder no longer fails discovery when the cwd is a valid standalone/polyrepo workspace; keep or adjust parity between `discoverRepositories` and `discoverRepositoriesFromPath` as appropriate.
+- [x] T006: Remove or rewrite `TestFindCurrentWorkItem` (or equivalent) if `findCurrentWorkItem` is deleted in slice 1.
+- [x] T007: Run `make check`; if e2e scripts still assume a doing work item for every `kira latest` scenario, add or adjust one scenario that runs `kira latest` with no markdown file in doing (e.g. work item only in review) and assert success.
 
 **Acceptance:** `make check` passes; new or updated tests document the regression (latest while work item not in doing).
 

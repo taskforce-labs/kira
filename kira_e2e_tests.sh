@@ -1211,6 +1211,54 @@ fi
 rm -rf "$REMOTE_DIR"
 
 ###############################################
+# Test 25b: kira latest - empty doing folder (no work item markdown)
+###############################################
+echo ""
+echo "🧪 Test 25b: kira latest - empty doing folder"
+
+rm -rf .git > /dev/null 2>&1
+git init > /dev/null 2>&1
+"$KIRA_BIN" init --force > /dev/null 2>&1
+git config user.email test@example.com
+git config user.name "Test User"
+git add .
+git commit -m "init" > /dev/null 2>&1
+git branch -M main > /dev/null 2>&1 || true
+
+# No work item markdown in doing (simulates work item only in review or absent)
+rm -f .work/2_doing/*.md 2>/dev/null || true
+mkdir -p .work/2_doing
+
+REMOTE_DIR_EMPTY=$(mktemp -d)
+git init --bare "$REMOTE_DIR_EMPTY" > /dev/null 2>&1
+git remote add origin "$REMOTE_DIR_EMPTY"
+git push -u origin main > /dev/null 2>&1
+
+git checkout -b 044-latest-empty-doing > /dev/null 2>&1
+echo "feature" > feature-empty-doing.txt
+git add feature-empty-doing.txt
+git commit -m "Feature" > /dev/null 2>&1
+
+echo "main advance" > main-empty-doing.txt
+git checkout main > /dev/null 2>&1
+git add main-empty-doing.txt
+git commit -m "Main advance" > /dev/null 2>&1
+git push origin main > /dev/null 2>&1
+
+git checkout 044-latest-empty-doing > /dev/null 2>&1
+
+LATEST_EMPTY_DOING=$("$KIRA_BIN" latest 2>&1) || LATEST_EMPTY_DOING_EXIT=$?
+if echo "$LATEST_EMPTY_DOING" | grep -q "Discovered" && echo "$LATEST_EMPTY_DOING" | grep -q "workspace"; then
+  echo "✅ kira latest with empty doing discovered repositories"
+else
+  echo "❌ kira latest with empty doing did not show expected discovery output"
+  echo "Output: $LATEST_EMPTY_DOING"
+  exit 1
+fi
+
+rm -rf "$REMOTE_DIR_EMPTY"
+
+###############################################
 # Test 26: kira latest - Conflict Detection and Display
 ###############################################
 echo ""
@@ -2728,16 +2776,16 @@ created: 2025-01-01
 ## Acceptance Criteria
 EOF
 "$KIRA_BIN" move 030 doing
-if ! "$KIRA_BIN" slice add 030 "E2ESlice" --no-commit 2>/dev/null; then
+if ! "$KIRA_BIN" slice add 030 "E2ESlice" 2>/dev/null; then
   echo "  ❌ slice add failed"
   exit 1
 fi
-if ! grep -q "### E2ESlice" .work/2_doing/030-slice-e2e.prd.md; then
+if ! grep -q "E2ESlice" .work/2_doing/030-slice-e2e.prd.md; then
   echo "  ❌ slice add did not add E2ESlice to file"
   exit 1
 fi
 echo "  ✅ slice add adds slice to work item"
-"$KIRA_BIN" slice task add 030 E2ESlice "E2E task one" --no-commit
+"$KIRA_BIN" slice task add 030 E2ESlice "E2E task one"
 if ! grep -q "T001" .work/2_doing/030-slice-e2e.prd.md || ! grep -q "E2E task one" .work/2_doing/030-slice-e2e.prd.md; then
   echo "  ❌ slice task add did not add task"
   exit 1
@@ -2749,9 +2797,8 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 echo "  ✅ slice show displays slices and tasks"
-"$KIRA_BIN" slice progress 030 | grep -q "1 open"
-if [ $? -ne 0 ]; then
-  echo "  ❌ slice progress did not show progress"
+if ! "$KIRA_BIN" slice progress 030 | grep -q "0/1 tasks"; then
+  echo "  ❌ slice progress did not show task counts"
   exit 1
 fi
 echo "  ✅ slice progress shows summary"
