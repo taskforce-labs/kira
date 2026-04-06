@@ -27,6 +27,8 @@ type Config struct {
 	// ScriptDisplayName overrides the basename used in DeriveRunID (optional).
 	ScriptDisplayName string
 	Stdout            io.Writer
+	// InterpArgs is passed to the Yaegi interpreter as os.Args for the workflow.
+	InterpArgs []string
 }
 
 func (c *Config) stdout() io.Writer {
@@ -51,7 +53,7 @@ func (c *Config) Execute(ctx context.Context) (runID string, err error) {
 		return "", fmt.Errorf("project root: %w", err)
 	}
 
-	i, err := yaegi.LoadWorkflow(wfAbs)
+	i, err := yaegi.LoadWorkflow(wfAbs, c.InterpArgs)
 	if err != nil {
 		return "", err
 	}

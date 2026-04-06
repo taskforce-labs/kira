@@ -34,8 +34,15 @@ type Config struct {
 	Done          *DoneConfig            `yaml:"done"`
 	DocsFolder    string                 `yaml:"docs_folder"` // default: ".docs"
 	CursorInstall *CursorInstallConfig   `yaml:"cursor_install"`
+	Workflows     *WorkflowsConfig       `yaml:"workflows"`
 	// ConfigDir is the absolute path to the directory containing kira.yml (set at load time; not persisted).
 	ConfigDir string `yaml:"-"`
+}
+
+// WorkflowsConfig configures kira run workflow scripts (default root `.workflows/`).
+type WorkflowsConfig struct {
+	Root    string            `yaml:"root"`    // default: ".workflows"
+	Scripts map[string]string `yaml:"scripts"` // optional: workflow name -> path relative to workflows root
 }
 
 // DoneConfig contains settings for the done command (merge PR, pull trunk, update status, cleanup).
@@ -797,6 +804,19 @@ func mergeWithDefaults(config *Config) {
 	mergeChecksDefaults(config)
 	mergeCursorInstallDefaults(config)
 	mergeFieldDefaults(config)
+	mergeWorkflowsDefaults(config)
+}
+
+func mergeWorkflowsDefaults(config *Config) {
+	if config.Workflows == nil {
+		config.Workflows = &WorkflowsConfig{}
+	}
+	if config.Workflows.Root == "" {
+		config.Workflows.Root = ".workflows"
+	}
+	if config.Workflows.Scripts == nil {
+		config.Workflows.Scripts = make(map[string]string)
+	}
 }
 
 func mergeCursorInstallDefaults(config *Config) {

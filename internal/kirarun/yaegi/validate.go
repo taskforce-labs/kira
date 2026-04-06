@@ -18,12 +18,12 @@ import (
 // ValidateWorkflow checks that path is a loadable main package with a valid Run entrypoint
 // for this kira version (Yaegi parse/compile + AST signature check). Does not execute Run.
 func ValidateWorkflow(workflowPath string) error {
-	_, err := LoadWorkflow(workflowPath)
+	_, err := LoadWorkflow(workflowPath, nil)
 	return err
 }
 
 // LoadWorkflow validates and compiles the workflow, returning an interpreter ready for InvokeRun.
-func LoadWorkflow(workflowPath string) (*interp.Interpreter, error) {
+func LoadWorkflow(workflowPath string, interpArgs []string) (*interp.Interpreter, error) {
 	_, f, src, err := readWorkflowAST(workflowPath)
 	if err != nil {
 		return nil, err
@@ -32,7 +32,7 @@ func LoadWorkflow(workflowPath string) (*interp.Interpreter, error) {
 		return nil, err
 	}
 
-	i := NewInterpreter()
+	i := NewInterpreter(interpArgs)
 	if _, err := i.Eval(string(src)); err != nil {
 		return nil, fmt.Errorf("workflow does not compile under Yaegi: %w", err)
 	}
@@ -149,8 +149,13 @@ func checkRunValue(i *interp.Interpreter) error {
 }
 
 // NewInterpreter returns a Yaegi interpreter with stdlib (excluding unsafe/syscall in upstream extract) and kira/kirarun.
-func NewInterpreter() *interp.Interpreter {
-	i := interp.New(interp.Options{})
+// interpArgs is passed to interp.Options.Args for scripts that read os.Args.
+func NewInterpreter(interpArgs []string) *interp.Interpreter {
+	opts := interp.Options{}
+	if len(interpArgs) > 0 {
+		opts.Args = interpArgs
+	}
+	i := interp.New(opts)
 	_ = i.Use(stdlib.Symbols)
 	_ = i.Use(KirarunExports())
 	i.ImportUsed()
