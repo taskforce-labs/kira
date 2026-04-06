@@ -28,7 +28,7 @@ This will enable [product dev loop triggers](.work/2_doing/024-product-dev-loop-
 
 **Script**
 
-- Entrypoint: `Run(ctx *kirarun.Context, step kirarun.Step, agents kirarun.Agents) error` — the third parameter is the agent execution surface; workflows that do not invoke agents may ignore it with `_`. The concrete `kirarun.Agents` type is defined by the host for this kira version.
+- Entrypoint: `Run(ctx *kirarun.Context, step *kirarun.Step, agents kirarun.Agents) error` — the third parameter is the agent execution surface; workflows that do not invoke agents may ignore it with `_`. The concrete `kirarun.Agents` type is defined by the host for this kira version. Idempotent steps use the package function `kirarun.Do(step, name, fn)` (Go has no generic methods).
 - **Validate before run:** the workflow source must load under Yaegi (parse/compile), expose `Run` with that exact signature (package `main`, correct parameter types and arity), and only use the `kirarun` API the host registers for this kira version. If the script is invalid, the signature is wrong, or it calls types/methods not provided by the host, fail with a clear error — do not create or advance a session.
 - `ctx` is **read-only** from the workflow: workspace paths, logging, read-only view of skills/commands, plus `ctx.Run` (e.g. `Attempt()` 1-based, `IsResume()` when `--resume` was passed, `IgnoreAttemptLimit()` when `--ignore-attempt-limit` was passed). Do not mutate host or agent state through `ctx`. Non-deterministic agent work goes through the third parameter, not side effects on `ctx`. Retry/backoff and caps live in the script via `Attempt()` and normal Go code (optional `const maxAttempts`).
 - `step.Do[T](name, fn)` — idempotent steps: persist successful `T` as JSON per step name; skip `fn` if that step already succeeded for this run; `fn` error marks step failed/resumable. Prefer typed structs; `map[string]any` only if shape is dynamic. If persisted JSON cannot decode into `T` on resume, fail with a clear step-scoped error.
@@ -105,10 +105,10 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"kirarun"
+	"kira/kirarun"
 )
 
-func Run(ctx *kirarun.Context, _ kirarun.Step, _ kirarun.Agents) error {
+func Run(ctx *kirarun.Context, _ *kirarun.Step, _ kirarun.Agents) error {
 	root := ctx.Workspace.Root()
 	doing := filepath.Join(root, ".work", "2_doing")
 	ctx.Log.Info(fmt.Sprintf("Scanning %s", doing))
@@ -116,7 +116,7 @@ func Run(ctx *kirarun.Context, _ kirarun.Step, _ kirarun.Agents) error {
 }
 ```
 
-### B — `step.Do` with types
+### B — `kirarun.Do` with types
 
 ```go
 package main
@@ -124,10 +124,10 @@ package main
 import (
 	"fmt"
 
-	"kirarun"
+	"kira/kirarun"
 )
 
-func Run(ctx *kirarun.Context, step kirarun.Step, _ kirarun.Agents) error {
+func Run(ctx *kirarun.Context, step *kirarun.Step, _ kirarun.Agents) error {
 	type step1Out struct {
 		Foo   string `json:"foo"`
 		Model string `json:"model"`
@@ -136,14 +136,14 @@ func Run(ctx *kirarun.Context, step kirarun.Step, _ kirarun.Agents) error {
 		Summary string `json:"summary"`
 	}
 
-	s1, err := step.Do[step1Out]("step_1", func(_ kirarun.StepContext) (step1Out, error) {
+	s1, err := kirarun.Do(step, "step_1", func(_ kirarun.StepContext) (step1Out, error) {
 		return step1Out{Foo: "bar", Model: "gpt-5"}, nil
 	})
 	if err != nil {
 		return err
 	}
 
-	s2, err := step.Do[step2Out]("step_2", func(_ kirarun.StepContext) (step2Out, error) {
+	s2, err := kirarun.Do(step, "step_2", func(_ kirarun.StepContext) (step2Out, error) {
 		return step2Out{Summary: fmt.Sprintf("foo=%s", s1.Foo)}, nil
 	})
 	if err != nil {
@@ -163,12 +163,12 @@ import (
 	"errors"
 	"time"
 
-	"kirarun"
+	"kira/kirarun"
 )
 
 const maxAttempts = 3
 
-func Run(ctx *kirarun.Context, step kirarun.Step, _ kirarun.Agents) error {
+func Run(ctx *kirarun.Context, step *kirarun.Step, _ kirarun.Agents) error {
 	if !ctx.Run.IgnoreAttemptLimit() && ctx.Run.Attempt() > maxAttempts {
 		return errors.New("max attempts exceeded")
 	}
@@ -184,7 +184,7 @@ func Run(ctx *kirarun.Context, step kirarun.Step, _ kirarun.Agents) error {
 
 - [ ] `kira run` runs Yaegi workflows with `Run(ctx, step, agents)` and the flags above; invalid scripts or wrong `Run` signature / mismatched `kirarun` usage fail before execution with a clear error.
 - [ ] Session file lifecycle (pre-invoke write, steps/attempts, delete on success, strict decode) matches this spec; malformed or schema-invalid session files error clearly and do not run the workflow.
-- [ ] `step.Do` persists and skips completed steps across resume and retries; `ctx.Run.Attempt()` is 1-based; `--ignore-attempt-limit` sets `ctx.Run.IgnoreAttemptLimit()` without faking the counter.
+- [ ] `kirarun.Do` persists and skips completed steps across resume and retries; `ctx.Run.Attempt()` is 1-based; `--ignore-attempt-limit` sets `ctx.Run.IgnoreAttemptLimit()` without faking the counter.
 - [ ] `ctx` is read-only to workflows; agent invocation uses the third `Run` parameter (`kirarun.Agents`). Provider wiring (e.g. Cursor first) targets that parameter. [PRD 024](.work/2_doing/024-product-dev-loop-triggers.prd.md) is background and may lag this spec.
 - [ ] Concurrent same-run-id execution is guarded.
 - [ ] `make check` passes.
@@ -199,10 +199,10 @@ Commit: Persistent session model at `.workflows/sessions/<run-id>.yml`, strict v
 - [x] T004: Unit tests covering happy path, bad YAML, wrong schema, and lock contention.
 
 ### 2. `kirarun` API and `step.Do` (host-registered surface)
-Commit: Read-only `Context`, `ctx.Run` (1-based `Attempt()`, `IsResume()`, `IgnoreAttemptLimit()`), `Step` / `StepContext`, generic `step.Do` with JSON persistence and resume semantics, and a concrete `Agents` type placeholder for the host.
-- [ ] T005: Implement `kirarun` types matching the PRD examples: workflows cannot mutate host state via `ctx`; `Agents` is the extension point for agent execution.
-- [ ] T006: Implement `step.Do[T]`: persist successful `T` per step name, skip `fn` when already succeeded, mark failures/resumable state; on resume, fail with a clear step-scoped error if stored JSON does not decode into `T`.
-- [ ] T007: Unit tests for `step.Do` and `ctx.Run` behavior without Yaegi (in-memory or test session backend wired to slice 1 types).
+Commit: Read-only `Context`, `ctx.Run` (1-based `Attempt()`, `IsResume()`, `IgnoreAttemptLimit()`), `Step` / `StepContext`, generic `kirarun.Do` with JSON persistence and resume semantics, and a concrete `Agents` type placeholder for the host.
+- [x] T005: Implement `kirarun` types matching the PRD examples: workflows cannot mutate host state via `ctx`; `Agents` is the extension point for agent execution.
+- [x] T006: Implement `kirarun.Do[T]`: persist successful `T` per step name, skip `fn` when already succeeded, mark failures/resumable state; on resume, fail with a clear step-scoped error if stored JSON does not decode into `T`.
+- [x] T007: Unit tests for `step.Do` and `ctx.Run` behavior without Yaegi (in-memory or test session backend wired to slice 1 types).
 
 ### 3. Yaegi load, symbol registry, and `Run` validation
 Commit: Narrow interpreter surface via `interp.Use`, parse/compile workflow source, require `package main` and `Run(ctx *kirarun.Context, step kirarun.Step, agents kirarun.Agents) error`; invalid scripts fail before any session is created or advanced.
