@@ -212,11 +212,11 @@ Commit: Narrow interpreter surface via `interp.Use`, parse/compile workflow sour
 
 ### 4. Runner orchestration (invoke, panic recovery, flags)
 Commit: End-to-end runner: derive/accept run id, session pre-write, invoke `Run`, recover panics into errors where compatible with session updates, `--resume`, `--auto-retry` (attempt bumped before each `Run`), `--ignore-attempt-limit` on context only (persisted attempt unchanged), collision handling for new run ids.
-- [ ] T011: New run id as `<script-name>-<6-random-chars>`; print it for operator use; fail fast if a session file already exists for that id (including rare random-id collision).
-- [ ] T012: `--resume` required when a session already exists for the target run (except `--auto-retry` single-process reuse per PRD); wire `--ignore-attempt-limit` to `ctx.Run.IgnoreAttemptLimit()` without changing stored attempt.
-- [ ] T013: `--auto-retry`: loop until `Run` returns nil or interrupt; same run id; bump attempt in the session before each `Run` entry.
-- [ ] T014: Panic recovery in the runner with session/recording behavior aligned with pre-invoke writes.
-- [ ] T015: Integration tests covering resume, retry loop, and ignore-attempt-limit guards.
+- [x] T011: New run id as `<script-name>-<UTC-timestamp>` (second precision); print it for operator use; fail fast if a session file already exists for that id (including same-second collision).
+- [x] T012: `--resume` required when a session already exists for the target run (except `--auto-retry` single-process reuse per PRD); wire `--ignore-attempt-limit` to `ctx.Run.IgnoreAttemptLimit()` without changing stored attempt.
+- [x] T013: `--auto-retry`: loop until `Run` returns nil or interrupt; same run id; bump attempt in the session before each `Run` entry.
+- [x] T014: Panic recovery in the runner with session/recording behavior aligned with pre-invoke writes.
+- [x] T015: Integration tests covering resume, retry loop, and ignore-attempt-limit guards.
 
 ### 5. `kira run` CLI and workflow resolution
 Commit: `kira run <script-or-workflow> [args]` resolving by path or name under `workflows` in `kira.yml` with default root `.workflows/`, forwarding script args, and exposing all runner flags.
