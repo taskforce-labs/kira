@@ -44,3 +44,4 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 35. [2026-01-27] Multi Kira Planning: an approach to planning work across multiple kira projects for enterprise usecases
 36. [2026-02-15] kira latest branch: should check to see if there are changes on the remote branch first pull them in and merge then get all the changes from trunk as per usual
 37. [2026-02-21] kira discuss: using pandoc, say, kira question, agents, handy we could build a workflow that allows us to talk through questions to get clarity quicker
+38. [2026-04-06] kira gateway control plane: an entry point to reviece and direct commands to mulitple projects across multiple servers
