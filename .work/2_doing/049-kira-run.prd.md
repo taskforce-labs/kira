@@ -182,12 +182,12 @@ func Run(ctx *kirarun.Context, step *kirarun.Step, _ kirarun.Agents) error {
 
 ## Acceptance Criteria
 
-- [ ] `kira run` runs Yaegi workflows with `Run(ctx, step, agents)` and the flags above; invalid scripts or wrong `Run` signature / mismatched `kirarun` usage fail before execution with a clear error.
-- [ ] Session file lifecycle (pre-invoke write, steps/attempts, delete on success, strict decode) matches this spec; malformed or schema-invalid session files error clearly and do not run the workflow.
-- [ ] `kirarun.Do` persists and skips completed steps across resume and retries; `ctx.Run.Attempt()` is 1-based; `--ignore-attempt-limit` sets `ctx.Run.IgnoreAttemptLimit()` without faking the counter.
-- [ ] `ctx` is read-only to workflows; agent invocation uses the third `Run` parameter (`kirarun.Agents`). Provider wiring (e.g. Cursor first) targets that parameter. [PRD 024](.work/2_doing/024-product-dev-loop-triggers.prd.md) is background and may lag this spec.
-- [ ] Concurrent same-run-id execution is guarded.
-- [ ] `make check` passes.
+- [x] `kira run` runs Yaegi workflows with `Run(ctx, step, agents)` and the flags above; invalid scripts or wrong `Run` signature / mismatched `kirarun` usage fail before execution with a clear error.
+- [x] Session file lifecycle (pre-invoke write, steps/attempts, delete on success, strict decode) matches this spec; malformed or schema-invalid session files error clearly and do not run the workflow.
+- [x] `kirarun.Do` persists and skips completed steps across resume and retries; `ctx.Run.Attempt()` is 1-based; `--ignore-attempt-limit` sets `ctx.Run.IgnoreAttemptLimit()` without faking the counter.
+- [x] `ctx` is read-only to workflows; agent invocation uses the third `Run` parameter (`kirarun.Agents`). Provider wiring (e.g. Cursor first) targets that parameter. [PRD 024](.work/2_doing/024-product-dev-loop-triggers.prd.md) is background and may lag this spec.
+- [x] Concurrent same-run-id execution is guarded.
+- [x] `make check` passes.
 
 ## Slices
 
