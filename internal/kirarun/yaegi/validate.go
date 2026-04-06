@@ -18,47 +18,61 @@ import (
 // ValidateWorkflow checks that path is a loadable main package with a valid Run entrypoint
 // for this kira version (Yaegi parse/compile + AST signature check). Does not execute Run.
 func ValidateWorkflow(workflowPath string) error {
-	abs, err := filepath.Abs(workflowPath)
-	if err != nil {
-		return fmt.Errorf("workflow path: %w", err)
-	}
-	if !filepath.IsAbs(abs) {
-		return fmt.Errorf("workflow path must be absolute")
-	}
-	st, err := os.Stat(abs)
-	if err != nil {
-		return fmt.Errorf("workflow file: %w", err)
-	}
-	if st.IsDir() {
-		return fmt.Errorf("workflow path must be a file")
-	}
+	_, err := LoadWorkflow(workflowPath)
+	return err
+}
 
-	src, err := os.ReadFile(abs) // #nosec G304 -- abs was validated and stat'd as a regular file
+// LoadWorkflow validates and compiles the workflow, returning an interpreter ready for InvokeRun.
+func LoadWorkflow(workflowPath string) (*interp.Interpreter, error) {
+	_, f, src, err := readWorkflowAST(workflowPath)
 	if err != nil {
-		return fmt.Errorf("read workflow: %w", err)
-	}
-
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, abs, src, parser.AllErrors)
-	if err != nil {
-		return fmt.Errorf("parse workflow: %w", err)
-	}
-	if f.Name.Name != "main" {
-		return fmt.Errorf("workflow must use package main: got %q", f.Name.Name)
+		return nil, err
 	}
 	if err := validateRunAST(f); err != nil {
-		return err
+		return nil, err
 	}
 
 	i := NewInterpreter()
 	if _, err := i.Eval(string(src)); err != nil {
-		return fmt.Errorf("workflow does not compile under Yaegi: %w", err)
+		return nil, fmt.Errorf("workflow does not compile under Yaegi: %w", err)
 	}
 
 	if err := checkRunValue(i); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return i, nil
+}
+
+func readWorkflowAST(workflowPath string) (abs string, f *ast.File, src []byte, err error) {
+	abs, err = filepath.Abs(workflowPath)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("workflow path: %w", err)
+	}
+	if !filepath.IsAbs(abs) {
+		return "", nil, nil, fmt.Errorf("workflow path must be absolute")
+	}
+	st, err := os.Stat(abs)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("workflow file: %w", err)
+	}
+	if st.IsDir() {
+		return "", nil, nil, fmt.Errorf("workflow path must be a file")
+	}
+
+	src, err = os.ReadFile(abs) // #nosec G304 -- abs was validated and stat'd as a regular file
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("read workflow: %w", err)
+	}
+
+	fset := token.NewFileSet()
+	f, err = parser.ParseFile(fset, abs, src, parser.AllErrors)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("parse workflow: %w", err)
+	}
+	if f.Name.Name != "main" {
+		return "", nil, nil, fmt.Errorf("workflow must use package main: got %q", f.Name.Name)
+	}
+	return abs, f, src, nil
 }
 
 func validateRunAST(f *ast.File) error {
