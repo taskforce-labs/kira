@@ -193,10 +193,10 @@ func Run(ctx *kirarun.Context, step kirarun.Step, _ kirarun.Agents) error {
 
 ### 1. Session file schema, I/O, and per-run locking
 Commit: Persistent session model at `.workflows/sessions/<run-id>.yml`, strict validation on load, create/update before any workflow invocation, delete on success, and exclusive lock for a given run id.
-- [ ] T001: Define versioned session YAML schema matching **Session file format (YAML)** (`path`, `kira-version`, `run-id`, `attempt`, `attempts`, `steps`); reject malformed YAML and schema-invalid files with errors that name the file and the problem.
-- [ ] T002: Implement load/save helpers: ensure parent dirs exist; write at least `attempt` before the workflow runs; remove the session file when the run completes successfully; surface create/write failures without running the workflow.
-- [ ] T003: Add a same-run-id lock (session-adjacent lock file or equivalent): concurrent second invocation fails fast with a clear message.
-- [ ] T004: Unit tests covering happy path, bad YAML, wrong schema, and lock contention.
+- [x] T001: Define versioned session YAML schema matching **Session file format (YAML)** (`path`, `kira-version`, `run-id`, `attempt`, `attempts`, `steps`); reject malformed YAML and schema-invalid files with errors that name the file and the problem.
+- [x] T002: Implement load/save helpers: ensure parent dirs exist; write at least `attempt` before the workflow runs; remove the session file when the run completes successfully; surface create/write failures without running the workflow.
+- [x] T003: Add a same-run-id lock (session-adjacent lock file or equivalent): concurrent second invocation fails fast with a clear message.
+- [x] T004: Unit tests covering happy path, bad YAML, wrong schema, and lock contention.
 
 ### 2. `kirarun` API and `step.Do` (host-registered surface)
 Commit: Read-only `Context`, `ctx.Run` (1-based `Attempt()`, `IsResume()`, `IgnoreAttemptLimit()`), `Step` / `StepContext`, generic `step.Do` with JSON persistence and resume semantics, and a concrete `Agents` type placeholder for the host.
