@@ -1,7 +1,7 @@
 ---
 id: 044
 title: latest in review
-status: doing
+status: review
 kind: issue
 assigned: 
 estimate: 0
