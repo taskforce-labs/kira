@@ -116,6 +116,28 @@ func TestTryLockContention(t *testing.T) {
 	require.Contains(t, err.Error(), "another process")
 }
 
+func TestTryLockManyWaiters(t *testing.T) {
+	tmp := t.TempDir()
+	lockPath := filepath.Join(tmp, "run.lock")
+	holder, err := TryLock(lockPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = holder.Unlock() })
+
+	const n = 12
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			_, err := TryLock(lockPath)
+			errs <- err
+		}()
+	}
+	for i := 0; i < n; i++ {
+		err := <-errs
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "another process")
+	}
+}
+
 func TestAttemptRecordTimestamps(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "run-abc.yml")

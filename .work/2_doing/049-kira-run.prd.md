@@ -226,9 +226,9 @@ Commit: `kira run <script-or-workflow> [args]` resolving by path or name under `
 
 ### 6. Acceptance, concurrency, and repo quality gate
 Commit: Same-run-id concurrency story verified end-to-end, any operator-facing run-id format documented, and `make check` (plus e2e script per `AGENTS.md`) green.
-- [ ] T019: Verify concurrent same-run-id execution is guarded (stress or targeted test).
-- [ ] T020: Document run-id derivation rule and `--ignore-attempt-limit` vs persisted attempt where operators need it (implementation note or short doc pointer).
-- [ ] T021: `make check` passes; run `bash kira_e2e_tests.sh` and fix failures tied to this feature.
+- [x] T019: Verify concurrent same-run-id execution is guarded (stress or targeted test).
+- [x] T020: Document run-id derivation rule and `--ignore-attempt-limit` vs persisted attempt where operators need it (implementation note or short doc pointer).
+- [x] T021: `make check` passes; run `bash kira_e2e_tests.sh` and fix failures tied to this feature.
 
 ## Implementation Notes
 
