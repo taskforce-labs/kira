@@ -1,11 +1,15 @@
 ---
 id: 044
 title: latest in review
-status: review
+status: done
 kind: issue
-assigned: 
+created: 2026-02-25T00:00:00Z
+assigned: null
 estimate: 0
-created: 2026-02-25
+merge_commit_sha: 6898171529fffb0f97800af35f9c2ac7db3a4ed6
+merge_strategy: rebase
+merged_at: "2026-04-06T05:37:10Z"
+pr_number: 30
 tags: []
 ---
 
