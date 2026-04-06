@@ -205,10 +205,10 @@ Commit: Read-only `Context`, `ctx.Run` (1-based `Attempt()`, `IsResume()`, `Igno
 - [x] T007: Unit tests for `step.Do` and `ctx.Run` behavior without Yaegi (in-memory or test session backend wired to slice 1 types).
 
 ### 3. Yaegi load, symbol registry, and `Run` validation
-Commit: Narrow interpreter surface via `interp.Use`, parse/compile workflow source, require `package main` and `Run(ctx *kirarun.Context, step kirarun.Step, agents kirarun.Agents) error`; invalid scripts fail before any session is created or advanced.
-- [ ] T008: Register only the `kirarun` API intended for this kira version; exclude broad `unsafe` / syscall by default.
-- [ ] T009: Validate `Run` exists with the exact signature; return clear errors for wrong arity, types, or disallowed calls.
-- [ ] T010: Tests with valid and invalid sample workflow sources.
+Commit: Narrow interpreter surface via `interp.Use`, parse/compile workflow source, require `package main` and `Run(ctx *kirarun.Context, step *kirarun.Step, agents kirarun.Agents) error`; invalid scripts fail before any session is created or advanced.
+- [x] T008: Register only the `kirarun` API intended for this kira version; exclude broad `unsafe` / syscall by default.
+- [x] T009: Validate `Run` exists with the exact signature; return clear errors for wrong arity, types, or disallowed calls.
+- [x] T010: Tests with valid and invalid sample workflow sources.
 
 ### 4. Runner orchestration (invoke, panic recovery, flags)
 Commit: End-to-end runner: derive/accept run id, session pre-write, invoke `Run`, recover panics into errors where compatible with session updates, `--resume`, `--auto-retry` (attempt bumped before each `Run`), `--ignore-attempt-limit` on context only (persisted attempt unchanged), collision handling for new run ids.
