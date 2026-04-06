@@ -24,7 +24,7 @@ This will enable [product dev loop triggers](.work/2_doing/024-product-dev-loop-
 - `--resume <run-id>` — continue a run; required when a session file already exists (runner fails fast otherwise). Exception: `--auto-retry` may reuse the same run id in one process without an extra `--resume`.
 - `--auto-retry` — loop until `Run` returns nil or the user interrupts; same run id; each loop iteration bumps attempt (written before `Run`).
 - `--ignore-attempt-limit` — this invocation only: do not treat the script’s own attempt cap as fatal (e.g. after `maxAttempts`); exposed on context (e.g. `ctx.Run.IgnoreAttemptLimit()`) so `Run` can skip an `Attempt() > maxAttempts` early return. The persisted attempt counter is unchanged.
-- **New run id:** when not using `--resume`, the runner derives `run-id` from the resolved workflow identity (e.g. mapped name or script basename) and a timestamp, prints it (so the user can `--resume` later), and uses it for `.workflows/sessions/<run-id>.yml`. If a session file for that id already exists, fail fast with a clear error (collisions should be vanishingly rare with a fine-grained timestamp).
+- **New run id:** when not using `--resume`, the runner derives `run-id` as `<script-name>-<timestamp>` (script name from the resolved workflow identity, e.g. mapped name or script basename without extension), prints it (so the user can `--resume` later), and uses the same value for the session filename `.workflows/sessions/<run-id>.yml`. If a session file for that id already exists, fail fast with a clear error (treat rare random-id collisions like any other existing session).
 
 **Script**
 
@@ -40,6 +40,36 @@ This will enable [product dev loop triggers](.work/2_doing/024-product-dev-loop-
 - **Validate on load:** if the file exists but is not valid YAML, or does not match the expected session schema (required fields, types, version if versioned), fail immediately with an error that identifies the file and what is wrong — do not run the workflow or partially apply state.
 - Same session holds run-level attempt counter and per-step outputs; later attempts or `--resume` still skip completed `step.Do` work.
 
+**Session file format (YAML)**
+
+Shape and semantics (field names and nesting are normative; value placeholders describe intent):
+
+```yaml
+path: <absolute-path-to-script>           # written on first run
+kira-version: <kira-version>              # written on first run
+run-id: <script-name>-<timestamp>         # written on first run; matches session filename stem
+attempt: <int>                            # written / incremented before running
+attempts:
+  - attempt: <int>                        # written on failure
+    name: <run | step-name>
+    started_at: <timestamp>
+    failed_at: <timestamp>
+    error:
+      <specific-to-error>
+steps:
+  - name: <step-name>                     # written on success of step
+    attempt: <int>
+    started_at: <timestamp>
+    finished_at: <timestamp>
+    data:
+      <specific-to-step>
+```
+
+- `path` and `kira-version` are set when the session is first created for a run.
+- `run-id` in the file must match the session file stem and the id printed for `--resume`.
+- `attempts[].name` is `run` for a top-level `Run` failure (or equivalent), or the `step.Do` step name for a step failure.
+- `steps[].data` holds JSON-compatible output for successful `step.Do` completions (typed decode on resume per `step.Do` rules).
+
 **Other**
 
 - Concurrent runs for the same run id: lock session (or sibling lock) and fail fast if busy.
@@ -50,7 +80,7 @@ This will enable [product dev loop triggers](.work/2_doing/024-product-dev-loop-
 kira run hello_world
 kira run .workflows/hello_world.go
 
-# new runs print a derived run-id (workflow identity + timestamp) for later resume
+# new runs print a derived run-id (<script-name>-<timestamp>) for later resume
 # resume
 kira run foo_bar --resume run-abc123
 kira run .workflows/foo_bar.go --resume run-abc123
@@ -161,11 +191,50 @@ func Run(ctx *kirarun.Context, step kirarun.Step, _ kirarun.Agents) error {
 
 ## Slices
 
+### 1. Session file schema, I/O, and per-run locking
+Commit: Persistent session model at `.workflows/sessions/<run-id>.yml`, strict validation on load, create/update before any workflow invocation, delete on success, and exclusive lock for a given run id.
+- [ ] T001: Define versioned session YAML schema matching **Session file format (YAML)** (`path`, `kira-version`, `run-id`, `attempt`, `attempts`, `steps`); reject malformed YAML and schema-invalid files with errors that name the file and the problem.
+- [ ] T002: Implement load/save helpers: ensure parent dirs exist; write at least `attempt` before the workflow runs; remove the session file when the run completes successfully; surface create/write failures without running the workflow.
+- [ ] T003: Add a same-run-id lock (session-adjacent lock file or equivalent): concurrent second invocation fails fast with a clear message.
+- [ ] T004: Unit tests covering happy path, bad YAML, wrong schema, and lock contention.
+
+### 2. `kirarun` API and `step.Do` (host-registered surface)
+Commit: Read-only `Context`, `ctx.Run` (1-based `Attempt()`, `IsResume()`, `IgnoreAttemptLimit()`), `Step` / `StepContext`, generic `step.Do` with JSON persistence and resume semantics, and a concrete `Agents` type placeholder for the host.
+- [ ] T005: Implement `kirarun` types matching the PRD examples: workflows cannot mutate host state via `ctx`; `Agents` is the extension point for agent execution.
+- [ ] T006: Implement `step.Do[T]`: persist successful `T` per step name, skip `fn` when already succeeded, mark failures/resumable state; on resume, fail with a clear step-scoped error if stored JSON does not decode into `T`.
+- [ ] T007: Unit tests for `step.Do` and `ctx.Run` behavior without Yaegi (in-memory or test session backend wired to slice 1 types).
+
+### 3. Yaegi load, symbol registry, and `Run` validation
+Commit: Narrow interpreter surface via `interp.Use`, parse/compile workflow source, require `package main` and `Run(ctx *kirarun.Context, step kirarun.Step, agents kirarun.Agents) error`; invalid scripts fail before any session is created or advanced.
+- [ ] T008: Register only the `kirarun` API intended for this kira version; exclude broad `unsafe` / syscall by default.
+- [ ] T009: Validate `Run` exists with the exact signature; return clear errors for wrong arity, types, or disallowed calls.
+- [ ] T010: Tests with valid and invalid sample workflow sources.
+
+### 4. Runner orchestration (invoke, panic recovery, flags)
+Commit: End-to-end runner: derive/accept run id, session pre-write, invoke `Run`, recover panics into errors where compatible with session updates, `--resume`, `--auto-retry` (attempt bumped before each `Run`), `--ignore-attempt-limit` on context only (persisted attempt unchanged), collision handling for new run ids.
+- [ ] T011: New run id as `<script-name>-<6-random-chars>`; print it for operator use; fail fast if a session file already exists for that id (including rare random-id collision).
+- [ ] T012: `--resume` required when a session already exists for the target run (except `--auto-retry` single-process reuse per PRD); wire `--ignore-attempt-limit` to `ctx.Run.IgnoreAttemptLimit()` without changing stored attempt.
+- [ ] T013: `--auto-retry`: loop until `Run` returns nil or interrupt; same run id; bump attempt in the session before each `Run` entry.
+- [ ] T014: Panic recovery in the runner with session/recording behavior aligned with pre-invoke writes.
+- [ ] T015: Integration tests covering resume, retry loop, and ignore-attempt-limit guards.
+
+### 5. `kira run` CLI and workflow resolution
+Commit: `kira run <script-or-workflow> [args]` resolving by path or name under `workflows` in `kira.yml` with default root `.workflows/`, forwarding script args, and exposing all runner flags.
+- [ ] T016: Parse flags and positional workflow selector; resolve workflow file from `kira.yml` and repo layout.
+- [ ] T017: Register the subcommand under the existing Cobra/root command pattern; document usage in help text.
+- [ ] T018: CLI or integration tests for resolution and flag passthrough.
+
+### 6. Acceptance, concurrency, and repo quality gate
+Commit: Same-run-id concurrency story verified end-to-end, any operator-facing run-id format documented, and `make check` (plus e2e script per `AGENTS.md`) green.
+- [ ] T019: Verify concurrent same-run-id execution is guarded (stress or targeted test).
+- [ ] T020: Document run-id derivation rule and `--ignore-attempt-limit` vs persisted attempt where operators need it (implementation note or short doc pointer).
+- [ ] T021: `make check` passes; run `bash kira_e2e_tests.sh` and fix failures tied to this feature.
+
 ## Implementation Notes
 
 - Narrow Yaegi surface via `interp.Use`; recover panics in the runner and record like a returned error where compatible with pre-invoke session writes.
 - Document `--ignore-attempt-limit` vs persisted attempt counter (flag is advisory for script guards, not a counter override).
-- Session YAML schema: path, kira version, run id, attempt, `attempts[]`, `steps[]` with per-step `data` — details belong in implementation docs/tests, not repeated here.
-- Run id for new runs: encode workflow identity + timestamp in the derivation rule used in code and tests; document the exact format where operators need it.
+- Session YAML: follow **Session file format (YAML)** in Requirements; pin exact timestamp formats and error object shapes in code/tests.
+- Run id for new runs: `<script-name>-<timestamp>` as in Requirements; document character set for the random suffix (e.g. alphanumeric) where operators need it.
 
 ## Release Notes
