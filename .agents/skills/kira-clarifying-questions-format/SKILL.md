@@ -1,10 +1,10 @@
 ---
-name: clarifying-questions-format
+name: kira-clarifying-questions-format
 description: "Present clarifying questions with selectable options. Use when any skill or command needs to ask stakeholders to choose among options—format questions so answers are easy to give (check a box) and assumptions are visible (suggest an option and why)."
 disable-model-invocation: false
 ---
 
-# Clarifying questions format
+# Kira: Clarifying questions format
 
 When you need to present clarifying questions with selectable options, use this format. Any skill that asks stakeholders to choose among options should follow it.
 

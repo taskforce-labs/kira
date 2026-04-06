@@ -1,4 +1,9 @@
-# Break Into Slices
+---
+name: kira-break-work-item-into-slices
+description: "Break a work item into testable slices that can be committed to git, with clear tasks and acceptance criteria."
+disable-model-invocation: false
+---
+# Kira: Break Into Slices
 
 ## Overview
 Break a work item into testable slices that can be committed to git, with clear tasks and acceptance criteria.
@@ -34,4 +39,4 @@ Commit: <Summary of the slice and tasks>
 
 ## Output
 
-Work item with Slices section populated in the preferred markdown format. Use the work-item-elaboration skill for detailed guidance.
+Work item with Slices section populated in the preferred markdown format. Elaborate behaviour first with **kira-elaborate-work-item** if value, rules, or flows are still fuzzy.
