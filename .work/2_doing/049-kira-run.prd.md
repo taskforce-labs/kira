@@ -220,9 +220,9 @@ Commit: End-to-end runner: derive/accept run id, session pre-write, invoke `Run`
 
 ### 5. `kira run` CLI and workflow resolution
 Commit: `kira run <script-or-workflow> [args]` resolving by path or name under `workflows` in `kira.yml` with default root `.workflows/`, forwarding script args, and exposing all runner flags.
-- [ ] T016: Parse flags and positional workflow selector; resolve workflow file from `kira.yml` and repo layout.
-- [ ] T017: Register the subcommand under the existing Cobra/root command pattern; document usage in help text.
-- [ ] T018: CLI or integration tests for resolution and flag passthrough.
+- [x] T016: Parse flags and positional workflow selector; resolve workflow file from `kira.yml` and repo layout.
+- [x] T017: Register the subcommand under the existing Cobra/root command pattern; document usage in help text.
+- [x] T018: CLI or integration tests for resolution and flag passthrough.
 
 ### 6. Acceptance, concurrency, and repo quality gate
 Commit: Same-run-id concurrency story verified end-to-end, any operator-facing run-id format documented, and `make check` (plus e2e script per `AGENTS.md`) green.
@@ -235,6 +235,6 @@ Commit: Same-run-id concurrency story verified end-to-end, any operator-facing r
 - Narrow Yaegi surface via `interp.Use`; recover panics in the runner and record like a returned error where compatible with pre-invoke session writes.
 - Document `--ignore-attempt-limit` vs persisted attempt counter (flag is advisory for script guards, not a counter override).
 - Session YAML: follow **Session file format (YAML)** in Requirements; pin exact timestamp formats and error object shapes in code/tests.
-- Run id for new runs: `<script-name>-<timestamp>` as in Requirements; document character set for the random suffix (e.g. alphanumeric) where operators need it.
+- Run id for new runs: `<script-name>-<UTC-timestamp>` (second precision, e.g. `hello-20060102150405`). `--ignore-attempt-limit` does not change the persisted `attempt` counter in the session file; scripts gate on `ctx.Run.IgnoreAttemptLimit()` locally.
 
 ## Release Notes
