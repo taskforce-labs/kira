@@ -63,8 +63,8 @@ tags: []
 - [x] T004: Under each question subsection, detect `#### Options`; parse checklist items and treat the question as answered if at least one `[x]` is present.
 
 ### Slice 3: Filter and output
-- [ ] T005: Filter to unanswered questions only; output human-readable lines (file path + question text).
-- [ ] T006: Add `--output json` for machine-readable array of `{ "file", "question" }` (or equivalent).
+- [x] T005: Filter to unanswered questions only; output human-readable lines (file path + question text).
+- [x] T006: Add `--output json` for machine-readable array of `{ "file", "question" }` (or equivalent).
 
 ### Slice 4: Location and scope filters
 - [ ] T007: Add `--work` and `--docs` flags; when set, restrict file discovery to work folder only or docs folder only; when neither set, search both.
