@@ -39,18 +39,18 @@ tags: []
 
 ## Acceptance Criteria
 
-- [ ] `kira questions` exists and runs without required arguments.
-- [ ] Search is limited to files under the configured work folder and docs folder (from kira.yml); default work folder `.work` and docs folder `.docs` when not set.
-- [ ] Only `.md` and `.qmd` files are scanned.
-- [ ] Only content under a level-2 heading exactly `## Questions` is considered; other headings (including `## Questions to Answer`) are ignored.
-- [ ] Each `### <number>. <question-title>` under `## Questions` is one question; `#### Options` under that subsection applies only to that question. A question is listed as unanswered only when it has no `#### Options` or no `[x]` in that block; if at least one option is checked, the question is not listed.
-- [ ] Output lists each unanswered question with the file path (relative to repo root or config dir) and the question text (or line reference).
-- [ ] If config cannot be loaded or work/docs paths are invalid, the command exits non-zero with an explicit error message.
-- [ ] Unit tests cover: no `## Questions` section (no output); question subsection with no `#### Options` (listed); `#### Options` all unchecked (listed); at least one `[x]` in `#### Options` (not listed); multiple files and multiple `### N.` questions per file.
-- [ ] `--work` limits search to the work folder only; `--docs` limits search to the docs folder only; default (no flag) searches both.
-- [ ] `--status <values>` limits work results to files under the given status folder(s); invalid status exits non-zero; multiple values supported (comma or repeatable).
-- [ ] `--doc-type` / `--no-doc-type` behave as in Requirements (including union when both are set); with neither flag, typed and untyped are included.
-- [ ] `--doc-type` matching (e.g. case-insensitivity) is documented in command help.
+- [x] `kira questions` exists and runs without required arguments.
+- [x] Search is limited to files under the configured work folder and docs folder (from kira.yml); default work folder `.work` and docs folder `.docs` when not set.
+- [x] Only `.md` and `.qmd` files are scanned.
+- [x] Only content under a level-2 heading exactly `## Questions` is considered; other headings (including `## Questions to Answer`) are ignored.
+- [x] Each `### <number>. <question-title>` under `## Questions` is one question; `#### Options` under that subsection applies only to that question. A question is listed as unanswered only when it has no `#### Options` or no `[x]` in that block; if at least one option is checked, the question is not listed.
+- [x] Output lists each unanswered question with the file path (relative to repo root or config dir) and the question text (or line reference).
+- [x] If config cannot be loaded or work/docs paths are invalid, the command exits non-zero with an explicit error message.
+- [x] Unit tests cover: no `## Questions` section (no output); question subsection with no `#### Options` (listed); `#### Options` all unchecked (listed); at least one `[x]` in `#### Options` (not listed); multiple files and multiple `### N.` questions per file.
+- [x] `--work` limits search to the work folder only; `--docs` limits search to the docs folder only; default (no flag) searches both.
+- [x] `--status <values>` limits work results to files under the given status folder(s); invalid status exits non-zero; multiple values supported (comma or repeatable).
+- [x] `--doc-type` / `--no-doc-type` behave as in Requirements (including union when both are set); with neither flag, typed and untyped are included.
+- [x] `--doc-type` matching (e.g. case-insensitivity) is documented in command help.
 
 ## Slices
 
@@ -67,10 +67,10 @@ tags: []
 - [x] T006: Add `--output json` for machine-readable array of `{ "file", "question" }` (or equivalent).
 
 ### Slice 4: Location and scope filters
-- [ ] T007: Add `--work` and `--docs` flags; when set, restrict file discovery to work folder only or docs folder only; when neither set, search both.
-- [ ] T008: Add `--status <values>`; resolve status folders from config; restrict work results to files under those folders; support multiple values (comma or repeatable); invalid status exit non-zero.
-- [ ] T009: Add `--doc-type <values>`; derive doc type from each scanned file basename (`*.<type>.md` / `*.<type>.qmd`); apply to work and docs; support multiple values; combinable with `--no-doc-type` (union).
-- [ ] T010: Add `--no-doc-type` for untyped files; implement union when both `--doc-type` and `--no-doc-type` are set; default when neither flag: include typed and untyped files.
+- [x] T007: Add `--work` and `--docs` flags; when set, restrict file discovery to work folder only or docs folder only; when neither set, search both.
+- [x] T008: Add `--status <values>`; resolve status folders from config; restrict work results to files under those folders; support multiple values (comma or repeatable); invalid status exit non-zero.
+- [x] T009: Add `--doc-type <values>`; derive doc type from each scanned file basename (`*.<type>.md` / `*.<type>.qmd`); apply to work and docs; support multiple values; combinable with `--no-doc-type` (union).
+- [x] T010: Add `--no-doc-type` for untyped files; implement union when both `--doc-type` and `--no-doc-type` are set; default when neither flag: include typed and untyped files.
 
 ## Implementation Notes
 
