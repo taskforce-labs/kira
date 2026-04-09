@@ -1,5 +1,5 @@
 ---
-name: kira-plan-and-build
+name: kira-plan-and-build-work-item
 description: "Plan the included work item and then build using the following approach"
 disable-model-invocation: false
 ---
