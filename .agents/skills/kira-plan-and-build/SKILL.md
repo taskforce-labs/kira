@@ -8,10 +8,16 @@ Create a plan to implement the included work item as it's described using the fo
 
 ### Non-negotiables (slice boundaries)
 
-- **One slice, one commit.** Each slice produces **exactly one** git commit (`kira slice commit`) before you start the next slice. Do not batch multiple slices into a single commit.
+The usual failure mode is **doing multiple slices—or the whole work item—in one shot** instead of **one commit per slice**. These rules prevent that.
+
+- **One slice, one commit.** Each slice produces **exactly one** git commit (`kira slice commit --commit-check`) before you start the next slice. Do not batch multiple slices into a single commit.
 - **Implement only the current slice.** Write and test only what that slice’s tasks require. Do not add code, flags, or files that belong to a later slice “while you’re here.”
 - **Do not implement the full work item and commit once.** Never finish the entire card in one change set and then split or fix history afterward unless the user explicitly asks for a history repair.
 - **After each slice commit**, confirm progress (e.g. `git log -1`, `kira slice show current`) before continuing. The next slice starts on top of that commit.
+
+### Baseline
+
+- Before the **first** slice, run **`kira check -t commit`**. If it fails, stop, tell the user, and wait for direction.
 
 For each **slice** (not each task):
 
@@ -20,13 +26,12 @@ For each **slice** (not each task):
    - all tasks in that slice (not tasks from later slices);
    - add/update unit tests and other relevant tests for **this slice’s behaviour**;
    - follow secure coding practices
-3. Verify: `kira check -t commit` before committing. If checks fail, fix and re-run; only commit when they pass.
-4. Commit (one commit per slice):
+3. Commit (one commit per slice)—this is also verification: use **`kira slice commit --commit-check`** every time. That runs **`kira check`** with the configured commit tag(s) **before** the git commit, so project checks (including tests if configured) must pass for each slice. If checks fail, fix and re-run; do not drop **`--commit-check`**.
    - The commit must include **both** the code changes for the slice **and** the work item with that slice’s tasks marked done.
    - Edit the work item to check the boxes for the tasks you just completed in the `## Slices` section, then run `kira slice lint [current | <work-item-id>]` and fix any errors.
-  - Commit: use `kira slice commit` (defaults: work item `current`, slice `completed`) -`kira slice commit` validates the target slice has no open tasks, then runs **`git add -A`** and commits with the generated multi-line template (code and work item together). Use `--dry-run` to preview; `--commit-check` to run `kira check` (default tag `commit`) before committing.
+   - **`kira slice commit --commit-check`** (defaults: work item `current`, slice `completed`). Validates the slice has no open tasks, runs **`kira check`**, then **`git add -A`** and commits with the generated multi-line template. Use **`--dry-run`** to preview; use **`--commit-check-tags`** only if you need tags other than the default for `--commit-check`.
    - Use `kira slice task done current --next` to mark a task done and see the next task plus progress summary - which can help determine what is left to do;
-5. Move to the next slice and repeat.
+4. Move to the next slice and repeat.
 
 When all slices are done, run `kira check -t done`.
 
