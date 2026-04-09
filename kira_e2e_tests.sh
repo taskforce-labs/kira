@@ -268,6 +268,17 @@ else
     exit 1
 fi
 
+if ! "$KIRA_BIN" questions --help > /dev/null; then
+    echo "❌ questions command help failed"
+    exit 1
+fi
+echo "✅ questions command help works"
+if ! "$KIRA_BIN" questions --output json > /dev/null; then
+    echo "❌ questions command failed"
+    exit 1
+fi
+echo "✅ questions command runs (json)"
+
 # Test 11: init flags: fill-missing and force
 echo ""
 echo "🧪 Test 11: init --fill-missing and --force"
