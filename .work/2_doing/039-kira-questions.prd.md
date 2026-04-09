@@ -59,8 +59,8 @@ tags: []
 - [x] T002: Implement recursive file discovery for `.md` and `.qmd` under work and docs roots; skip non-files and unsupported extensions.
 
 ### Slice 2: Parse Questions and Options
-- [ ] T003: Parse each file for a `## Questions` section only; within it, treat each `### <number>. <title>` heading as one question until the next `###` or `##`.
-- [ ] T004: Under each question subsection, detect `#### Options`; parse checklist items and treat the question as answered if at least one `[x]` is present.
+- [x] T003: Parse each file for a `## Questions` section only; within it, treat each `### <number>. <title>` heading as one question until the next `###` or `##`.
+- [x] T004: Under each question subsection, detect `#### Options`; parse checklist items and treat the question as answered if at least one `[x]` is present.
 
 ### Slice 3: Filter and output
 - [ ] T005: Filter to unanswered questions only; output human-readable lines (file path + question text).
