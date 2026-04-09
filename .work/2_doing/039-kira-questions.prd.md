@@ -55,8 +55,8 @@ tags: []
 ## Slices
 
 ### Slice 1: Command and config
-- [ ] T001: Add `questions` subcommand to root; load config and resolve work folder and docs folder; exit with error if not in a kira workspace or paths invalid.
-- [ ] T002: Implement recursive file discovery for `.md` and `.qmd` under work and docs roots; skip non-files and unsupported extensions.
+- [x] T001: Add `questions` subcommand to root; load config and resolve work folder and docs folder; exit with error if not in a kira workspace or paths invalid.
+- [x] T002: Implement recursive file discovery for `.md` and `.qmd` under work and docs roots; skip non-files and unsupported extensions.
 
 ### Slice 2: Parse Questions and Options
 - [ ] T003: Parse each file for a `## Questions` section only; within it, treat each `### <number>. <title>` heading as one question until the next `###` or `##`.
