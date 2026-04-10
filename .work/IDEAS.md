@@ -47,4 +47,4 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 38. [2026-04-01] kira new follow on: create new work items from the follow on section in a work item
 39. [2026-04-01] kira find risks: scans the codebase for looking for risk tags to surface during risk analysis
 40. [2026-04-06] kira gateway control plane: an entry point to reviece and direct commands to mulitple projects across multiple servers
-
+41. [2026-04-10] kira mobile question: surface questions from the repo into the app - select an option or converse about it further to unpack and fold into the relevant docs or work items.
