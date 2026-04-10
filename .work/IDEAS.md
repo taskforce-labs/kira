@@ -48,3 +48,4 @@ This file is for capturing quick ideas and thoughts that don't fit into formal w
 39. [2026-04-01] kira find risks: scans the codebase for looking for risk tags to surface during risk analysis
 40. [2026-04-06] kira gateway control plane: an entry point to reviece and direct commands to mulitple projects across multiple servers
 41. [2026-04-10] kira mobile question: surface questions from the repo into the app - select an option or converse about it further to unpack and fold into the relevant docs or work items.
+42. [2026-04-10] kira start branch: allows kira start to setup a worktree and branch for non-work-item activity e.g. sprint-planning
