@@ -15,11 +15,12 @@ func KirarunExports() interp.Exports {
 	return interp.Exports{
 		"kira/kirarun/kirarun": {
 			// Generic function symbol uses any instantiation for reflect registration.
-			"Do":           reflect.ValueOf(kirarun.Do[any]),
-			"NewLogger":    reflect.ValueOf(kirarun.NewLogger),
-			"NewRunHandle": reflect.ValueOf(kirarun.NewRunHandle),
-			"NewStep":      reflect.ValueOf(kirarun.NewStep),
-			"NewWorkspace": reflect.ValueOf(kirarun.NewWorkspace),
+			"Do":                reflect.ValueOf(kirarun.Do[any]),
+			"UnmarshalStepData": reflect.ValueOf(kirarun.UnmarshalStepData),
+			"NewLogger":         reflect.ValueOf(kirarun.NewLogger),
+			"NewRunHandle":      reflect.ValueOf(kirarun.NewRunHandle),
+			"NewStep":           reflect.ValueOf(kirarun.NewStep),
+			"NewWorkspace":      reflect.ValueOf(kirarun.NewWorkspace),
 
 			"Agents":        reflect.ValueOf((*kirarun.Agents)(nil)),
 			"CommandsView":  reflect.ValueOf((*kirarun.CommandsView)(nil)),

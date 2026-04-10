@@ -31,7 +31,13 @@ This will enable [product dev loop triggers](.work/2_doing/024-product-dev-loop-
 - Entrypoint: `Run(ctx *kirarun.Context, step *kirarun.Step, agents kirarun.Agents) error` — the third parameter is the agent execution surface; workflows that do not invoke agents may ignore it with `_`. The concrete `kirarun.Agents` type is defined by the host for this kira version. Idempotent steps use the package function `kirarun.Do(step, name, fn)` (Go has no generic methods).
 - **Validate before run:** the workflow source must load under Yaegi (parse/compile), expose `Run` with that exact signature (package `main`, correct parameter types and arity), and only use the `kirarun` API the host registers for this kira version. If the script is invalid, the signature is wrong, or it calls types/methods not provided by the host, fail with a clear error — do not create or advance a session.
 - `ctx` is **read-only** from the workflow: workspace paths, logging, read-only view of skills/commands, plus `ctx.Run` (e.g. `Attempt()` 1-based, `IsResume()` when `--resume` was passed, `IgnoreAttemptLimit()` when `--ignore-attempt-limit` was passed). Do not mutate host or agent state through `ctx`. Non-deterministic agent work goes through the third parameter, not side effects on `ctx`. Retry/backoff and caps live in the script via `Attempt()` and normal Go code (optional `const maxAttempts`).
-- `step.Do[T](name, fn)` — idempotent steps: persist successful `T` as JSON per step name; skip `fn` if that step already succeeded for this run; `fn` error marks step failed/resumable. Prefer typed structs; `map[string]any` only if shape is dynamic. If persisted JSON cannot decode into `T` on resume, fail with a clear step-scoped error.
+- `kirarun.Do(step, name, fn)` — idempotent steps: persist successful output as **JSON** (one object per step name in the session file); skip `fn` if that step already completed for this run; `fn` error marks the step failed / resumable. **How return types work** (compiled vs Yaegi, coercion): see **Step outputs** below.
+- **Step outputs (return types and typing rules)**
+  - **What is stored:** `steps[].data` is always a JSON object. In code, represent that with a **struct** and **`json` tags** on each field, unless the payload has **dynamic keys** (then `map[string]any` is acceptable).
+  - **Compiled Go** (packages built with `go build`, including tests and host code): use **`kirarun.Do[T]`** with a callback **`func(kirarun.StepContext) (T, error)`**. The **compiler** knows `T` for the return value and for resume decoding inside `Do`.
+  - **Yaegi workflows** (scripts under `.workflows/`): the host registers **`kirarun.Do[any]`** only (one concrete symbol via `interp.Use`). Callbacks use **`func(kirarun.StepContext) (any, error)`** — you may still **return a struct value** inside that `any`. The **compiler does not** check that the value matches the struct type you use in the rest of the script; that limitation comes from `any`, not from missing helpers.
+  - **Unmarshal after `Do` in scripts:** call **`kirarun.UnmarshalStepData(raw, &out)`** where `out` is your tagged struct variable and **`&out` is its address** (same rule as `json.Unmarshal`: the unmarshaler must receive a pointer so it can write fields into your variable). That performs a **runtime** JSON round-trip so the same code works whether `raw` is struct-backed (common on first run) or **`map[string]any`**-backed (common after `--resume`). If JSON does not fit `out`, you get an error **when unmarshaling**, not from `go build`.
+  - **Compiled-only sugar:** **`kirarun.UnmarshalStepDataAs[T](raw)`** — same behavior, returns a `T`; convenient when you are not under Yaegi. Scripts use **`UnmarshalStepData`** (registered for the interpreter).
 - Interpreter: no broad `unsafe` / syscall surface by default.
 
 **Session file**
@@ -68,7 +74,7 @@ steps:
 - `path` and `kira-version` are set when the session is first created for a run.
 - `run-id` in the file must match the session file stem and the id printed for `--resume`.
 - `attempts[].name` is `run` for a top-level `Run` failure (or equivalent), or the `step.Do` step name for a step failure.
-- `steps[].data` holds JSON-compatible output for successful `step.Do` completions (typed decode on resume per `step.Do` rules).
+- `steps[].data` holds the JSON object written for each successful step; typing and unmarshal rules are under **Step outputs** in **Script**.
 
 **Other**
 
@@ -116,7 +122,11 @@ func Run(ctx *kirarun.Context, _ *kirarun.Step, _ kirarun.Agents) error {
 }
 ```
 
-### B — `kirarun.Do` with types
+### Hello world — three steps (fetch → construct → say)
+
+Canonical script: `.workflows/hello_world.go`. Matches **Step outputs** in **Requirements** (Yaegi + `Do[any]` + `UnmarshalStepData`). Three idempotent steps: **`get_greeting`** (stub **phrase** + optional **style**; later LLM via **`kirarun.Agents`**), **`construct_greeting`** (`phrase + " world"`), **`say_greeting`** (stdout).
+
+**Shape:** `runStepOneGetGreeting` / `runStepTwoConstructGreeting` / `runStepThreeSayGreeting` each wrap `kirarun.Do` + `UnmarshalStepData` with the step body inlined in the callback. `Run` is a short pipeline.
 
 ```go
 package main
@@ -127,29 +137,123 @@ import (
 	"kira/kirarun"
 )
 
-func Run(ctx *kirarun.Context, step *kirarun.Step, _ kirarun.Agents) error {
-	type step1Out struct {
-		Foo   string `json:"foo"`
-		Model string `json:"model"`
-	}
-	type step2Out struct {
-		Summary string `json:"summary"`
-	}
+type getGreetingOut struct {
+	Phrase string `json:"phrase"`
+	Style  string `json:"style"`
+}
 
-	s1, err := kirarun.Do(step, "step_1", func(_ kirarun.StepContext) (step1Out, error) {
+type constructGreetingOut struct {
+	Message string `json:"message"`
+}
+
+type sayGreetingOut struct {
+	Printed bool `json:"printed"`
+}
+
+func runStepOneGetGreeting(step *kirarun.Step, ctx *kirarun.Context, agents kirarun.Agents) (getGreetingOut, error) {
+	raw, err := kirarun.Do(step, "get_greeting", func(_ kirarun.StepContext) (any, error) {
+		_ = ctx
+		_ = agents
+		return getGreetingOut{Phrase: "G'day", Style: "australia"}, nil
+	})
+	if err != nil {
+		return getGreetingOut{}, err
+	}
+	var out getGreetingOut
+	if err := kirarun.UnmarshalStepData(raw, &out); err != nil {
+		return getGreetingOut{}, fmt.Errorf("get_greeting: %w", err)
+	}
+	return out, nil
+}
+
+func runStepTwoConstructGreeting(step *kirarun.Step, in getGreetingOut) (constructGreetingOut, error) {
+	raw, err := kirarun.Do(step, "construct_greeting", func(_ kirarun.StepContext) (any, error) {
+		return constructGreetingOut{Message: in.Phrase + " world"}, nil
+	})
+	if err != nil {
+		return constructGreetingOut{}, err
+	}
+	var out constructGreetingOut
+	if err := kirarun.UnmarshalStepData(raw, &out); err != nil {
+		return constructGreetingOut{}, fmt.Errorf("construct_greeting: %w", err)
+	}
+	return out, nil
+}
+
+func runStepThreeSayGreeting(step *kirarun.Step, in constructGreetingOut) (sayGreetingOut, error) {
+	raw, err := kirarun.Do(step, "say_greeting", func(_ kirarun.StepContext) (any, error) {
+		fmt.Println(in.Message)
+		return sayGreetingOut{Printed: true}, nil
+	})
+	if err != nil {
+		return sayGreetingOut{}, err
+	}
+	var out sayGreetingOut
+	if err := kirarun.UnmarshalStepData(raw, &out); err != nil {
+		return sayGreetingOut{}, fmt.Errorf("say_greeting: %w", err)
+	}
+	return out, nil
+}
+
+func Run(ctx *kirarun.Context, step *kirarun.Step, agents kirarun.Agents) error {
+	fetched, err := runStepOneGetGreeting(step, ctx, agents)
+	if err != nil {
+		return err
+	}
+	built, err := runStepTwoConstructGreeting(step, fetched)
+	if err != nil {
+		return err
+	}
+	_, err = runStepThreeSayGreeting(step, built)
+	return err
+}
+```
+
+### B — two typed steps chained (minimal pattern)
+
+Same **Step outputs** rules as **Hello world** (structs + tags, `(any, error)` under Yaegi, `UnmarshalStepData` between steps); this snippet is only two steps for brevity — the canonical pipeline is three steps in `.workflows/hello_world.go`.
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"kira/kirarun"
+)
+
+type step1Out struct {
+	Foo   string `json:"foo"`
+	Model string `json:"model"`
+}
+
+type step2Out struct {
+	Summary string `json:"summary"`
+}
+
+func Run(ctx *kirarun.Context, step *kirarun.Step, _ kirarun.Agents) error {
+	raw1, err := kirarun.Do(step, "step_1", func(_ kirarun.StepContext) (any, error) {
 		return step1Out{Foo: "bar", Model: "gpt-5"}, nil
 	})
 	if err != nil {
 		return err
 	}
+	var s1 step1Out
+	if err := kirarun.UnmarshalStepData(raw1, &s1); err != nil {
+		return fmt.Errorf("step_1: %w", err)
+	}
 
-	s2, err := kirarun.Do(step, "step_2", func(_ kirarun.StepContext) (step2Out, error) {
-		return step2Out{Summary: fmt.Sprintf("foo=%s", s1.Foo)}, nil
+	raw2, err := kirarun.Do(step, "step_2", func(_ kirarun.StepContext) (any, error) {
+		return step2Out{Summary: fmt.Sprintf("foo=%s model=%s", s1.Foo, s1.Model)}, nil
 	})
 	if err != nil {
 		return err
 	}
-	_ = s2
+	var s2 step2Out
+	if err := kirarun.UnmarshalStepData(raw2, &s2); err != nil {
+		return fmt.Errorf("step_2: %w", err)
+	}
+	_ = s2 // use s2.Summary in later steps or logging
 	return nil
 }
 ```
@@ -188,6 +292,7 @@ func Run(ctx *kirarun.Context, step *kirarun.Step, _ kirarun.Agents) error {
 - [x] `ctx` is read-only to workflows; agent invocation uses the third `Run` parameter (`kirarun.Agents`). Provider wiring (e.g. Cursor first) targets that parameter. [PRD 024](.work/2_doing/024-product-dev-loop-triggers.prd.md) is background and may lag this spec.
 - [x] Concurrent same-run-id execution is guarded.
 - [x] `make check` passes.
+- [x] Step data unmarshal: `kirarun.UnmarshalStepData` / `UnmarshalStepDataAs` implemented and covered by tests; Yaegi export includes `UnmarshalStepData`; `.workflows/hello_world.go` uses it (slice 7).
 
 ## Slices
 
@@ -230,8 +335,16 @@ Commit: Same-run-id concurrency story verified end-to-end, any operator-facing r
 - [x] T020: Document run-id derivation rule and `--ignore-attempt-limit` vs persisted attempt where operators need it (implementation note or short doc pointer).
 - [x] T021: `make check` passes; run `bash kira_e2e_tests.sh` and fix failures tied to this feature.
 
+### 7. Step data unmarshal (`UnmarshalStepData` / `UnmarshalStepDataAs`)
+Commit: First-class `kirarun` helpers for turning `Do[any]` results into typed structs via JSON (same shape on first run vs `--resume`); Yaegi registers `UnmarshalStepData`; canonical workflow drops local `jsonRoundTrip`.
+- [x] T022: Implement `kirarun.UnmarshalStepData(v any, ptr any) error` — `ptr` must be a non-nil pointer; `json.Marshal(v)` then `json.Unmarshal` into `ptr`; clear errors if `ptr` is invalid or JSON shape does not match.
+- [x] T023: Implement `kirarun.UnmarshalStepDataAs[T any](v any) (T, error)` as thin wrapper over the same logic (compiled ergonomics); unit tests cover struct-in-`any`, `map[string]any`, and mismatch cases for both APIs.
+- [x] T024: Register `UnmarshalStepData` in `internal/kirarun/yaegi/exports.go` (`UnmarshalStepDataAs` compiled-only unless Yaegi gains reliable generic calls); extend validation/tests if the symbol surface is asserted anywhere.
+- [x] T025: Update `.workflows/hello_world.go` to use `UnmarshalStepData`; remove the local `jsonRoundTrip` helper; ensure `kira run` / resume still passes existing integration coverage.
+
 ## Implementation Notes
 
+- Step typing and Yaegi vs compiled behavior are specified once under **Requirements → Script → Step outputs**; avoid duplicating that narrative here.
 - Narrow Yaegi surface via `interp.Use`; recover panics in the runner and record like a returned error where compatible with pre-invoke session writes.
 - Document `--ignore-attempt-limit` vs persisted attempt counter (flag is advisory for script guards, not a counter override).
 - Session YAML: follow **Session file format (YAML)** in Requirements; pin exact timestamp formats and error object shapes in code/tests.
