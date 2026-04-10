@@ -1,10 +1,14 @@
 ---
 id: 039
 title: kira questions
-status: review
+status: done
 kind: prd
-assigned:
-created: 2026-02-02
+created: 2026-02-02T00:00:00Z
+assigned: null
+merge_commit_sha: 7dddb15e936bf3da7f2a8c1899d9461a3f8d251e
+merge_strategy: rebase
+merged_at: "2026-04-10T06:36:11Z"
+pr_number: 31
 tags: []
 ---
 
