@@ -109,48 +109,48 @@ The runner prints a concise, human-readable trace of what it is doing so operato
 
 **Sample output (illustrative — not fixed copy)**
 
-Prefix and wording are examples; the **events** and **fields** (run-id, attempt, step names, flags) are what matter for humans and tooling.
+Human lines use a fixed-width **event** column (same strings as JSON `event`) and spaced `key=value` fields so operators can scan vertically. Exact spacing may evolve; **event kinds** and **fields** stay the contract.
 
 _New run, three steps, success:_
 
 ```text
-[kira-run] starting workflow=.workflows/hello_world.go run-id=hello_world-20060102150405 attempt=1
-[kira-run] step start name=get_greeting
-[kira-run] step done name=get_greeting
-[kira-run] step start name=construct_greeting
-[kira-run] step done name=construct_greeting
-[kira-run] step start name=say_greeting
-[kira-run] step done name=say_greeting
-[kira-run] run completed ok run-id=hello_world-20060102150405 (session removed)
+[kira-run]  run_start     workflow=.workflows/hello_world.go  run-id=hello_world-20060102150405  attempt=1
+[kira-run]  step_start    step=get_greeting
+[kira-run]  step_done     step=get_greeting
+[kira-run]  step_start    step=construct_greeting
+[kira-run]  step_done     step=construct_greeting
+[kira-run]  step_start    step=say_greeting
+[kira-run]  step_done     step=say_greeting
+[kira-run]  run_completed run-id=hello_world-20060102150405  session=removed
 ```
 
 _Resume after partial progress (first two steps cached):_
 
 ```text
-[kira-run] resuming run-id=hello_world-20060102150405 attempt=1 completed=2 (get_greeting, construct_greeting)
-[kira-run] step skip name=get_greeting reason=already_completed
-[kira-run] step skip name=construct_greeting reason=already_completed
-[kira-run] step start name=say_greeting
-[kira-run] step done name=say_greeting
-[kira-run] run completed ok run-id=hello_world-20060102150405 (session removed)
+[kira-run]  run_resume    run-id=hello_world-20060102150405  attempt=1  completed=2  steps=get_greeting, construct_greeting
+[kira-run]  step_skip     step=get_greeting  reason=already_completed
+[kira-run]  step_skip     step=construct_greeting  reason=already_completed
+[kira-run]  step_start    step=say_greeting
+[kira-run]  step_done     step=say_greeting
+[kira-run]  run_completed run-id=hello_world-20060102150405  session=removed
 ```
 
 _`--auto-retry` after a failure (attempt bumps each iteration):_
 
 ```text
-[kira-run] starting workflow=foo_bar run-id=foo_bar-20060102150406 attempt=1
-[kira-run] step start name=fetch
-[kira-run] run failed run-id=foo_bar-20060102150406 attempt=1 error=…
-[kira-run] retry run-id=foo_bar-20060102150406 attempt=2
-[kira-run] step start name=fetch
-[kira-run] step done name=fetch
-[kira-run] run completed ok run-id=foo_bar-20060102150406 (session removed)
+[kira-run]  run_start     workflow=foo_bar  run-id=foo_bar-20060102150406  attempt=1
+[kira-run]  step_start    step=fetch
+[kira-run]  run_failed    run-id=foo_bar-20060102150406  attempt=1  error=…
+[kira-run]  retry         run-id=foo_bar-20060102150406  attempt=2
+[kira-run]  step_start    step=fetch
+[kira-run]  step_done     step=fetch
+[kira-run]  run_completed run-id=foo_bar-20060102150406  session=removed
 ```
 
 _`--ignore-attempt-limit` (one notice; script may continue past a local maxAttempts guard):_
 
 ```text
-[kira-run] notice flag=ignore_attempt_limit (persisted attempt unchanged; script may bypass attempt cap)
+[kira-run]  flag_notice   flag=ignore_attempt_limit  detail=persisted_attempt_unchanged_bypass_cap_allowed
 ```
 
 **Sample JSONL (illustrative — one object per line)**

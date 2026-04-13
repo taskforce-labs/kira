@@ -17,6 +17,30 @@ import (
 	"kira/internal/kirarun/session"
 )
 
+// humanLines returns stderr lines that contain kira-run progress output.
+func humanLines(stderr string) []string {
+	var out []string
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.Contains(line, "[kira-run]") {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func lineIndex(lines []string, subs ...string) int {
+outer:
+	for i, line := range lines {
+		for _, sub := range subs {
+			if !strings.Contains(line, sub) {
+				continue outer
+			}
+		}
+		return i
+	}
+	return -1
+}
+
 func TestDeriveRunID(t *testing.T) {
 	ts := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
 	id, err := DeriveRunID("hello.go", ts)
@@ -42,12 +66,12 @@ func TestExecuteSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, buf.String(), "run id:")
 	human := stderr.String()
-	require.Contains(t, human, "[kira-run] starting")
-	require.Contains(t, human, "[kira-run] run completed ok")
-	iStart := strings.Index(human, "[kira-run] starting")
-	iDone := strings.Index(human, "[kira-run] run completed ok")
-	require.GreaterOrEqual(t, iStart, 0)
-	require.Greater(t, iDone, iStart)
+	lines := humanLines(human)
+	require.NotEmpty(t, lines)
+	require.Contains(t, lines[0], "run_start")
+	last := lines[len(lines)-1]
+	require.Contains(t, last, "run_completed")
+	require.Contains(t, last, "session=removed")
 
 	sessionsDir, err := session.SessionsDir(root)
 	require.NoError(t, err)
@@ -72,8 +96,9 @@ func TestExecuteFailNoRetry(t *testing.T) {
 	}
 	_, err = cfg.Execute(context.Background())
 	require.Error(t, err)
-	require.Contains(t, stderr.String(), "[kira-run] starting")
-	require.Contains(t, stderr.String(), "[kira-run] run failed")
+	out := stderr.String()
+	require.Contains(t, out, "run_start")
+	require.Contains(t, out, "run_failed")
 
 	sessDir, err := session.SessionsDir(root)
 	require.NoError(t, err)
@@ -100,16 +125,16 @@ func TestHumanOutputThreeSteps(t *testing.T) {
 	_, err = cfg.Execute(context.Background())
 	require.NoError(t, err)
 
-	s := stderr.String()
-	iStart := strings.Index(s, "[kira-run] starting")
-	iA := strings.Index(s, "step start name=a")
-	iB := strings.Index(s, "step start name=b")
-	iC := strings.Index(s, "step start name=c")
-	iDone := strings.Index(s, "[kira-run] run completed ok")
-	require.Greater(t, iA, iStart)
-	require.Greater(t, iB, iA)
-	require.Greater(t, iC, iB)
-	require.Greater(t, iDone, iC)
+	lines := humanLines(stderr.String())
+	require.GreaterOrEqual(t, len(lines), 8)
+	require.Contains(t, lines[0], "run_start")
+	require.Contains(t, lines[1], "step_start")
+	require.Contains(t, lines[1], "step=a")
+	require.Contains(t, lines[2], "step_done")
+	require.Contains(t, lines[2], "step=a")
+	require.Contains(t, lines[3], "step_start")
+	require.Contains(t, lines[3], "step=b")
+	require.Contains(t, lines[7], "run_completed")
 }
 
 func TestHumanOutputResumeSkipsFirstStep(t *testing.T) {
@@ -129,7 +154,7 @@ func TestHumanOutputResumeSkipsFirstStep(t *testing.T) {
 	}
 	_, err = cfg1.Execute(context.Background())
 	require.Error(t, err)
-	require.Contains(t, stderr1.String(), "[kira-run] run failed")
+	require.Contains(t, stderr1.String(), "run_failed")
 
 	const prefix = "run id: "
 	out := stdout1.String()
@@ -152,14 +177,14 @@ func TestHumanOutputResumeSkipsFirstStep(t *testing.T) {
 	_, err = cfg2.Execute(context.Background())
 	require.NoError(t, err)
 
-	s := stderr2.String()
-	require.Contains(t, s, "[kira-run] resuming")
-	require.Contains(t, s, "step skip name=first")
-	require.Contains(t, s, "reason=already_completed")
-	iSkip := strings.Index(s, "step skip name=first")
-	iSecond := strings.Index(s, "step start name=second")
+	lines := humanLines(stderr2.String())
+	require.GreaterOrEqual(t, lineIndex(lines, "run_resume"), 0)
+	require.GreaterOrEqual(t, lineIndex(lines, "step_skip", "step=first"), 0)
+	require.Contains(t, strings.Join(lines, "\n"), "reason=already_completed")
+	iSkip := lineIndex(lines, "step_skip", "step=first")
+	iSecond := lineIndex(lines, "step_start", "step=second")
 	require.Greater(t, iSecond, iSkip)
-	require.Contains(t, s, "[kira-run] run completed ok")
+	require.GreaterOrEqual(t, lineIndex(lines, "run_completed"), 0)
 }
 
 func TestHumanOutputAutoRetry(t *testing.T) {
@@ -169,6 +194,7 @@ func TestHumanOutputAutoRetry(t *testing.T) {
 	require.NoError(t, err)
 
 	var stdout, stderr bytes.Buffer
+	// Avoid "retry" in workflow= so tests can substring-match the retry event line.
 	cfg := &Config{
 		ProjectRoot:       root,
 		WorkflowPath:      absWF,
@@ -176,19 +202,19 @@ func TestHumanOutputAutoRetry(t *testing.T) {
 		AutoRetry:         true,
 		Stdout:            &stdout,
 		Stderr:            &stderr,
-		ScriptDisplayName: "autoretry",
+		ScriptDisplayName: "bounce",
 	}
 	_, err = cfg.Execute(context.Background())
 	require.NoError(t, err)
 
-	s := stderr.String()
-	iStart := strings.Index(s, "[kira-run] starting")
-	iFail := strings.Index(s, "[kira-run] run failed")
-	iRetry := strings.Index(s, "[kira-run] retry")
-	iDone := strings.Index(s, "[kira-run] run completed ok")
-	require.Greater(t, iFail, iStart)
-	require.Greater(t, iRetry, iFail)
-	require.Greater(t, iDone, iRetry)
+	lines := humanLines(stderr.String())
+	iStart := lineIndex(lines, "run_start")
+	iFail := lineIndex(lines, "run_failed")
+	iRetry := lineIndex(lines, "retry")
+	iDone := lineIndex(lines, "run_completed")
+	require.Less(t, iStart, iFail)
+	require.Less(t, iFail, iRetry)
+	require.Less(t, iRetry, iDone)
 }
 
 func TestHumanOutputIgnoreAttemptLimitNotice(t *testing.T) {
@@ -209,11 +235,13 @@ func TestHumanOutputIgnoreAttemptLimitNotice(t *testing.T) {
 	_, err = cfg.Execute(context.Background())
 	require.NoError(t, err)
 
-	s := stderr.String()
-	iNotice := strings.Index(s, "ignore_attempt_limit")
-	iStart := strings.Index(s, "[kira-run] starting")
+	lines := humanLines(stderr.String())
+	iNotice := lineIndex(lines, "flag_notice")
+	iStart := lineIndex(lines, "run_start")
 	require.GreaterOrEqual(t, iNotice, 0)
-	require.Greater(t, iStart, iNotice)
+	require.GreaterOrEqual(t, iStart, 0)
+	require.Less(t, iNotice, iStart)
+	require.Contains(t, lines[iNotice], "ignore_attempt_limit")
 }
 
 func TestJSONLProgressThreeStep(t *testing.T) {
