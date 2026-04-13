@@ -379,8 +379,8 @@ func Run(ctx *kirarun.Context, step *kirarun.Step, _ kirarun.Agents) error {
 - [x] Concurrent same-run-id execution is guarded.
 - [x] `make check` passes.
 - [x] Step data unmarshal: `kirarun.UnmarshalStepData` / `UnmarshalStepDataAs` implemented and covered by tests; Yaegi export includes `UnmarshalStepData`; `.workflows/hello_world.go` uses it (slice 7).
-- [ ] Operator-visible **run progress output** matches **Run progress output (operator-facing)** in Requirements: internal **event** pipeline with **human** renderer on stderr; new run, resume, skipped steps, optional step start/finish, `--auto-retry` iterations, `--ignore-attempt-limit` notice, and successful completion; runner lines distinguishable from workflow `ctx.Log` output; messages include enough **run-id**, **attempt**, and **step** context for humans and LLM assistants to diagnose failures and choose remediation (e.g. `--resume`).
-- [ ] Tests or integration checks assert the presence (or content) of key **human** progress lines so regressions are caught without manual terminal inspection.
+- [x] Operator-visible **run progress output** matches **Run progress output (operator-facing)** in Requirements: internal **event** pipeline with **human** renderer on stderr; new run, resume, skipped steps, optional step start/finish, `--auto-retry` iterations, `--ignore-attempt-limit` notice, and successful completion; runner lines distinguishable from workflow `ctx.Log` output; messages include enough **run-id**, **attempt**, and **step** context for humans and LLM assistants to diagnose failures and choose remediation (e.g. `--resume`).
+- [x] Tests or integration checks assert the presence (or content) of key **human** progress lines so regressions are caught without manual terminal inspection.
 - [ ] **`--run-events <path>`** writes **JSONL** per **JSONL contract** (schema version, event kinds, required common fields); each runner progress event appears as one JSON line; file truncated at invocation start; tests load and assert selected lines with `encoding/json` (or document `jq` in a script).
 - [ ] **Human** and **JSONL** outputs for the same run are **semantically aligned** (same event sequence and payloads — no duplicate sources of truth).
 
@@ -434,12 +434,12 @@ Commit: First-class `kirarun` helpers for turning `Do[any]` results into typed s
 
 ### 8. Run progress output — event pipeline and human renderer
 Commit: Versioned **runner event** types and a single emission path; **human** stderr formatting for starting a run, resuming, skipping completed steps, auto-retry iterations, `--ignore-attempt-limit`, step boundaries (optional), success and failure; **run-id**, **attempt**, and **step** context for remediation; tests on human output.
-- [ ] T026: Define **schema_version** + **event kind** constants and typed event payloads (`run_start`, `run_resume`, `step_skip`, `step_start`, `step_done`, `retry`, `run_failed`, `run_completed`, `flag_notice`); central **emit** API used by runner and `kirarun.Do` hooks (no ad-hoc `fmt` scattered without going through events).
-- [ ] T027: **Human** renderer: stderr, stable prefix, `key=value` style aligned with PRD samples; distinct from workflow `ctx.Log`.
-- [ ] T028: New run and `--resume`: emit `run_start` / `run_resume` with workflow identity, run-id, attempt, and on resume completed-step summary.
-- [ ] T029: Idempotent skip: emit `step_skip` from `kirarun.Do` when the step body is not re-run.
-- [ ] T030: Optional `step_start` / `step_done`; `run_failed` / `run_completed` with run-id; `--auto-retry` emits `retry` + failure context as specified; `--ignore-attempt-limit` emits `flag_notice`.
-- [ ] T031: Integration or CLI tests capture stderr and assert key substrings / event order for new run, resume+skip, and retry paths.
+- [x] T026: Define **schema_version** + **event kind** constants and typed event payloads (`run_start`, `run_resume`, `step_skip`, `step_start`, `step_done`, `retry`, `run_failed`, `run_completed`, `flag_notice`); central **emit** API used by runner and `kirarun.Do` hooks (no ad-hoc `fmt` scattered without going through events).
+- [x] T027: **Human** renderer: stderr, stable prefix, `key=value` style aligned with PRD samples; distinct from workflow `ctx.Log`.
+- [x] T028: New run and `--resume`: emit `run_start` / `run_resume` with workflow identity, run-id, attempt, and on resume completed-step summary.
+- [x] T029: Idempotent skip: emit `step_skip` from `kirarun.Do` when the step body is not re-run.
+- [x] T030: Optional `step_start` / `step_done`; `run_failed` / `run_completed` with run-id; `--auto-retry` emits `retry` + failure context as specified; `--ignore-attempt-limit` emits `flag_notice`.
+- [x] T031: Integration or CLI tests capture stderr and assert key substrings / event order for new run, resume+skip, and retry paths.
 
 ### 9. Run progress JSONL (`--run-events`)
 Commit: **`--run-events <path>`** writes **JSONL** from the **same** event pipeline as slice 8; **JSONL contract** in Requirements; truncate file per invocation; tests validate JSON lines and parity with human-visible sequence for a representative workflow.

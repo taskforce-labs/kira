@@ -14,11 +14,18 @@ type Step struct {
 	persister StepPersister
 	run       RunHandle
 	ctx       StepContext
+	progress  *StepProgress
 }
 
 // NewStep builds a Step bound to persistence and the current attempt counter.
-func NewStep(persister StepPersister, run RunHandle) *Step {
-	return &Step{persister: persister, run: run}
+func NewStep(persister StepPersister, run RunHandle, opts ...StepOption) *Step {
+	s := &Step{persister: persister, run: run}
+	for _, o := range opts {
+		if o != nil {
+			o(s)
+		}
+	}
+	return s
 }
 
 // Do runs fn once per successful completion for name, persisting JSON object output.
@@ -35,6 +42,9 @@ func Do[T any](s *Step, name string, fn func(StepContext) (T, error)) (T, error)
 		return zero, fmt.Errorf("Do(%q): no persister configured", name)
 	}
 	if raw, ok := s.persister.GetStepData(name); ok {
+		if s.progress != nil && s.progress.StepSkipped != nil {
+			s.progress.StepSkipped(name, "already_completed")
+		}
 		out, err := decodeStepData[T](name, raw)
 		if err != nil {
 			return zero, err
@@ -42,6 +52,9 @@ func Do[T any](s *Step, name string, fn func(StepContext) (T, error)) (T, error)
 		return out, nil
 	}
 
+	if s.progress != nil && s.progress.StepStarted != nil {
+		s.progress.StepStarted(name)
+	}
 	started := time.Now().UTC()
 	out, err := fn(s.ctx)
 	if err != nil {
@@ -54,6 +67,9 @@ func Do[T any](s *Step, name string, fn func(StepContext) (T, error)) (T, error)
 	}
 	if err := s.persister.PutStep(name, s.run.Attempt(), started, finished, data); err != nil {
 		return zero, fmt.Errorf("Do(%q): persist: %w", name, err)
+	}
+	if s.progress != nil && s.progress.StepDone != nil {
+		s.progress.StepDone(name)
 	}
 	return out, nil
 }

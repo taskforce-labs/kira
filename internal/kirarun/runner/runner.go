@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"kira/internal/kirarun/runevents"
 	"kira/internal/kirarun/session"
 	"kira/internal/kirarun/steppersist"
 	"kira/internal/kirarun/yaegi"
@@ -27,6 +28,7 @@ type Config struct {
 	// ScriptDisplayName overrides the basename used in DeriveRunID (optional).
 	ScriptDisplayName string
 	Stdout            io.Writer
+	Stderr            io.Writer
 	// InterpArgs is passed to the Yaegi interpreter as os.Args for the workflow.
 	InterpArgs []string
 }
@@ -36,6 +38,20 @@ func (c *Config) stdout() io.Writer {
 		return c.Stdout
 	}
 	return os.Stdout
+}
+
+func (c *Config) stderr() io.Writer {
+	if c != nil && c.Stderr != nil {
+		return c.Stderr
+	}
+	return os.Stderr
+}
+
+func (c *Config) workflowLabel(wfAbs string) string {
+	if c != nil && c.ScriptDisplayName != "" {
+		return c.ScriptDisplayName
+	}
+	return wfAbs
 }
 
 // Execute loads the workflow, manages the session file, and invokes Run until success, fatal error, or ctx done.
@@ -94,7 +110,10 @@ func (c *Config) Execute(ctx context.Context) (runID string, err error) {
 		return runID, err
 	}
 
-	return c.runLoop(ctx, i, root, sessPath, sess, cliResume)
+	bus := runevents.NewBus()
+	bus.AddSink(runevents.NewHumanSink(c.stderr()))
+
+	return c.runLoop(ctx, i, root, sessPath, sess, cliResume, bus, c.workflowLabel(wfAbs))
 }
 
 func (c *Config) loadSession(cliResume bool, sessPath, wfAbs, runID string) (*session.Session, error) {
@@ -122,11 +141,21 @@ func (c *Config) runLoop(
 	root, sessPath string,
 	sess *session.Session,
 	cliResume bool,
+	bus *runevents.Bus,
+	workflow string,
 ) (string, error) {
 	runID := sess.RunID
+	loop := 0
 	for {
+		loop++
 		select {
 		case <-ctx.Done():
+			bus.Emit(runevents.Event{
+				Event:   runevents.KindRunFailed,
+				RunID:   runID,
+				Attempt: sess.Attempt,
+				Error:   ctx.Err().Error(),
+			})
 			return runID, ctx.Err()
 		default:
 		}
@@ -135,12 +164,72 @@ func (c *Config) runLoop(
 			return runID, err
 		}
 
+		if c.IgnoreAttemptLimit && loop == 1 {
+			bus.Emit(runevents.Event{Event: runevents.KindFlagNotice, Flag: "ignore_attempt_limit"})
+		}
+		if loop == 1 {
+			if cliResume {
+				n, names := completedStepSummary(sess.Steps)
+				bus.Emit(runevents.Event{
+					Event:          runevents.KindRunResume,
+					RunID:          runID,
+					Attempt:        sess.Attempt,
+					Workflow:       workflow,
+					Completed:      n,
+					CompletedSteps: names,
+				})
+			} else {
+				bus.Emit(runevents.Event{
+					Event:    runevents.KindRunStart,
+					RunID:    runID,
+					Attempt:  sess.Attempt,
+					Workflow: workflow,
+				})
+			}
+		} else if c.AutoRetry {
+			bus.Emit(runevents.Event{
+				Event:   runevents.KindRetry,
+				RunID:   runID,
+				Attempt: sess.Attempt,
+			})
+		}
+
 		runHandle := kirarun.NewRunHandle(sess.Attempt, cliResume, c.IgnoreAttemptLimit)
 		pers := steppersist.NewSessionAdapter(sess)
-		step := kirarun.NewStep(pers, runHandle)
+		prog := &kirarun.StepProgress{
+			StepSkipped: func(name, reason string) {
+				bus.Emit(runevents.Event{
+					Event:    runevents.KindStepSkip,
+					RunID:    runID,
+					Attempt:  sess.Attempt,
+					Workflow: workflow,
+					Step:     name,
+					Reason:   reason,
+				})
+			},
+			StepStarted: func(name string) {
+				bus.Emit(runevents.Event{
+					Event:    runevents.KindStepStart,
+					RunID:    runID,
+					Attempt:  sess.Attempt,
+					Workflow: workflow,
+					Step:     name,
+				})
+			},
+			StepDone: func(name string) {
+				bus.Emit(runevents.Event{
+					Event:    runevents.KindStepDone,
+					RunID:    runID,
+					Attempt:  sess.Attempt,
+					Workflow: workflow,
+					Step:     name,
+				})
+			},
+		}
+		step := kirarun.NewStep(pers, runHandle, kirarun.WithStepProgress(prog))
 		kctx := &kirarun.Context{
 			Workspace: kirarun.NewWorkspace(root),
-			Log:       kirarun.NewLogger(os.Stderr),
+			Log:       kirarun.NewLogger(c.stderr()),
 			Run:       runHandle,
 		}
 
@@ -149,11 +238,19 @@ func (c *Config) runLoop(
 		finished := time.Now().UTC()
 
 		if runErr == nil {
+			bus.Emit(runevents.Event{Event: runevents.KindRunCompleted, RunID: runID})
 			if err := session.Remove(sessPath); err != nil {
 				return runID, err
 			}
 			return runID, nil
 		}
+
+		bus.Emit(runevents.Event{
+			Event:   runevents.KindRunFailed,
+			RunID:   runID,
+			Attempt: sess.Attempt,
+			Error:   runErr.Error(),
+		})
 
 		sess.Attempts = append(sess.Attempts, session.AttemptRecord{
 			Attempt:   sess.Attempt,
@@ -176,6 +273,17 @@ func (c *Config) runLoop(
 			return runID, fmt.Errorf("%w (also failed to save session: %v)", runErr, saveErr)
 		}
 	}
+}
+
+func completedStepSummary(steps []session.StepRecord) (int, []string) {
+	if len(steps) == 0 {
+		return 0, nil
+	}
+	names := make([]string, 0, len(steps))
+	for _, st := range steps {
+		names = append(names, st.Name)
+	}
+	return len(names), names
 }
 
 func (c *Config) resolveRunID(wfAbs string) (string, error) {
