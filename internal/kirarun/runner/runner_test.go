@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"kira/internal/kirarun/runevents"
 	"kira/internal/kirarun/session"
 )
 
@@ -212,4 +214,91 @@ func TestHumanOutputIgnoreAttemptLimitNotice(t *testing.T) {
 	iStart := strings.Index(s, "[kira-run] starting")
 	require.GreaterOrEqual(t, iNotice, 0)
 	require.Greater(t, iStart, iNotice)
+}
+
+func TestJSONLProgressThreeStep(t *testing.T) {
+	root := t.TempDir()
+	eventsFile := filepath.Join(root, "events.jsonl")
+	wf := filepath.Join("testdata", "threestep.go")
+	absWF, err := filepath.Abs(wf)
+	require.NoError(t, err)
+
+	var stdout, stderr bytes.Buffer
+	cfg := &Config{
+		ProjectRoot:       root,
+		WorkflowPath:      absWF,
+		KiraVersion:       "test",
+		Stdout:            &stdout,
+		Stderr:            &stderr,
+		RunEventsPath:     eventsFile,
+		ScriptDisplayName: "threestep",
+	}
+	_, err = cfg.Execute(context.Background())
+	require.NoError(t, err)
+
+	raw, err := os.ReadFile(eventsFile) // #nosec G304 -- test reads JSONL it just wrote under t.TempDir
+	require.NoError(t, err)
+	lines := nonEmptyLines(raw)
+	require.NotEmpty(t, lines)
+
+	var kinds []string
+	var runID string
+	for _, line := range lines {
+		var ev runevents.Event
+		require.NoError(t, json.Unmarshal(line, &ev))
+		require.Equal(t, runevents.SchemaVersion, ev.SchemaVersion)
+		require.Equal(t, runevents.SourceRunner, ev.Source)
+		require.NotEmpty(t, ev.Event)
+		require.NotEmpty(t, ev.Ts)
+		if ev.RunID != "" {
+			if runID == "" {
+				runID = ev.RunID
+			} else {
+				require.Equal(t, runID, ev.RunID, "event=%s", ev.Event)
+			}
+		}
+		kinds = append(kinds, ev.Event)
+	}
+	require.NotEmpty(t, runID)
+	require.Equal(t, runevents.KindRunStart, kinds[0])
+	require.Equal(t, runevents.KindRunCompleted, kinds[len(kinds)-1])
+	require.Contains(t, kinds, runevents.KindStepStart)
+	require.Contains(t, kinds, runevents.KindStepDone)
+}
+
+func TestHumanAndJSONLSameEventCount(t *testing.T) {
+	root := t.TempDir()
+	eventsFile := filepath.Join(root, "events.jsonl")
+	wf := filepath.Join("testdata", "threestep.go")
+	absWF, err := filepath.Abs(wf)
+	require.NoError(t, err)
+
+	var stdout, stderr bytes.Buffer
+	cfg := &Config{
+		ProjectRoot:       root,
+		WorkflowPath:      absWF,
+		KiraVersion:       "test",
+		Stdout:            &stdout,
+		Stderr:            &stderr,
+		RunEventsPath:     eventsFile,
+		ScriptDisplayName: "threestep",
+	}
+	_, err = cfg.Execute(context.Background())
+	require.NoError(t, err)
+
+	raw, err := os.ReadFile(eventsFile) // #nosec G304 -- test reads JSONL it just wrote under t.TempDir
+	require.NoError(t, err)
+	jsonCount := len(nonEmptyLines(raw))
+	humanCount := strings.Count(stderr.String(), "[kira-run]")
+	require.Equal(t, jsonCount, humanCount)
+}
+
+func nonEmptyLines(data []byte) [][]byte {
+	var out [][]byte
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(bytes.TrimSpace(line)) > 0 {
+			out = append(out, line)
+		}
+	}
+	return out
 }

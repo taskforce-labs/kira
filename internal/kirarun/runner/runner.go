@@ -1,11 +1,13 @@
 package runner
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"kira/internal/kirarun/runevents"
@@ -29,6 +31,7 @@ type Config struct {
 	ScriptDisplayName string
 	Stdout            io.Writer
 	Stderr            io.Writer
+	RunEventsPath     string
 	// InterpArgs is passed to the Yaegi interpreter as os.Args for the workflow.
 	InterpArgs []string
 }
@@ -112,6 +115,20 @@ func (c *Config) Execute(ctx context.Context) (runID string, err error) {
 
 	bus := runevents.NewBus()
 	bus.AddSink(runevents.NewHumanSink(c.stderr()))
+
+	if path := strings.TrimSpace(c.RunEventsPath); path != "" {
+		// #nosec G304 -- path is operator-chosen artifact location for JSONL progress
+		f, oerr := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		if oerr != nil {
+			return "", fmt.Errorf("run-events: %w", oerr)
+		}
+		bw := bufio.NewWriter(f)
+		defer func() {
+			_ = bw.Flush()
+			_ = f.Close()
+		}()
+		bus.AddSink(runevents.NewJSONLSink(bw))
+	}
 
 	return c.runLoop(ctx, i, root, sessPath, sess, cliResume, bus, c.workflowLabel(wfAbs))
 }
