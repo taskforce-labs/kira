@@ -381,8 +381,8 @@ func Run(ctx *kirarun.Context, step *kirarun.Step, _ kirarun.Agents) error {
 - [x] Step data unmarshal: `kirarun.UnmarshalStepData` / `UnmarshalStepDataAs` implemented and covered by tests; Yaegi export includes `UnmarshalStepData`; `.workflows/hello_world.go` uses it (slice 7).
 - [x] Operator-visible **run progress output** matches **Run progress output (operator-facing)** in Requirements: internal **event** pipeline with **human** renderer on stderr; new run, resume, skipped steps, optional step start/finish, `--auto-retry` iterations, `--ignore-attempt-limit` notice, and successful completion; runner lines distinguishable from workflow `ctx.Log` output; messages include enough **run-id**, **attempt**, and **step** context for humans and LLM assistants to diagnose failures and choose remediation (e.g. `--resume`).
 - [x] Tests or integration checks assert the presence (or content) of key **human** progress lines so regressions are caught without manual terminal inspection.
-- [ ] **`--run-events <path>`** writes **JSONL** per **JSONL contract** (schema version, event kinds, required common fields); each runner progress event appears as one JSON line; file truncated at invocation start; tests load and assert selected lines with `encoding/json` (or document `jq` in a script).
-- [ ] **Human** and **JSONL** outputs for the same run are **semantically aligned** (same event sequence and payloads — no duplicate sources of truth).
+- [x] **`--run-events <path>`** writes **JSONL** per **JSONL contract** (schema version, event kinds, required common fields); each runner progress event appears as one JSON line; file truncated at invocation start; tests load and assert selected lines with `encoding/json` (or document `jq` in a script).
+- [x] **Human** and **JSONL** outputs for the same run are **semantically aligned** (same event sequence and payloads — no duplicate sources of truth).
 
 ## Slices
 
@@ -443,9 +443,9 @@ Commit: Versioned **runner event** types and a single emission path; **human** s
 
 ### 9. Run progress JSONL (`--run-events`)
 Commit: **`--run-events <path>`** writes **JSONL** from the **same** event pipeline as slice 8; **JSONL contract** in Requirements; truncate file per invocation; tests validate JSON lines and parity with human-visible sequence for a representative workflow.
-- [ ] T032: Wire Cobra flag `--run-events` (path); open/truncate file at run start; register JSONL **sink** alongside human renderer on the shared emit path.
-- [ ] T033: Serialize each emitted event to one JSON line (`encoding/json`), flush per line; include `schema_version`, `event`, `ts`, `source`, and event-specific fields per PRD.
-- [ ] T034: Tests: parse JSONL output for a short workflow (new run + at least one step); assert `schema_version`, `event` kinds, and `run_id` consistency; optional assertion that human + JSONL runs share the same event count/order in a controlled scenario.
+- [x] T032: Wire Cobra flag `--run-events` (path); open/truncate file at run start; register JSONL **sink** alongside human renderer on the shared emit path.
+- [x] T033: Serialize each emitted event to one JSON line (`encoding/json`), flush per line; include `schema_version`, `event`, `ts`, `source`, and event-specific fields per PRD.
+- [x] T034: Tests: parse JSONL output for a short workflow (new run + at least one step); assert `schema_version`, `event` kinds, and `run_id` consistency; optional assertion that human + JSONL runs share the same event count/order in a controlled scenario.
 
 ## Implementation Notes
 

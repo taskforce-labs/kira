@@ -26,7 +26,8 @@ relative to the project root, or a path to a .go file under the configured workf
 Flags:
   --resume             Continue a previous run (session file must exist)
   --auto-retry         Retry until success or SIGINT (same run id)
-  --ignore-attempt-limit  Sets ctx.Run.IgnoreAttemptLimit() for this process only`,
+  --ignore-attempt-limit  Sets ctx.Run.IgnoreAttemptLimit() for this process only
+  --run-events         Write runner progress as JSON Lines to a file (truncated each invocation)`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runRun,
 }
@@ -35,6 +36,7 @@ func init() {
 	runCmd.Flags().String("resume", "", "Run id to resume (matches .workflows/sessions/<id>.yml)")
 	runCmd.Flags().Bool("auto-retry", false, "Retry until Run succeeds or the process is interrupted")
 	runCmd.Flags().Bool("ignore-attempt-limit", false, "Workflow may treat attempt limits as non-fatal for this invocation")
+	runCmd.Flags().String("run-events", "", "Write runner progress events as JSON Lines to this path (file is truncated at the start of each invocation)")
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -58,6 +60,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	runEventsPath, err := cmd.Flags().GetString("run-events")
+	if err != nil {
+		return err
+	}
+
 	wfPath, displayName, err := workflow.Resolve(cfg, args[0])
 	if err != nil {
 		return err
@@ -77,6 +84,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		IgnoreAttemptLimit: ignoreLimit,
 		ScriptDisplayName:  displayName,
 		Stdout:             os.Stdout,
+		RunEventsPath:      runEventsPath,
 		InterpArgs:         interpArgs,
 	}
 
