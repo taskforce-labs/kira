@@ -24,6 +24,7 @@ This will enable [product dev loop triggers](.work/2_doing/024-product-dev-loop-
 - `--resume <run-id>` — continue a run; required when a session file already exists (runner fails fast otherwise). Exception: `--auto-retry` may reuse the same run id in one process without an extra `--resume`.
 - `--auto-retry` — loop until `Run` returns nil or the user interrupts; same run id; each loop iteration bumps attempt (written before `Run`).
 - `--ignore-attempt-limit` — this invocation only: do not treat the script’s own attempt cap as fatal (e.g. after `maxAttempts`); exposed on context (e.g. `ctx.Run.IgnoreAttemptLimit()`) so `Run` can skip an `Attempt() > maxAttempts` early return. The persisted attempt counter is unchanged.
+- `--run-events <path>` — optional: write **runner progress** as **JSON Lines** (JSONL, UTF-8) to `path` — one JSON object per line, same **event vocabulary** as human stderr output (see **Run progress output**). Truncate (or recreate) the file at the **start of this process’s** run so each file corresponds to one invocation; flush after each line where practical so CI and tail can stream. **Human lines on stderr remain the default** when this flag is set unless a future `--quiet-runner` (or similar) is introduced elsewhere; dual output is intentional for local debugging plus machine consumption.
 - **New run id:** when not using `--resume`, the runner derives `run-id` as `<script-name>-<timestamp>` (script name from the resolved workflow identity, e.g. mapped name or script basename without extension), prints it (so the user can `--resume` later), and uses the same value for the session filename `.workflows/sessions/<run-id>.yml`. If a session file for that id already exists, fail fast with a clear error (treat rare random-id collisions like any other existing session).
 
 **Script**
@@ -80,6 +81,88 @@ steps:
 
 - Concurrent runs for the same run id: lock session (or sibling lock) and fail fast if busy.
 
+**Run progress output (operator-facing)**
+
+**Intent:** The runner should emit enough **structured context** in plain language that **people** and **LLM assistants** can understand what happened, why a run stopped, and how to **remediate** (e.g. which **run-id** to pass to `--resume`, which **step** failed or was skipped, which **attempt** this was, whether **auto-retry** or **ignore-attempt-limit** changed behavior). Progress lines complement workflow `ctx.Log.*` and session YAML: they are the fastest path from a failed CI job or local terminal to a correct next command.
+
+**Event model and dual renderers:** The implementation maintains a single **versioned event stream** in code (e.g. typed structs or a small sum type per **event kind**). Every normative **event** below is emitted once through that pipeline, then rendered as:
+
+1. **Human** — concise lines on **stderr** (default), with a stable prefix (e.g. `[kira-run]`) and `key=value` fragments where helpful.
+2. **JSONL** — optional via **`--run-events <path>`**: each event serializes to **one JSON object per line** (newline-delimited). **Human wording and JSON field names both derive from the same event values** so semantics cannot drift.
+
+**JSONL contract:**
+
+- Every line is a single JSON object with at least: **`schema_version`** (integer, start at `1`), **`event`** (string event kind), **`ts`** (RFC3339 UTC timestamp), **`source`** (`"runner"`), and **`run_id`** when known (omit or null only before the first run id is allocated, if such a state exists in code).
+- Include **`attempt`**, **`workflow`** (resolved path or logical name), **`step`** (step name), **`reason`**, **`flag`**, **`error`** (string message for failures), etc., **when applicable** — match the human event’s payload.
+- **Event kinds** (normative names; use these exact strings in JSON `event` for tooling): `run_start`, `run_resume`, `step_skip`, `step_start`, `step_done`, `retry`, `run_failed`, `run_completed`, `flag_notice` (extend only with a schema version bump and documentation).
+- **Workflow stdout** stays reserved for the script; **do not** write JSONL to stdout by default (file path keeps piping and CI artifacts simple).
+
+The runner prints a concise, human-readable trace of what it is doing so operators can follow a run in the terminal without opening the session file. Output is **runner-owned** (distinct from workflow `ctx.Log.*` lines); use a consistent prefix or channel (e.g. stderr) so script logs and runner lines are easy to tell apart. Exact **human** phrasing may evolve; **event kinds** and **JSON field names** are the stable contract for tools. **Sample output** below is **illustrative only** for human lines; **sample JSONL** shows shape, not exhaustive fields.
+
+- **New run:** Before invoking `Run`, print that a new run is **starting**, the **resolved workflow** (path or mapped name as used for resolution), the **run-id**, and the **attempt** about to be used (written to the session before entry). If the implementation prints the run-id elsewhere, avoid duplicate noise in the same line set (one clear “start” message is enough).
+- **Resume (`--resume`):** Print that the run is **resuming**, the **run-id**, the **attempt** read from the session for this entry, and a short summary of **already-completed steps** (e.g. count and/or names) when that information is available without heavy parsing.
+- **Skipped step (idempotent `kirarun.Do`):** When the host skips a step because it already completed for this run, print that the step was **skipped** (step **name**), and that the body was not re-executed (resume/cache semantics). One line per skip is sufficient.
+- **Step execution (optional but recommended):** When a step is **not** skipped, print **starting** the step (name) and **finished** the step (name) on success; on step failure, print failure in line with existing error reporting (step-scoped message, non-zero exit).
+- **`--auto-retry`:** Before each loop iteration, print that a **retry** is starting (same run-id), the **attempt** being applied for this iteration (bumped per PRD before each `Run`), and optionally the outcome of the previous iteration when useful (e.g. “attempt N failed: …” at warn level).
+- **`--ignore-attempt-limit`:** Print once per invocation that the flag is **active** (script may bypass `maxAttempts`-style guards; persisted attempt unchanged), so operators are not surprised by extra attempts.
+- **Successful completion:** Print that the run **completed successfully** and the run-id (and that the session file was removed, if that helps operators). **Non-zero exit** paths already surface errors; runner lines should still identify run-id and attempt where relevant.
+
+**Sample output (illustrative — not fixed copy)**
+
+Prefix and wording are examples; the **events** and **fields** (run-id, attempt, step names, flags) are what matter for humans and tooling.
+
+_New run, three steps, success:_
+
+```text
+[kira-run] starting workflow=.workflows/hello_world.go run-id=hello_world-20060102150405 attempt=1
+[kira-run] step start name=get_greeting
+[kira-run] step done name=get_greeting
+[kira-run] step start name=construct_greeting
+[kira-run] step done name=construct_greeting
+[kira-run] step start name=say_greeting
+[kira-run] step done name=say_greeting
+[kira-run] run completed ok run-id=hello_world-20060102150405 (session removed)
+```
+
+_Resume after partial progress (first two steps cached):_
+
+```text
+[kira-run] resuming run-id=hello_world-20060102150405 attempt=1 completed=2 (get_greeting, construct_greeting)
+[kira-run] step skip name=get_greeting reason=already_completed
+[kira-run] step skip name=construct_greeting reason=already_completed
+[kira-run] step start name=say_greeting
+[kira-run] step done name=say_greeting
+[kira-run] run completed ok run-id=hello_world-20060102150405 (session removed)
+```
+
+_`--auto-retry` after a failure (attempt bumps each iteration):_
+
+```text
+[kira-run] starting workflow=foo_bar run-id=foo_bar-20060102150406 attempt=1
+[kira-run] step start name=fetch
+[kira-run] run failed run-id=foo_bar-20060102150406 attempt=1 error=…
+[kira-run] retry run-id=foo_bar-20060102150406 attempt=2
+[kira-run] step start name=fetch
+[kira-run] step done name=fetch
+[kira-run] run completed ok run-id=foo_bar-20060102150406 (session removed)
+```
+
+_`--ignore-attempt-limit` (one notice; script may continue past a local maxAttempts guard):_
+
+```text
+[kira-run] notice flag=ignore_attempt_limit (persisted attempt unchanged; script may bypass attempt cap)
+```
+
+**Sample JSONL (illustrative — one object per line)**
+
+Same run as the “new run, three steps” example above; field sets vary by `event`.
+
+```text
+{"schema_version":1,"source":"runner","event":"run_start","ts":"2006-01-02T15:04:05Z","run_id":"hello_world-20060102150405","attempt":1,"workflow":".workflows/hello_world.go"}
+{"schema_version":1,"source":"runner","event":"step_start","ts":"2006-01-02T15:04:05Z","run_id":"hello_world-20060102150405","attempt":1,"step":"get_greeting"}
+{"schema_version":1,"source":"runner","event":"step_done","ts":"2006-01-02T15:04:05Z","run_id":"hello_world-20060102150405","attempt":1,"step":"get_greeting"}
+```
+
 ## Invoking
 
 ```bash
@@ -87,6 +170,9 @@ kira run hello_world
 kira run .workflows/hello_world.go
 
 # new runs print a derived run-id (<script-name>-<timestamp>) for later resume
+# runner also prints start/resume, skipped steps, retries, and completion per **Run progress output**
+# optional JSONL mirror for CI / jq / LLM tooling
+kira run hello_world --run-events /tmp/hello_world.events.jsonl
 # resume
 kira run foo_bar --resume run-abc123
 kira run .workflows/foo_bar.go --resume run-abc123
@@ -293,6 +379,10 @@ func Run(ctx *kirarun.Context, step *kirarun.Step, _ kirarun.Agents) error {
 - [x] Concurrent same-run-id execution is guarded.
 - [x] `make check` passes.
 - [x] Step data unmarshal: `kirarun.UnmarshalStepData` / `UnmarshalStepDataAs` implemented and covered by tests; Yaegi export includes `UnmarshalStepData`; `.workflows/hello_world.go` uses it (slice 7).
+- [ ] Operator-visible **run progress output** matches **Run progress output (operator-facing)** in Requirements: internal **event** pipeline with **human** renderer on stderr; new run, resume, skipped steps, optional step start/finish, `--auto-retry` iterations, `--ignore-attempt-limit` notice, and successful completion; runner lines distinguishable from workflow `ctx.Log` output; messages include enough **run-id**, **attempt**, and **step** context for humans and LLM assistants to diagnose failures and choose remediation (e.g. `--resume`).
+- [ ] Tests or integration checks assert the presence (or content) of key **human** progress lines so regressions are caught without manual terminal inspection.
+- [ ] **`--run-events <path>`** writes **JSONL** per **JSONL contract** (schema version, event kinds, required common fields); each runner progress event appears as one JSON line; file truncated at invocation start; tests load and assert selected lines with `encoding/json` (or document `jq` in a script).
+- [ ] **Human** and **JSONL** outputs for the same run are **semantically aligned** (same event sequence and payloads — no duplicate sources of truth).
 
 ## Slices
 
@@ -342,6 +432,21 @@ Commit: First-class `kirarun` helpers for turning `Do[any]` results into typed s
 - [x] T024: Register `UnmarshalStepData` in `internal/kirarun/yaegi/exports.go` (`UnmarshalStepDataAs` compiled-only unless Yaegi gains reliable generic calls); extend validation/tests if the symbol surface is asserted anywhere.
 - [x] T025: Update `.workflows/hello_world.go` to use `UnmarshalStepData`; remove the local `jsonRoundTrip` helper; ensure `kira run` / resume still passes existing integration coverage.
 
+### 8. Run progress output — event pipeline and human renderer
+Commit: Versioned **runner event** types and a single emission path; **human** stderr formatting for starting a run, resuming, skipping completed steps, auto-retry iterations, `--ignore-attempt-limit`, step boundaries (optional), success and failure; **run-id**, **attempt**, and **step** context for remediation; tests on human output.
+- [ ] T026: Define **schema_version** + **event kind** constants and typed event payloads (`run_start`, `run_resume`, `step_skip`, `step_start`, `step_done`, `retry`, `run_failed`, `run_completed`, `flag_notice`); central **emit** API used by runner and `kirarun.Do` hooks (no ad-hoc `fmt` scattered without going through events).
+- [ ] T027: **Human** renderer: stderr, stable prefix, `key=value` style aligned with PRD samples; distinct from workflow `ctx.Log`.
+- [ ] T028: New run and `--resume`: emit `run_start` / `run_resume` with workflow identity, run-id, attempt, and on resume completed-step summary.
+- [ ] T029: Idempotent skip: emit `step_skip` from `kirarun.Do` when the step body is not re-run.
+- [ ] T030: Optional `step_start` / `step_done`; `run_failed` / `run_completed` with run-id; `--auto-retry` emits `retry` + failure context as specified; `--ignore-attempt-limit` emits `flag_notice`.
+- [ ] T031: Integration or CLI tests capture stderr and assert key substrings / event order for new run, resume+skip, and retry paths.
+
+### 9. Run progress JSONL (`--run-events`)
+Commit: **`--run-events <path>`** writes **JSONL** from the **same** event pipeline as slice 8; **JSONL contract** in Requirements; truncate file per invocation; tests validate JSON lines and parity with human-visible sequence for a representative workflow.
+- [ ] T032: Wire Cobra flag `--run-events` (path); open/truncate file at run start; register JSONL **sink** alongside human renderer on the shared emit path.
+- [ ] T033: Serialize each emitted event to one JSON line (`encoding/json`), flush per line; include `schema_version`, `event`, `ts`, `source`, and event-specific fields per PRD.
+- [ ] T034: Tests: parse JSONL output for a short workflow (new run + at least one step); assert `schema_version`, `event` kinds, and `run_id` consistency; optional assertion that human + JSONL runs share the same event count/order in a controlled scenario.
+
 ## Implementation Notes
 
 - Step typing and Yaegi vs compiled behavior are specified once under **Requirements → Script → Step outputs**; avoid duplicating that narrative here.
@@ -349,5 +454,6 @@ Commit: First-class `kirarun` helpers for turning `Do[any]` results into typed s
 - Document `--ignore-attempt-limit` vs persisted attempt counter (flag is advisory for script guards, not a counter override).
 - Session YAML: follow **Session file format (YAML)** in Requirements; pin exact timestamp formats and error object shapes in code/tests.
 - Run id for new runs: `<script-name>-<UTC-timestamp>` (second precision, e.g. `hello-20060102150405`). `--ignore-attempt-limit` does not change the persisted `attempt` counter in the session file; scripts gate on `ctx.Run.IgnoreAttemptLimit()` locally.
+- **Run progress output:** Implement **slice 8** (events + human) then **slice 9** (JSONL); do not duplicate progress logic outside the shared emit path. **JSON field names** and **`event` strings** are a light API for CI and LLMs — bump **`schema_version`** when removing or renaming fields. Prefer **file-based JSONL** (`--run-events`) over stdout to avoid colliding with workflow output.
 
 ## Release Notes
