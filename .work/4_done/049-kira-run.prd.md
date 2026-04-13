@@ -1,12 +1,16 @@
 ---
 id: 049
 title: kira run
-status: review
+status: done
 kind: prd
-assigned:
+created: 2026-03-24T00:00:00Z
+assigned: null
+due: 2026-03-24T00:00:00Z
 estimate: 0
-created: 2026-03-24
-due: 2026-03-24
+merge_commit_sha: bba0df03190b364ca96a7ea9b0164c452dd3555a
+merge_strategy: rebase
+merged_at: "2026-04-13T11:06:07Z"
+pr_number: 29
 tags: []
 ---
 
