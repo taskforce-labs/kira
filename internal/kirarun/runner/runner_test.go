@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,16 +28,24 @@ func TestExecuteSuccess(t *testing.T) {
 	absWF, err := filepath.Abs(wf)
 	require.NoError(t, err)
 
-	var buf bytes.Buffer
+	var buf, stderr bytes.Buffer
 	cfg := &Config{
 		ProjectRoot:  root,
 		WorkflowPath: absWF,
 		KiraVersion:  "test",
 		Stdout:       &buf,
+		Stderr:       &stderr,
 	}
 	_, err = cfg.Execute(context.Background())
 	require.NoError(t, err)
 	require.Contains(t, buf.String(), "run id:")
+	human := stderr.String()
+	require.Contains(t, human, "[kira-run] starting")
+	require.Contains(t, human, "[kira-run] run completed ok")
+	iStart := strings.Index(human, "[kira-run] starting")
+	iDone := strings.Index(human, "[kira-run] run completed ok")
+	require.GreaterOrEqual(t, iStart, 0)
+	require.Greater(t, iDone, iStart)
 
 	sessionsDir, err := session.SessionsDir(root)
 	require.NoError(t, err)
@@ -51,18 +60,156 @@ func TestExecuteFailNoRetry(t *testing.T) {
 	absWF, err := filepath.Abs(wf)
 	require.NoError(t, err)
 
+	var stderr bytes.Buffer
 	cfg := &Config{
 		ProjectRoot:  root,
 		WorkflowPath: absWF,
 		KiraVersion:  "test",
 		Stdout:       io.Discard,
+		Stderr:       &stderr,
 	}
 	_, err = cfg.Execute(context.Background())
 	require.Error(t, err)
+	require.Contains(t, stderr.String(), "[kira-run] starting")
+	require.Contains(t, stderr.String(), "[kira-run] run failed")
 
 	sessDir, err := session.SessionsDir(root)
 	require.NoError(t, err)
 	entries, err := os.ReadDir(sessDir)
 	require.NoError(t, err)
 	require.NotEmpty(t, entries)
+}
+
+func TestHumanOutputThreeSteps(t *testing.T) {
+	root := t.TempDir()
+	wf := filepath.Join("testdata", "threestep.go")
+	absWF, err := filepath.Abs(wf)
+	require.NoError(t, err)
+
+	var stdout, stderr bytes.Buffer
+	cfg := &Config{
+		ProjectRoot:       root,
+		WorkflowPath:      absWF,
+		KiraVersion:       "test",
+		Stdout:            &stdout,
+		Stderr:            &stderr,
+		ScriptDisplayName: "threestep",
+	}
+	_, err = cfg.Execute(context.Background())
+	require.NoError(t, err)
+
+	s := stderr.String()
+	iStart := strings.Index(s, "[kira-run] starting")
+	iA := strings.Index(s, "step start name=a")
+	iB := strings.Index(s, "step start name=b")
+	iC := strings.Index(s, "step start name=c")
+	iDone := strings.Index(s, "[kira-run] run completed ok")
+	require.Greater(t, iA, iStart)
+	require.Greater(t, iB, iA)
+	require.Greater(t, iC, iB)
+	require.Greater(t, iDone, iC)
+}
+
+func TestHumanOutputResumeSkipsFirstStep(t *testing.T) {
+	root := t.TempDir()
+	wf := filepath.Join("testdata", "resume_twophase.go")
+	absWF, err := filepath.Abs(wf)
+	require.NoError(t, err)
+
+	var stdout1, stderr1 bytes.Buffer
+	cfg1 := &Config{
+		ProjectRoot:       root,
+		WorkflowPath:      absWF,
+		KiraVersion:       "test",
+		Stdout:            &stdout1,
+		Stderr:            &stderr1,
+		ScriptDisplayName: "resume_twophase",
+	}
+	_, err = cfg1.Execute(context.Background())
+	require.Error(t, err)
+	require.Contains(t, stderr1.String(), "[kira-run] run failed")
+
+	const prefix = "run id: "
+	out := stdout1.String()
+	require.True(t, strings.HasPrefix(out, prefix), out)
+	runID := strings.TrimSpace(strings.TrimPrefix(out, prefix))
+
+	marker := filepath.Join(root, ".kira_run_test_phase2")
+	require.NoError(t, os.WriteFile(marker, []byte{}, 0o600))
+
+	var stderr2 bytes.Buffer
+	cfg2 := &Config{
+		ProjectRoot:       root,
+		WorkflowPath:      absWF,
+		KiraVersion:       "test",
+		ResumeID:          runID,
+		Stdout:            io.Discard,
+		Stderr:            &stderr2,
+		ScriptDisplayName: "resume_twophase",
+	}
+	_, err = cfg2.Execute(context.Background())
+	require.NoError(t, err)
+
+	s := stderr2.String()
+	require.Contains(t, s, "[kira-run] resuming")
+	require.Contains(t, s, "step skip name=first")
+	require.Contains(t, s, "reason=already_completed")
+	iSkip := strings.Index(s, "step skip name=first")
+	iSecond := strings.Index(s, "step start name=second")
+	require.Greater(t, iSecond, iSkip)
+	require.Contains(t, s, "[kira-run] run completed ok")
+}
+
+func TestHumanOutputAutoRetry(t *testing.T) {
+	root := t.TempDir()
+	wf := filepath.Join("testdata", "autoretry.go")
+	absWF, err := filepath.Abs(wf)
+	require.NoError(t, err)
+
+	var stdout, stderr bytes.Buffer
+	cfg := &Config{
+		ProjectRoot:       root,
+		WorkflowPath:      absWF,
+		KiraVersion:       "test",
+		AutoRetry:         true,
+		Stdout:            &stdout,
+		Stderr:            &stderr,
+		ScriptDisplayName: "autoretry",
+	}
+	_, err = cfg.Execute(context.Background())
+	require.NoError(t, err)
+
+	s := stderr.String()
+	iStart := strings.Index(s, "[kira-run] starting")
+	iFail := strings.Index(s, "[kira-run] run failed")
+	iRetry := strings.Index(s, "[kira-run] retry")
+	iDone := strings.Index(s, "[kira-run] run completed ok")
+	require.Greater(t, iFail, iStart)
+	require.Greater(t, iRetry, iFail)
+	require.Greater(t, iDone, iRetry)
+}
+
+func TestHumanOutputIgnoreAttemptLimitNotice(t *testing.T) {
+	root := t.TempDir()
+	wf := filepath.Join("testdata", "ok.go")
+	absWF, err := filepath.Abs(wf)
+	require.NoError(t, err)
+
+	var stdout, stderr bytes.Buffer
+	cfg := &Config{
+		ProjectRoot:        root,
+		WorkflowPath:       absWF,
+		KiraVersion:        "test",
+		IgnoreAttemptLimit: true,
+		Stdout:             &stdout,
+		Stderr:             &stderr,
+	}
+	_, err = cfg.Execute(context.Background())
+	require.NoError(t, err)
+
+	s := stderr.String()
+	iNotice := strings.Index(s, "ignore_attempt_limit")
+	iStart := strings.Index(s, "[kira-run] starting")
+	require.GreaterOrEqual(t, iNotice, 0)
+	require.Greater(t, iStart, iNotice)
 }
