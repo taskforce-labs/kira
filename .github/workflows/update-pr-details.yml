@@ -67,14 +67,19 @@ jobs:
       - name: Validate branch name format
         if: github.head_ref != steps.trunk-branch.outputs.trunk
         id: validate-branch
-        continue-on-error: true
         run: |
-          BRANCH=$(./kdev current --slug 2>&1)
+          # stdout only: go run prints module downloads to stderr; merging stderr breaks GITHUB_OUTPUT
+          set +e
+          BRANCH=$(./kdev current --slug)
           EXIT_CODE=$?
+          set -e
           if [ $EXIT_CODE -ne 0 ]; then
-            echo "Branch name does not match kira format, skipping PR update"
-            echo "valid=false" >> $GITHUB_OUTPUT
-            exit 0
+            echo "Error: Branch name does not match kira format or kdev failed (exit $EXIT_CODE)"
+            exit 1
+          fi
+          if [ -z "$BRANCH" ]; then
+            echo "Error: kdev current --slug produced empty output"
+            exit 1
           fi
           echo "Branch: $BRANCH"
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
@@ -83,36 +88,33 @@ jobs:
       - name: Get PR title
         if: steps.validate-branch.outputs.valid == 'true'
         id: pr-title
-        continue-on-error: true
         run: |
-          TITLE=$(./kdev current --title 2>&1)
+          set +e
+          TITLE=$(./kdev current --title)
           EXIT_CODE=$?
+          set -e
           if [ $EXIT_CODE -ne 0 ]; then
-            echo "Work item not found or invalid branch name, skipping PR update"
-            echo "title=" >> $GITHUB_OUTPUT
-            echo "skip=true" >> $GITHUB_OUTPUT
-            exit 0
+            echo "Error: Work item not found, invalid branch name, or kdev failed (exit $EXIT_CODE)"
+            exit 1
           fi
           DELIMITER=$(openssl rand -hex 16)
           echo "title<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$TITLE" >> $GITHUB_OUTPUT
           echo "$DELIMITER" >> $GITHUB_OUTPUT
-          echo "skip=false" >> $GITHUB_OUTPUT
 
       - name: Get PR body
         id: pr-body
-        if: steps.validate-branch.outputs.valid == 'true' && steps.pr-title.outputs.skip != 'true'
+        if: steps.validate-branch.outputs.valid == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
         run: |
-          BODY=$(./kdev current --body 2>&1)
+          set +e
+          BODY=$(./kdev current --body)
           EXIT_CODE=$?
+          set -e
           if [ $EXIT_CODE -ne 0 ]; then
-            echo "Work item not found or invalid branch name, skipping PR update"
-            echo "body=" >> $GITHUB_OUTPUT
-            echo "skip=true" >> $GITHUB_OUTPUT
-            exit 0
+            echo "Error: Work item not found, invalid branch name, or kdev failed (exit $EXIT_CODE)"
+            exit 1
           fi
           # Check PR body size limit (~65KB)
           BODY_SIZE=$(echo "$BODY" | wc -c)
@@ -125,22 +127,24 @@ jobs:
           echo "body<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$BODY" >> $GITHUB_OUTPUT
           echo "$DELIMITER" >> $GITHUB_OUTPUT
-          echo "skip=false" >> $GITHUB_OUTPUT
 
       - name: Get related PRs
         id: prs
-        if: steps.validate-branch.outputs.valid == 'true' && steps.pr-title.outputs.skip != 'true' && steps.pr-body.outputs.skip != 'true'
+        if: steps.validate-branch.outputs.valid == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
         run: |
-          PRS=$(./kdev current prs 2>&1)
+          set +e
+          PRS=$(./kdev current prs)
           EXIT_CODE=$?
-          if [ $EXIT_CODE -ne 0 ] || [ -z "$PRS" ] || [ "$PRS" = "[]" ]; then
-            echo "No PRs found or error getting PR list, skipping PR update"
-            echo "prs=[]" >> $GITHUB_OUTPUT
-            echo "skip=true" >> $GITHUB_OUTPUT
-            exit 0
+          set -e
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "Error: kdev current prs failed (exit $EXIT_CODE)"
+            exit 1
+          fi
+          if [ -z "$PRS" ] || [ "$PRS" = "[]" ]; then
+            echo "Error: No related PRs found (empty list). Ensure an open PR exists for this branch."
+            exit 1
           fi
           # Validate JSON structure
           if ! echo "$PRS" | jq empty 2>/dev/null; then
@@ -151,10 +155,9 @@ jobs:
           echo "prs<<$DELIMITER" >> $GITHUB_OUTPUT
           echo "$PRS" >> $GITHUB_OUTPUT
           echo "$DELIMITER" >> $GITHUB_OUTPUT
-          echo "skip=false" >> $GITHUB_OUTPUT
 
       - name: Update PRs
-        if: steps.validate-branch.outputs.valid == 'true' && steps.pr-title.outputs.skip != 'true' && steps.pr-body.outputs.skip != 'true' && steps.prs.outputs.skip != 'true'
+        if: steps.validate-branch.outputs.valid == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PRS: ${{ steps.prs.outputs.prs }}
