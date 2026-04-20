@@ -16,7 +16,8 @@ When you need to present clarifying questions with selectable options, use this 
 
 ## Structure
 
-Put all clarifying questions under a **## Questions** section. For each thing to clarify:
+Put all clarifying questions under a level-2 section whose heading is **`## Questions`** or, when a short label helps readers and tools, **`## Questions: <theme>`** (colon after `Questions`; trim the theme).
+For each thing to clarify:
 
 1. **Heading**: `### N. [Short title of what we need to clarify]` (N = 1, 2, 3, …)
 2. **Context**: One or more sentences describing the clarification and why it matters.
@@ -28,7 +29,7 @@ After listing options for a question, **suggest an option**: state which option 
 ## Example
 
 ```markdown
-## Questions
+## Questions: Scope
 
 ### 1. Things we need to clarify
 Details of the work item that we need to clarify.
