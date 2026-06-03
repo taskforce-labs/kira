@@ -9,4 +9,4 @@ We believe people and agents can interact purely via **Git, markdown and minimal
 
 
 ## Further reading
-- **User journeys** live under [./user_journeys/](.docs/product/user_journeys/)
+- **User journeys** — **Job to be done** (**As a** / **I want** / **So that**), **stages**, **success criteria**, and **touchpoints / artifacts** per [user_journeys/README.md](./user_journeys/README.md)

@@ -1,20 +1,41 @@
 # User journey: answering questions (every loop, often on the go)
 
+## Job to be done
+
+- **As a** decision owner on the loop whose **agents and teammates** are doing parallel work—and who cannot sit at one machine answering pings one-by-one all day  
+- **I want** **questions surfaced at each band of work**, answered **asynchronously or in small batches**, with decisions written into **durable artifacts**  
+- **So that** work keeps moving **without** me as a synchronous bottleneck on every line of code, and **nobody re-asks the same decision** next week
+
+**Scenario:** Work spans direction, architecture, plan, roadmap, elaboration, and slicing; you often answer **on the go**—between meetings, from a phone, in a few minutes.  
+**Trigger:** A **visible question queue** needs attention—e.g. `## Questions` on a work item, a batch in a planning doc, or a thread with bounded asks.
+
 ## Who this is for
 
-You want **agents and teammates to keep moving** while you stay authoritative on decisions—but you cannot sit at one machine answering pings one-by-one all day. This journey is how **questions surface at each band of work**, get answered **asynchronously or in small batches**, and land back in **durable artifacts** so nobody re-asks the same thing.
+**Primary:** Decision owners on the loop. **Secondary:** Agents and peers who surface uncertainty, propose options, and update drafts after you answer.
 
 ## How this ties to on the loop vs in the loop
 
-**On the loop** is not only “big docs up front.” It is also **how work is staged**: agents progress in the background, collect **bounded** questions with clear options where possible, and you answer **on the go**—between meetings, from a phone, in a few minutes—without being the bottleneck on every line of code.
+**On the loop** is not only “big docs up front.” It is also **how work is staged**: agents progress in the background, collect **bounded** questions with clear options where possible, and you answer **on the go** without being the bottleneck on every line of code.
 
 **In the loop** is when you are deep in implementation yourself; questions tend to be smaller and faster, and you may answer them inline without a formal queue. You still benefit when upstream questions were already resolved in writing.
 
 Kira-shaped habits (work items, `## Questions`, ADRs, plan/roadmap updates) exist so answers **stick** and agents stay productive after a short human burst.
 
+## Touchpoints and artifacts
+
+- **People / channels:** chat, email, review threads—where batched questions and short answers land.
+- **Work items** under `.work/`, especially **`## Questions`** and the work item body.
+- **Planning and direction:** `PLAN.md`, `ROADMAP.yml`, ADRs, product and user-journey markdown under `.docs/product/`.
+
+## Pain points and opportunities
+
+- **Pain:** Agents or teammates **guess** when uncertainty is not queued. **Opportunity:** One visible queue per stream with explicit “blocked until human chooses X vs Y.”
+- **Pain:** **Ping fatigue**—the same question in many DMs. **Opportunity:** Batch items in one section; use [kira-clarifying-questions-format](../../../.agents/skills/kira-clarifying-questions-format/SKILL.md) with checkable options when possible.
+- **Pain:** Decisions live only in chat. **Opportunity:** **Edit the owning artifact** the same day when practical so the next pass picks up canonical text.
+
 ---
 
-## Scene 1 — Same spine at every level
+## Stage 1: Same spine at every level
 
 At each loop—direction, architecture, plan, roadmap, elaboration, slicing—the useful rhythm is:
 
@@ -32,11 +53,11 @@ The only thing that changes by level is **where the answer lives** and **how urg
 | Work item | Behaviour, acceptance, edge cases | Work item body, `## Questions` |
 | Slices / tasks | Implementation detail, test shape | Task text, code comments sparingly |
 
-You do not need a meeting per row. You need a **habit**: questions point to **checkable options** when possible (see [kira-clarifying-questions-format](../../../.agents/skills/kira-clarifying-questions-format/SKILL.md)), so an on-the-go answer can be “option B” plus one line of nuance.
+You do not need a meeting per row. You need a **habit**: questions point to **checkable options** when possible, so an on-the-go answer can be “option B” plus one line of nuance.
 
 ---
 
-## Scene 2 — Let agents run; collect questions instead of stalling
+## Stage 2: Let agents run; collect questions instead of stalling
 
 When you are on the loop, you prefer agents to **do safe parallel work**—research, draft structure, scaffold tests—while parking **decision debt** in one visible place per stream (e.g. a `## Questions` section in a work item, or a short list in a planning doc), rather than stopping cold on the first unknown.
 
@@ -46,7 +67,7 @@ When you are on the loop, you prefer agents to **do safe parallel work**—resea
 
 ---
 
-## Scene 3 — Answer on the go
+## Stage 3: Answer on the go
 
 You are not at your desk for every question. The journey still works if:
 
@@ -58,7 +79,7 @@ You answer from wherever you are: tick a box, reply in thread, edit the work ite
 
 ---
 
-## Scene 4 — Close the loop so agents do not spin
+## Stage 4: Close the loop so agents do not spin
 
 After you answer:
 
@@ -70,7 +91,7 @@ If the answer **changes scope**, outer artifacts may need a touch-up (`PLAN.md`,
 
 ---
 
-## Scene 5 — When this is “in the loop” instead
+## Stage 5: When this is “in the loop” instead
 
 You are typing the change yourself. Many questions never leave your head—you decide and commit. **That is fine.** The overarching journey still applies when:
 
@@ -79,7 +100,7 @@ You are typing the change yourself. Many questions never leave your head—you d
 
 ---
 
-## How you know this journey is working
+## Success criteria
 
 - Agents produce **visible question queues** instead of silent wrong guesses.
 - You can clear a batch of decisions in **short bursts**, not only in long focused sessions.
