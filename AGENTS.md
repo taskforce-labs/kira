@@ -23,6 +23,11 @@ See [Go Secure Coding Practices](.docs/guides/security/golang-secure-coding.md) 
 
 DON'T RELAX THESE RULES FOR TEST FILES DO NOT CHANGE .golangci.yml TO RELAX RULES UNDER ANY CIRCUMSTANCES UNLESS I TELL YOU TO DO SO EXPLICITLY.
 
+## Worktrees and branches
+Do not create, switch, or manage git worktrees directly from Codex, Cursor, other agents, or generic git commands unless I explicitly ask you to do so.
+
+Kira owns the worktree and branch lifecycle for Kira-managed work items. Use `kira start` to move work into an isolated worktree/branch, and use Kira's review/done/release commands for later lifecycle steps. Once Kira has placed you in a worktree, work within that checkout and follow the slice workflow below.
+
 ## Slices (work item breakdown)
 Work items can include a `## Slices` section with slices and tasks (e.g. `### 1. SliceName`, `- [ ] T001: description`). Use `kira slice` to manage them. Generated sections use numbered headings (`### 1. Name`, `### 2. Name`); the parser also accepts unnumbered headings (`### Name`). You can refer to a slice by **1-based number** or by name in commands (e.g. `kira slice show current 1`, `kira slice task add current 2 "desc"`).
 
