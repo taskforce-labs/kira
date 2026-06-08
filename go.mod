@@ -1,10 +1,11 @@
 module kira
 
-// Note: Go 1.25.9+ is required to avoid standard library vulnerabilities (net/url,
-// crypto/tls, crypto/x509) reported by govulncheck. See GO-2025-4010, GO-2026-4341,
+// Note: Go 1.25.11+ is required to avoid standard library vulnerabilities (net,
+// net/http, net/textproto, crypto/x509) reported by govulncheck. See GO-2026-5039,
+// GO-2026-5037, GO-2026-4971, GO-2026-4918, GO-2025-4010, GO-2026-4341,
 // GO-2026-4340, GO-2025-4175, GO-2025-4155, GO-2025-4007, GO-2026-4337, GO-2026-4947,
 // GO-2026-4946, GO-2026-4870.
-go 1.25.9
+go 1.25.11
 
 require (
 	github.com/gofrs/flock v0.12.1

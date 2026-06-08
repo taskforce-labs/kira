@@ -134,11 +134,13 @@ compare-tool-versions:
 # Reinstall golangci-lint (GOLANGCI_LINT_VERSION) and govulncheck (@latest) into GOPATH/bin
 update-tool-versions:
 	@echo "Updating golangci-lint ($(GOLANGCI_LINT_VERSION)) and govulncheck (@latest)..."
-	@BIN_DIR=$$(go env GOPATH)/bin; \
+	@set -e; \
+	BIN_DIR=$$(go env GOPATH)/bin; \
+	mkdir -p "$$BIN_DIR"; \
 	INSTALL_SCRIPT=$$(mktemp) || exit 1; \
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh -o $$INSTALL_SCRIPT || (rm -f $$INSTALL_SCRIPT; exit 1); \
-	sh $$INSTALL_SCRIPT -b $$BIN_DIR $(GOLANGCI_LINT_VERSION); \
-	rm -f $$INSTALL_SCRIPT; \
+	curl -sSfL https://golangci-lint.run/install.sh -o $$INSTALL_SCRIPT || { rm -f "$$INSTALL_SCRIPT"; exit 1; }; \
+	sh "$$INSTALL_SCRIPT" -b "$$BIN_DIR" $(GOLANGCI_LINT_VERSION); \
+	rm -f "$$INSTALL_SCRIPT"; \
 	go install golang.org/x/vuln/cmd/govulncheck@latest; \
 	echo "Done. Run: make compare-tool-versions"
 
@@ -160,26 +162,47 @@ release-snapshot:
 # Install required developer tools
 install-tools:
 	@echo "Installing developer tools..."
-	@BIN_DIR=$$(go env GOPATH)/bin; \
+	@set -e; \
+	BIN_DIR=$$(go env GOPATH)/bin; \
+	  mkdir -p "$$BIN_DIR"; \
 	  echo "Checking if golangci-lint is already installed..."; \
-	  if command -v golangci-lint >/dev/null 2>&1; then \
+	  if [ -x "$$BIN_DIR/golangci-lint" ]; then \
+	    GOLANGCI_LINT="$$BIN_DIR/golangci-lint"; \
+	  elif command -v golangci-lint >/dev/null 2>&1; then \
+	    GOLANGCI_LINT=$$(command -v golangci-lint); \
+	  else \
+	    GOLANGCI_LINT=""; \
+	  fi; \
+	  if [ -n "$$GOLANGCI_LINT" ]; then \
 	    echo "golangci-lint found, checking version..."; \
-	    INSTALLED_VERSION=$$(golangci-lint version --short 2>/dev/null | head -1 || echo ""); \
-	    if [ "$$INSTALLED_VERSION" = "$(GOLANGCI_LINT_VERSION)" ]; then \
-	      echo "golangci-lint $(GOLANGCI_LINT_VERSION) already installed, skipping download"; \
-	      exit 0; \
+	    INSTALLED_VERSION=$$("$$GOLANGCI_LINT" version --short 2>/dev/null | head -1 || echo ""); \
+	    if [ "$(GOLANGCI_LINT_VERSION)" = "latest" ] || [ "$$INSTALLED_VERSION" = "$(GOLANGCI_LINT_VERSION)" ] || [ "v$$INSTALLED_VERSION" = "$(GOLANGCI_LINT_VERSION)" ]; then \
+	      echo "golangci-lint $$INSTALLED_VERSION already installed, skipping download"; \
 	    else \
 	      echo "golangci-lint $$INSTALLED_VERSION installed, upgrading to $(GOLANGCI_LINT_VERSION)"; \
+	      echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $$BIN_DIR"; \
+	      echo "Downloading install script to temporary file (safer than piping curl to sh)..."; \
+	      INSTALL_SCRIPT=$$(mktemp) || exit 1; \
+	      curl -sSfL https://golangci-lint.run/install.sh -o "$$INSTALL_SCRIPT" || { rm -f "$$INSTALL_SCRIPT"; exit 1; }; \
+	      echo "Running install script (it handles SHA256 checksum verification)..."; \
+	      sh "$$INSTALL_SCRIPT" -b "$$BIN_DIR" $(GOLANGCI_LINT_VERSION); \
+	      echo "Cleaning up temporary install script..."; \
+	      rm -f "$$INSTALL_SCRIPT"; \
 	    fi; \
+	  else \
+	    echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $$BIN_DIR"; \
+	    echo "Downloading install script to temporary file (safer than piping curl to sh)..."; \
+	    INSTALL_SCRIPT=$$(mktemp) || exit 1; \
+	    curl -sSfL https://golangci-lint.run/install.sh -o "$$INSTALL_SCRIPT" || { rm -f "$$INSTALL_SCRIPT"; exit 1; }; \
+	    echo "Running install script (it handles SHA256 checksum verification)..."; \
+	    sh "$$INSTALL_SCRIPT" -b "$$BIN_DIR" $(GOLANGCI_LINT_VERSION); \
+	    echo "Cleaning up temporary install script..."; \
+	    rm -f "$$INSTALL_SCRIPT"; \
 	  fi; \
-	  echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $$BIN_DIR"; \
-	  echo "Downloading install script to temporary file (safer than piping curl to sh)..."; \
-	  INSTALL_SCRIPT=$$(mktemp) || exit 1; \
-	  curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh -o $$INSTALL_SCRIPT || (rm -f $$INSTALL_SCRIPT; exit 1); \
-	  echo "Running install script (it handles SHA256 checksum verification)..."; \
-	  sh $$INSTALL_SCRIPT -b $$BIN_DIR $(GOLANGCI_LINT_VERSION); \
-	  echo "Cleaning up temporary install script..."; \
-	  rm -f $$INSTALL_SCRIPT; \
+	  if [ ! -x "$$BIN_DIR/golangci-lint" ] && ! command -v golangci-lint >/dev/null 2>&1; then \
+	    echo "golangci-lint install failed"; \
+	    exit 1; \
+	  fi; \
 	  echo ""; \
 	  echo "Installing GoReleaser..."; \
 	  if command -v goreleaser >/dev/null 2>&1; then \
@@ -203,10 +226,14 @@ install-tools:
 	  fi; \
 	  echo ""; \
 	  echo "Installing govulncheck..."; \
-	  if command -v govulncheck >/dev/null 2>&1; then \
+	  if [ -x "$$BIN_DIR/govulncheck" ] || command -v govulncheck >/dev/null 2>&1; then \
 	    echo "govulncheck already installed, skipping"; \
 	  else \
-	    go install golang.org/x/vuln/cmd/govulncheck@latest || echo "Failed to install govulncheck"; \
+	    go install golang.org/x/vuln/cmd/govulncheck@latest; \
+	  fi; \
+	  if [ ! -x "$$BIN_DIR/govulncheck" ] && ! command -v govulncheck >/dev/null 2>&1; then \
+	    echo "govulncheck install failed"; \
+	    exit 1; \
 	  fi
 
 # Clean up developer tools installed by install-tools/dev-setup
@@ -237,7 +264,7 @@ clean-tools:
 	@echo "Developer tools cleaned up"
 
 # Development setup
-GOLANGCI_LINT_VERSION ?= latest
+GOLANGCI_LINT_VERSION ?= v2.4.0
 
 dev-setup: install-tools
 	go mod download
@@ -249,4 +276,3 @@ demo:
 	cd demo-workspace && ../kira new prd "Demo Feature" todo "This is a demo feature"
 	cd demo-workspace && ../kira move 001 doing
 	cd demo-workspace && ../kira save "Initial demo setup"
-

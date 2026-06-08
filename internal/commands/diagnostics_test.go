@@ -29,7 +29,8 @@ func TestEnvironmentDiagnostics(t *testing.T) {
 
 	// Required Go version from go.mod (best-effort: find module root and read go.mod).
 	if goModPath, err := findGoMod(); err == nil {
-		if b, err := os.ReadFile(goModPath); err == nil { // #nosec G304 -- goModPath is from findGoMod (module root only), test-only
+		// #nosec G304 -- goModPath is from findGoMod (module root only), test-only
+		if b, err := os.ReadFile(goModPath); err == nil {
 			for _, line := range strings.Split(string(b), "\n") {
 				line = strings.TrimSpace(line)
 				if strings.HasPrefix(line, "go ") && !strings.HasPrefix(line, "go mod") {
